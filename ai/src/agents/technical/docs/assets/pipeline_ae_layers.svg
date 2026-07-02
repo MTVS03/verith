@@ -1,0 +1,79 @@
+<svg viewBox="0 0 1180 1580" xmlns="http://www.w3.org/2000/svg" font-family="Noto Sans CJK KR, NanumGothic, sans-serif">
+  <rect width="1180" height="1580" fill="#f4f4ef"/>
+  <text x="45" y="55" font-size="30" font-weight="700" fill="#2d2d2d">파이프라인 + A~E 층</text>
+  <text x="47" y="90" font-size="17" fill="#8a8a8a">보라 = LLM · 청록 = 코드 · 회색 점선 = 감싸는 층</text>
+
+  <!-- E harness -->
+  <rect x="45" y="120" width="1090" height="1300" rx="14" fill="#eceae4" stroke="#b5b0a5" stroke-width="1.5" stroke-dasharray="7 6"/>
+  <text x="75" y="165" font-size="21" font-weight="700" fill="#5a564c">E · 하네스 (resilience)</text>
+  <text x="77" y="195" font-size="15.5" fill="#8a8a8a">KIS 복원력 · 데이터부족 가드</text>
+
+  <!-- D observability -->
+  <rect x="90" y="220" width="770" height="1140" rx="12" fill="none" stroke="#a5a095" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="115" y="262" font-size="20" font-weight="700" fill="#5a564c">D · 관측/평가 (observability)</text>
+  <text x="117" y="290" font-size="15" fill="#8a8a8a">전 구간 trace · 검증 3층</text>
+
+  <!-- nodes -->
+  <rect x="270" y="330" width="420" height="90" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="480" y="370" font-size="18" font-weight="700" fill="#5a4b8a" text-anchor="middle">1–2. 질문 안전 정규화 · 분석 포커스</text>
+  <text x="480" y="398" font-size="15" fill="#6a5b9a" text-anchor="middle">LLM · 정규화 + 설명 강조 관점 (지표 선택 아님)</text>
+  <line x1="480" y1="420" x2="480" y2="450" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="270" y="450" width="420" height="90" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="480" y="490" font-size="18" font-weight="700" fill="#3d7a4f" text-anchor="middle">3–4. 데이터 수집 · 지표 계산</text>
+  <text x="480" y="518" font-size="15" fill="#3a6c4c" text-anchor="middle">코드 · 일봉 기본 5지표 + 주/월 추세 (D/W/M 직접 호출)</text>
+  <line x1="480" y1="540" x2="480" y2="570" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="270" y="570" width="420" height="90" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="480" y="610" font-size="18" font-weight="700" fill="#3d7a4f" text-anchor="middle">5. 국면 분류</text>
+  <text x="480" y="638" font-size="15" fill="#3a6c4c" text-anchor="middle">코드 · 일봉 국면 + 상위 추세 보정 (월봉 우선)</text>
+  <line x1="480" y1="660" x2="480" y2="690" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="270" y="690" width="420" height="90" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="480" y="730" font-size="18" font-weight="700" fill="#3d7a4f" text-anchor="middle">6–8. 종합 · 신뢰도 · 리스크</text>
+  <text x="480" y="758" font-size="15" fill="#3a6c4c" text-anchor="middle">코드 · score · confidence 계산</text>
+  <line x1="480" y1="780" x2="480" y2="810" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="270" y="810" width="420" height="90" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="480" y="850" font-size="18" font-weight="700" fill="#3d7a4f" text-anchor="middle">9. 차트 생성</text>
+  <text x="480" y="878" font-size="15" fill="#3a6c4c" text-anchor="middle">코드 · 일/주/월 스냅샷 · 출처메타</text>
+  <line x1="480" y1="900" x2="480" y2="930" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="270" y="930" width="420" height="90" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="480" y="970" font-size="18" font-weight="700" fill="#5a4b8a" text-anchor="middle">10. 국면 해석 · 리포트</text>
+  <text x="480" y="998" font-size="15" fill="#6a5b9a" text-anchor="middle">LLM · 확정 라벨을 문장으로</text>
+
+  <!-- verification boxes -->
+  <rect x="895" y="440" width="215" height="130" rx="10" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="1002" y="475" font-size="17" font-weight="700" fill="#8a6d1f" text-anchor="middle">D · 검증 3층</text>
+  <text x="1002" y="505" font-size="15" fill="#7a5f1a" text-anchor="middle">① 계산 정확성</text>
+  <text x="1002" y="528" font-size="13.5" fill="#8a7030" text-anchor="middle">기존 · mock 테스트</text>
+  <text x="1002" y="553" font-size="15" fill="#7a5f1a" text-anchor="middle">② regime 규칙 (신규·보정)</text>
+
+  <rect x="895" y="620" width="215" height="150" rx="10" fill="#f5dad3" stroke="#d9a08e"/>
+  <text x="1002" y="655" font-size="17" font-weight="700" fill="#b23a2e" text-anchor="middle">③ LLM 라벨 왜곡</text>
+  <text x="1002" y="685" font-size="14" fill="#9a3a30" text-anchor="middle">신규 · 최중요</text>
+  <text x="1002" y="715" font-size="15" fill="#9a3a30" text-anchor="middle">코드 라벨 ==</text>
+  <text x="1002" y="738" font-size="15" fill="#9a3a30" text-anchor="middle">LLM 출력 라벨?</text>
+
+  <rect x="895" y="930" width="215" height="90" rx="10" fill="#eceae4" stroke="#c9c5bb"/>
+  <text x="1002" y="968" font-size="16" font-weight="700" fill="#5a564c" text-anchor="middle">10 검증 대상</text>
+  <text x="1002" y="994" font-size="14" fill="#7a766c" text-anchor="middle">trajectory eval</text>
+
+  <g stroke="#a5a095" stroke-width="1.6" stroke-dasharray="5 4" fill="none">
+    <path d="M690 615 L893 560" marker-end="url(#a5g)"/>
+    <path d="M690 745 L893 690" marker-end="url(#a5g)"/>
+    <path d="M690 975 L893 970" marker-end="url(#a5g)"/>
+  </g>
+
+  <!-- return -->
+  <line x1="480" y1="1020" x2="480" y2="1440" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a5)"/>
+  <rect x="330" y="1440" width="300" height="70" rx="10" fill="#eceae4" stroke="#c9c5bb"/>
+  <text x="480" y="1478" font-size="19" font-weight="700" fill="#4a4a44" text-anchor="middle">상위 반환</text>
+  <text x="480" y="1500" font-size="15" fill="#7a766c" text-anchor="middle">JSON</text>
+
+  <defs>
+    <marker id="a5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8a8a8a"/></marker>
+    <marker id="a5g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#a5a095"/></marker>
+  </defs>
+</svg>

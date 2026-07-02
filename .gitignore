@@ -247,12 +247,8 @@ $RECYCLE.BIN/
 .nfs*
 
 ### Editors ###
-# VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# VSCode (개인 설정 — settings.json 포함 전체 무시)
+.vscode/
 *.code-workspace
 
 # JetBrains
@@ -268,3 +264,24 @@ $RECYCLE.BIN/
 ### uv ###
 # uv.lock should be committed for reproducibility; ignore its cache only
 .uv/
+
+### Secrets / local env (절대 커밋 금지) ###
+# 각 서비스의 .env — 팀에서 별도 공유 (ai/.env, backend/.env, frontend/.env.local 등)
+.env
+.env.*
+*.env
+
+# API 키·인증서·자격증명
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+credentials.json
+service-account*.json
+
+### Docker (따로 관리 — 저장소에 올리지 않음) ###
+docker-compose.yml
+docker-compose.override.yml
+
+.vscode

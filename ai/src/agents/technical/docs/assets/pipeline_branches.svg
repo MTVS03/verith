@@ -1,0 +1,144 @@
+<svg viewBox="0 0 1300 2050" xmlns="http://www.w3.org/2000/svg" font-family="Noto Sans CJK KR, NanumGothic, sans-serif">
+  <rect width="1300" height="2050" fill="#f4f4ef"/>
+  <text x="45" y="55" font-size="30" font-weight="700" fill="#2d2d2d">파이프라인 · 분기 + 루프 포함</text>
+  <text x="47" y="90" font-size="17" fill="#8a8a8a">가운데 = 정상 직진 · 오른쪽 = 예외 분기 · 되돌이 화살표 = 루프</text>
+
+  <!-- left main column boxes -->
+  <!-- 1-2 -->
+  <rect x="60" y="120" width="470" height="70" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="85" y="150" font-size="18" font-weight="700" fill="#5a4b8a">1–2. 질문 안전 정규화 · 분석 포커스</text>
+  <text x="85" y="176" font-size="15" fill="#6a5b9a">LLM</text>
+  <line x1="295" y1="190" x2="295" y2="215" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 3 -->
+  <rect x="60" y="215" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="245" font-size="18" font-weight="700" fill="#3d7a4f">3. 데이터 수집</text>
+  <text x="85" y="271" font-size="15" fill="#3a6c4c">코드 · KIS D/W/M 직접 호출</text>
+  <line x1="295" y1="285" x2="295" y2="310" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- KIS 성공? -->
+  <rect x="60" y="310" width="470" height="70" rx="10" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="85" y="340" font-size="18" font-weight="700" fill="#8a6d1f">KIS 호출 성공?</text>
+  <text x="85" y="366" font-size="15" fill="#7a5f1a">분기</text>
+  <text x="220" y="333" font-size="15" fill="#3a6c4c">성공 ↓</text>
+  <line x1="295" y1="380" x2="295" y2="440" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 4 -->
+  <rect x="60" y="440" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="470" font-size="18" font-weight="700" fill="#3d7a4f">4. 지표 계산</text>
+  <text x="85" y="496" font-size="15" fill="#3a6c4c">코드 · 일봉 기본 5지표 + 주/월 추세</text>
+  <line x1="295" y1="510" x2="295" y2="535" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 5 -->
+  <rect x="60" y="535" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="565" font-size="18" font-weight="700" fill="#3d7a4f">5. 국면 분류</text>
+  <text x="85" y="591" font-size="15" fill="#3a6c4c">코드 · 규칙 우선순위 (월봉 우선 보정)</text>
+  <line x1="295" y1="605" x2="295" y2="630" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 봉 수 충분? -->
+  <rect x="60" y="630" width="470" height="70" rx="10" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="85" y="660" font-size="18" font-weight="700" fill="#8a6d1f">봉 수 충분?</text>
+  <text x="85" y="686" font-size="15" fill="#7a5f1a">분기</text>
+  <text x="295" y="725" font-size="15" fill="#3a6c4c" text-anchor="middle">충분 ↓</text>
+  <line x1="295" y1="700" x2="295" y2="745" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 6 -->
+  <rect x="60" y="745" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="775" font-size="18" font-weight="700" fill="#3d7a4f">6. 신호 종합</text>
+  <text x="85" y="801" font-size="15" fill="#3a6c4c">코드 · signal_score</text>
+  <line x1="295" y1="815" x2="295" y2="840" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 신호 세기 분기 -->
+  <rect x="60" y="840" width="470" height="85" rx="10" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="85" y="870" font-size="18" font-weight="700" fill="#8a6d1f">신호 세기 분기 (≥ 0.3 포함)</text>
+  <text x="85" y="896" font-size="15" fill="#7a5f1a">≥0.5 명확 / 0.3~0.5 약한우세</text>
+  <text x="85" y="918" font-size="15" fill="#7a5f1a">&lt;0.3 중립</text>
+  <line x1="295" y1="925" x2="295" y2="950" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 7 -->
+  <rect x="60" y="950" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="980" font-size="18" font-weight="700" fill="#3d7a4f">7. 신뢰도 계산</text>
+  <text x="85" y="1006" font-size="15" fill="#3a6c4c">코드 · confidence</text>
+  <line x1="295" y1="1020" x2="295" y2="1045" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 8 -->
+  <rect x="60" y="1045" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="1075" font-size="18" font-weight="700" fill="#3d7a4f">8. 리스크 관찰점</text>
+  <text x="85" y="1101" font-size="15" fill="#3a6c4c">코드 · 지지·저항·거래량</text>
+  <line x1="295" y1="1115" x2="295" y2="1140" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 9 -->
+  <rect x="60" y="1140" width="470" height="70" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="85" y="1170" font-size="18" font-weight="700" fill="#3d7a4f">9. 차트 생성</text>
+  <text x="85" y="1196" font-size="15" fill="#3a6c4c">코드 · 스냅샷</text>
+  <line x1="295" y1="1210" x2="295" y2="1235" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- 10 -->
+  <rect x="60" y="1235" width="470" height="70" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="85" y="1265" font-size="18" font-weight="700" fill="#5a4b8a">10. 국면 해석</text>
+  <text x="85" y="1291" font-size="15" fill="#6a5b9a">LLM · 확정 라벨을 문장으로</text>
+  <line x1="295" y1="1305" x2="295" y2="1330" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- D검증 -->
+  <rect x="60" y="1330" width="470" height="70" rx="10" fill="#f5dad3" stroke="#d9a08e"/>
+  <text x="85" y="1360" font-size="18" font-weight="700" fill="#b23a2e">D검증 ③ : 라벨 일치?</text>
+  <text x="85" y="1386" font-size="15" fill="#9a3a30">코드 라벨 == LLM 라벨?</text>
+  <text x="295" y="1425" font-size="15" fill="#3d7a4f" text-anchor="middle">통과 ↓</text>
+  <line x1="295" y1="1400" x2="295" y2="1445" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <!-- report -->
+  <rect x="60" y="1445" width="470" height="70" rx="10" fill="#eceae4" stroke="#c9c5bb"/>
+  <text x="85" y="1475" font-size="18" font-weight="700" fill="#4a4a44">리포트 반환</text>
+  <text x="85" y="1501" font-size="15" fill="#7a766c">JSON</text>
+
+  <!-- right branches -->
+  <!-- retry -->
+  <rect x="700" y="310" width="470" height="70" rx="10" fill="#f5dad3" stroke="#d9a08e"/>
+  <text x="725" y="340" font-size="18" font-weight="700" fill="#b23a2e">재시도 3회 · 백오프</text>
+  <text x="725" y="366" font-size="15" fill="#9a3a30">1·2·4초 대기 후 재호출</text>
+  <line x1="530" y1="345" x2="698" y2="345" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <text x="600" y="335" font-size="14" fill="#b23a2e" text-anchor="middle">실패</text>
+  <!-- loop back -->
+  <path d="M935 310 Q935 250 550 250 L400 250 L400 213" fill="none" stroke="#c99a3a" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a6o)"/>
+  <text x="700" y="242" font-size="14" fill="#9a7420" text-anchor="middle">루프 (재호출)</text>
+
+  <!-- 소진 캐시 -->
+  <rect x="700" y="440" width="470" height="70" rx="10" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="725" y="470" font-size="18" font-weight="700" fill="#8a6d1f">소진 → stale 캐시 있음?</text>
+  <text x="725" y="496" font-size="15" fill="#7a5f1a">분기 (D 기준 1거래일 / W·M 별도)</text>
+  <line x1="700" y1="475" x2="532" y2="475" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a6)"/>
+  <rect x="700" y="530" width="470" height="90" rx="10" fill="#f5dad3" stroke="#d9a08e"/>
+  <text x="725" y="562" font-size="15.5" fill="#9a3a30">있음 → "최신 시세 미반영" 표기 (stale_cache)</text>
+  <text x="725" y="590" font-size="15.5" fill="#9a3a30">없음 → data_limited · 환각 안 채움</text>
+  <line x1="935" y1="510" x2="935" y2="528" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a6)"/>
+
+  <!-- E-2 판단불가 -->
+  <rect x="700" y="630" width="470" height="70" rx="10" fill="#f5dad3" stroke="#d9a08e"/>
+  <text x="725" y="660" font-size="18" font-weight="700" fill="#b23a2e">E-2. 판단 불가</text>
+  <text x="725" y="686" font-size="15" fill="#9a3a30">regime 판단불가 · 6~8 스킵</text>
+  <line x1="530" y1="665" x2="698" y2="665" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <text x="600" y="655" font-size="14" fill="#b23a2e" text-anchor="middle">부족</text>
+  <!-- 판단불가 → 차트 -->
+  <path d="M935 700 L935 1175 L532 1175" fill="none" stroke="#a5a095" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a6g)"/>
+  <text x="935" y="940" font-size="14" fill="#7a766c" text-anchor="middle">판단불가는</text>
+  <text x="935" y="960" font-size="14" fill="#7a766c" text-anchor="middle">바로 차트로</text>
+
+  <!-- 재생성 -->
+  <rect x="700" y="1330" width="470" height="70" rx="10" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="725" y="1360" font-size="18" font-weight="700" fill="#8a6d1f">재생성 1회</text>
+  <text x="725" y="1386" font-size="15" fill="#7a5f1a">라벨 강제 주입</text>
+  <line x1="530" y1="1365" x2="698" y2="1365" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <text x="610" y="1355" font-size="14" fill="#8a6d1f" text-anchor="middle">실패 1회차</text>
+  <path d="M935 1330 Q935 1270 550 1270 L400 1270 L400 1245" fill="none" stroke="#c99a3a" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a6o)"/>
+  <text x="700" y="1262" font-size="14" fill="#9a7420" text-anchor="middle">루프 (재검증)</text>
+  <!-- 템플릿 폴백 -->
+  <rect x="700" y="1420" width="470" height="70" rx="10" fill="#f5dad3" stroke="#d9a08e"/>
+  <text x="725" y="1450" font-size="18" font-weight="700" fill="#b23a2e">템플릿 폴백</text>
+  <text x="725" y="1476" font-size="15" fill="#9a3a30">또 실패 → LLM 문장 버림</text>
+  <line x1="935" y1="1400" x2="935" y2="1418" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a6)"/>
+  <line x1="700" y1="1470" x2="532" y2="1470" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a6)"/>
+
+  <!-- legend -->
+  <rect x="60" y="1570" width="1110" height="220" rx="12" fill="#eceae4" stroke="#d5d0c6"/>
+  <text x="90" y="1608" font-size="19" font-weight="700" fill="#4a4a44">읽는 법</text>
+  <g font-size="16" fill="#6a6a60">
+    <text x="95" y="1642">· 루프 2곳 : 재시도(최대 3회) · 재생성(1회) — 둘 다 상한 있음, 무한 루프 없음</text>
+    <text x="95" y="1674">· 모든 예외 경로가 안전 착지 : 캐시 폴백 / data_limited / 판단 불가 / 템플릿 폴백</text>
+    <text x="95" y="1706">· regime 판단불가면 6~8 스킵하고 바로 차트로 → 억지 판단 안 함</text>
+    <text x="95" y="1738">· KIS 실패는 D/W/M 타임프레임별로 분기 · stale = "최신 시세 미반영"</text>
+    <text x="95" y="1770">· 노드1 = 질문 안전 정규화 · 노드2 = 분석 포커스 정리 · 신호 &lt; 0.3 = "중립"</text>
+  </g>
+
+  <defs>
+    <marker id="a6" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8a8a8a"/></marker>
+    <marker id="a6o" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#c99a3a"/></marker>
+    <marker id="a6g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#a5a095"/></marker>
+  </defs>
+</svg>
