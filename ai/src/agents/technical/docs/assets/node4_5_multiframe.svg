@@ -1,0 +1,76 @@
+<svg viewBox="0 0 1180 1020" xmlns="http://www.w3.org/2000/svg" font-family="Noto Sans CJK KR, NanumGothic, sans-serif">
+  <rect width="1180" height="1020" fill="#f4f4ef"/>
+  <text x="45" y="55" font-size="30" font-weight="700" fill="#2d2d2d">노드 4·5 · 멀티 타임프레임 (보정된 부분)</text>
+  <text x="47" y="90" font-size="17" fill="#8a8a8a">일봉=신호 주력 · 주/월=방향 확인 · 일·주·월봉 KIS 직접 호출 (리샘플 없음)</text>
+
+  <!-- 3 데이터 수집 -->
+  <rect x="400" y="120" width="380" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="590" y="150" font-size="19" font-weight="700" fill="#3d7a4f" text-anchor="middle">3. 데이터 수집</text>
+  <text x="590" y="174" font-size="16" fill="#3a6c4c" text-anchor="middle">KIS D/W/M 원본 확보 (일·주·월봉)</text>
+  <line x1="590" y1="186" x2="590" y2="230" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a4)"/>
+
+  <!-- 3개 타임프레임 박스 -->
+  <!-- 일봉 -->
+  <rect x="60" y="260" width="320" height="200" rx="10" fill="#d8ecdd" stroke="#4a9a63" stroke-width="2"/>
+  <text x="220" y="295" font-size="19" font-weight="700" fill="#3d7a4f" text-anchor="middle">4. 일봉 지표 (주력)</text>
+  <g font-size="16.5" fill="#3a6c4c" text-anchor="middle">
+    <text x="220" y="328">이동평균 · RSI</text>
+    <text x="220" y="356">거래량 · 지지저항</text>
+    <text x="220" y="384">패턴 (기본 5개)</text>
+    <text x="220" y="416" font-weight="700" fill="#2f6640">→ 신호·signal_score</text>
+    <text x="220" y="444" font-size="14.5" fill="#5a8a6a">데이터 부족 시 계산 가능분만</text>
+  </g>
+  <!-- 주봉 -->
+  <rect x="440" y="260" width="300" height="200" rx="10" fill="#dbe4f2" stroke="#9ab0d8" stroke-width="2"/>
+  <text x="590" y="295" font-size="19" font-weight="700" fill="#41598f" text-anchor="middle">4. 주봉 (중기)</text>
+  <g font-size="16.5" fill="#41598f" text-anchor="middle">
+    <text x="590" y="330">추세 방향</text>
+    <text x="590" y="360">+ 주요 지지저항</text>
+    <text x="590" y="392">상승/하락/횡보</text>
+    <text x="590" y="424" font-size="14.5" fill="#6a7fb0">KIS W 직접 호출</text>
+  </g>
+  <!-- 월봉 -->
+  <rect x="800" y="260" width="320" height="200" rx="10" fill="#dbe4f2" stroke="#9ab0d8" stroke-width="2"/>
+  <text x="960" y="295" font-size="19" font-weight="700" fill="#41598f" text-anchor="middle">4. 월봉 (대세)</text>
+  <g font-size="16.5" fill="#41598f" text-anchor="middle">
+    <text x="960" y="330">추세 방향만</text>
+    <text x="960" y="360">이동평균 배열</text>
+    <text x="960" y="392">상승/하락/횡보</text>
+    <text x="960" y="424" font-size="14.5" fill="#6a7fb0">KIS M 직접 호출 · 보정 우선</text>
+  </g>
+
+  <!-- arrows from 3 to three boxes -->
+  <g stroke="#8a8a8a" stroke-width="2" fill="none">
+    <path d="M500 240 Q300 250 220 258" marker-end="url(#a4)"/>
+    <path d="M590 240 L590 258" marker-end="url(#a4)"/>
+    <path d="M680 240 Q900 250 960 258" marker-end="url(#a4)"/>
+  </g>
+  <!-- arrows to node5 -->
+  <g stroke="#8a8a8a" stroke-width="2" fill="none">
+    <path d="M220 460 Q240 500 400 545" marker-end="url(#a4)"/>
+    <path d="M590 460 L590 545" marker-end="url(#a4)"/>
+    <path d="M960 460 Q940 500 780 545" marker-end="url(#a4)"/>
+  </g>
+
+  <!-- node 5 -->
+  <rect x="60" y="548" width="1060" height="185" rx="10" fill="#d8ecdd" stroke="#4a9a63" stroke-width="2"/>
+  <text x="85" y="582" font-size="19" font-weight="700" fill="#3d7a4f">5. 국면 분류 — 일봉 국면 + 상위 타임프레임 보정</text>
+  <g font-size="16" fill="#3a6c4c">
+    <text x="85" y="614">① 일봉으로 1차 국면 규칙 판정 (과매도 반등 → 과열 → 상승 전환 관찰 → 상승 유지 → 하락 → 횡보)</text>
+    <text x="85" y="644">② 상위 추세로 보정 (월봉 우선, 월봉 없으면 주봉 대체) : 일봉 "과열" + 월봉 "상승" → final_regime=과열, alignment_flag=중립</text>
+    <text x="85" y="674">③ 중립 국면(과열·과매도·횡보)이면 상위 추세 있어도 alignment_flag=중립 · 조합 라벨 안 만듦</text>
+    <text x="85" y="704">④ regime_context에 "상위 추세는 상승이나 일봉 기준 단기 과열이 관찰됩니다" 기록 → 최종 regime 확정 (결정론 규칙, LLM 개입 없음)</text>
+  </g>
+  <line x1="590" y1="733" x2="590" y2="770" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a4)"/>
+
+  <!-- node 6 -->
+  <rect x="400" y="770" width="380" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="590" y="800" font-size="19" font-weight="700" fill="#3d7a4f" text-anchor="middle">6. 신호 종합 →</text>
+  <text x="590" y="824" font-size="16" fill="#3a6c4c" text-anchor="middle">이후 흐름 동일</text>
+
+  <!-- footer -->
+  <rect x="60" y="885" width="1060" height="60" rx="10" fill="#eceae4" stroke="#d5d0c6"/>
+  <text x="590" y="922" font-size="16.5" fill="#6a6a60" text-anchor="middle">청록=계산 주력(일봉) · 파랑=방향 확인(주/월) · 최종 regime은 코드가 확정, LLM 개입 없음 · 세 타임프레임 모두 KIS 실제 시세</text>
+
+  <defs><marker id="a4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8a8a8a"/></marker></defs>
+</svg>

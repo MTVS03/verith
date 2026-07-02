@@ -1,0 +1,86 @@
+<svg viewBox="0 0 1000 1560" xmlns="http://www.w3.org/2000/svg" font-family="Noto Sans CJK KR, NanumGothic, sans-serif">
+  <rect width="1000" height="1560" fill="#f4f4ef"/>
+  <text x="45" y="55" font-size="30" font-weight="700" fill="#2d2d2d">1장 · 성공 경로 (멀티 타임프레임 반영)</text>
+  <text x="47" y="90" font-size="17" fill="#8a8a8a">보라 = LLM(3곳) · 청록 = 코드(7곳) · 노란 테두리 = 이번 보정</text>
+
+  <!-- entry -->
+  <rect x="270" y="120" width="460" height="55" rx="10" fill="#eceae4" stroke="#c9c5bb"/>
+  <text x="500" y="155" font-size="20" font-weight="700" fill="#4a4a44" text-anchor="middle">Technical Supervisor 진입</text>
+  <line x1="500" y1="175" x2="500" y2="200" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+
+  <!-- node helper positions -->
+  <!-- 1 -->
+  <rect x="210" y="200" width="580" height="66" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="235" y="230" font-size="19" font-weight="700" fill="#5a4b8a">1. 질문 안전 정규화</text>
+  <text x="235" y="255" font-size="16" fill="#6a5b9a">LLM · 원본 질의 정규화 · 안전 필터</text>
+  <line x1="500" y1="266" x2="500" y2="288" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 2 -->
+  <rect x="210" y="288" width="580" height="66" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="235" y="318" font-size="19" font-weight="700" fill="#5a4b8a">2. 분석 포커스 정리</text>
+  <text x="235" y="343" font-size="16" fill="#6a5b9a">LLM · 설명 강조 관점 (지표 선택 아님)</text>
+  <line x1="500" y1="354" x2="500" y2="376" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 3 -->
+  <rect x="210" y="376" width="580" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="235" y="406" font-size="19" font-weight="700" fill="#3d7a4f">3. 데이터 수집</text>
+  <text x="235" y="431" font-size="16" fill="#3a6c4c">코드 · 일·주·월봉 캐시 확인 + KIS D/W/M 필요분 호출</text>
+  <line x1="500" y1="442" x2="500" y2="464" stroke="#c99a3a" stroke-width="2.5" marker-end="url(#a3o)"/>
+  <!-- 4 보정 -->
+  <rect x="210" y="464" width="580" height="86" rx="10" fill="#f4e6c3" stroke="#d9b25a" stroke-width="2"/>
+  <text x="235" y="494" font-size="19" font-weight="700" fill="#8a6d1f">4. 지표 계산 (보정)</text>
+  <text x="235" y="519" font-size="16" fill="#7a5f1a">코드 · 일봉 기본 5개 지표 (신호 주력, 데이터 부족 시 계산 가능분만)</text>
+  <text x="235" y="541" font-size="16" fill="#7a5f1a">+ 주봉·월봉 추세 (KIS 직접 호출, 리샘플 없음)</text>
+  <line x1="500" y1="550" x2="500" y2="572" stroke="#c99a3a" stroke-width="2.5" marker-end="url(#a3o)"/>
+  <!-- 5 보정 -->
+  <rect x="210" y="572" width="580" height="110" rx="10" fill="#f4e6c3" stroke="#d9b25a" stroke-width="2"/>
+  <text x="235" y="602" font-size="19" font-weight="700" fill="#8a6d1f">5. 국면 분류 (보정)</text>
+  <text x="235" y="627" font-size="16" fill="#7a5f1a">코드 · 일봉 국면 + 상위 추세 정합성 보정 (월봉 우선, 없으면 주봉)</text>
+  <text x="235" y="649" font-size="16" fill="#7a5f1a">예: 일봉 과열 + 월봉 상승 → final_regime=과열,</text>
+  <text x="235" y="671" font-size="16" fill="#7a5f1a">alignment_flag=중립 + regime_context로 맥락 (조합 라벨 없음)</text>
+  <line x1="500" y1="682" x2="500" y2="704" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 6 -->
+  <rect x="210" y="704" width="580" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="235" y="734" font-size="19" font-weight="700" fill="#3d7a4f">6. 신호 종합 (1차)</text>
+  <text x="235" y="759" font-size="16" fill="#3a6c4c">코드 · 가중집계 → signal_score</text>
+  <line x1="500" y1="770" x2="500" y2="792" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 7 -->
+  <rect x="210" y="792" width="580" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="235" y="822" font-size="19" font-weight="700" fill="#3d7a4f">7. 신뢰도 계산</text>
+  <text x="235" y="847" font-size="16" fill="#3a6c4c">코드 · 일치도·거래량·충돌 → confidence</text>
+  <line x1="500" y1="858" x2="500" y2="880" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 8 -->
+  <rect x="210" y="880" width="580" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="235" y="910" font-size="19" font-weight="700" fill="#3d7a4f">8. 리스크 관찰점</text>
+  <text x="235" y="935" font-size="16" fill="#3a6c4c">코드 · 지지·저항·거래량 관찰 지점 도출</text>
+  <line x1="500" y1="946" x2="500" y2="968" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 9 -->
+  <rect x="210" y="968" width="580" height="66" rx="10" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="235" y="998" font-size="19" font-weight="700" fill="#3d7a4f">9. 차트 생성</text>
+  <text x="235" y="1023" font-size="16" fill="#3a6c4c">코드 · 기간별(일/주/월) 렌더 + 출처메타</text>
+  <line x1="500" y1="1034" x2="500" y2="1056" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- 10 -->
+  <rect x="210" y="1056" width="580" height="66" rx="10" fill="#e3ddf2" stroke="#b7abdb"/>
+  <text x="235" y="1086" font-size="19" font-weight="700" fill="#5a4b8a">10. 국면 해석 · 리포트</text>
+  <text x="235" y="1111" font-size="16" fill="#6a5b9a">LLM · 확정 라벨(멀티프레임 포함)을 문장으로</text>
+  <line x1="500" y1="1122" x2="500" y2="1144" stroke="#8a8a8a" stroke-width="2" marker-end="url(#a3)"/>
+  <!-- return -->
+  <rect x="290" y="1144" width="420" height="55" rx="10" fill="#eceae4" stroke="#c9c5bb"/>
+  <text x="500" y="1179" font-size="19" font-weight="700" fill="#4a4a44" text-anchor="middle">결과 패키징 → 상위 반환</text>
+
+  <!-- legend -->
+  <rect x="210" y="1250" width="580" height="270" rx="12" fill="#f4e6c3" stroke="#d9b25a"/>
+  <text x="235" y="1285" font-size="19" font-weight="700" fill="#8a6d1f">읽는 법 (이번 보정)</text>
+  <g font-size="16" fill="#7a5f1a">
+    <text x="240" y="1318">· 노란 테두리 2개(4·5) = 멀티 타임프레임으로 갱신된 노드</text>
+    <text x="240" y="1348">· 일봉 = 신호 주력(기본 5지표) · 주/월 = 방향 확인(추세만)</text>
+    <text x="240" y="1378">· 일·주·월봉 모두 KIS 직접 호출 → 리샘플 없음(실제 시세)</text>
+    <text x="240" y="1408">· 국면(5)은 일봉 국면을 상위 추세로 보정 → 맥락 있는 라벨</text>
+    <text x="240" y="1438">· 보정도 결정론 규칙 → 검증 ②로 테스트 가능</text>
+    <text x="240" y="1468">· 나머지 노드·D·E·분기·루프는 이전과 동일</text>
+    <text x="240" y="1498">· 노드1 = 질문 안전 정규화 · 노드2 = 분석 포커스 정리</text>
+  </g>
+
+  <defs>
+    <marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8a8a8a"/></marker>
+    <marker id="a3o" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#c99a3a"/></marker>
+  </defs>
+</svg>

@@ -1,0 +1,91 @@
+<svg viewBox="0 0 1180 1120" xmlns="http://www.w3.org/2000/svg" font-family="Noto Sans CJK KR, NanumGothic, sans-serif">
+  <rect width="1180" height="1120" fill="#f4f4ef"/>
+  <text x="70" y="70" font-size="34" font-weight="700" fill="#2d2d2d">시퀀스 1 · 정상 흐름 (멀티 타임프레임 반영)</text>
+  <text x="72" y="108" font-size="19" fill="#8a8a8a">보라 = LLM · 청록 = 코드 · 노란 = 검증 분기 · 일봉·주봉·월봉 KIS 직접 호출</text>
+
+  <!-- lifelines -->
+  <g stroke="#c9c9c2" stroke-width="1.5" stroke-dasharray="4 5">
+    <line x1="150" y1="270" x2="150" y2="1060"/>
+    <line x1="430" y1="270" x2="430" y2="1060"/>
+    <line x1="700" y1="270" x2="700" y2="1060"/>
+    <line x1="940" y1="270" x2="940" y2="1060"/>
+    <line x1="1120" y1="270" x2="1120" y2="1060"/>
+  </g>
+  <!-- actor boxes -->
+  <g font-size="18" font-weight="700" text-anchor="middle">
+    <rect x="70" y="220" width="160" height="48" rx="10" fill="#eceae4" stroke="#c9c5bb"/><text x="150" y="250" fill="#4a4a44">Top Supervisor</text>
+    <rect x="330" y="220" width="200" height="48" rx="10" fill="#e3ddf2" stroke="#b7abdb"/><text x="430" y="250" fill="#5a4b8a">Technical Supervisor</text>
+    <rect x="655" y="220" width="90" height="48" rx="10" fill="#d8ecdd" stroke="#9ccca8"/><text x="700" y="250" fill="#3d7a4f">캐시</text>
+    <rect x="880" y="220" width="120" height="48" rx="10" fill="#d8ecdd" stroke="#9ccca8"/><text x="940" y="250" fill="#3d7a4f">KIS API</text>
+    <rect x="1060" y="220" width="90" height="48" rx="10" fill="#e3ddf2" stroke="#b7abdb"/><text x="1105" y="250" fill="#5a4b8a">LLM</text>
+  </g>
+
+  <g font-size="17" fill="#3a3a3a" text-anchor="middle">
+    <!-- 1 -->
+    <line x1="150" y1="320" x2="428" y2="320" stroke="#6a6a6a" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="290" y="310">변형 질의 + 티커</text>
+    <circle cx="150" cy="320" r="12" fill="#4a4a44"/><text x="150" y="325" fill="#fff" font-size="14">1</text>
+    <!-- 2 질문 안전 정규화·분석 포커스 -->
+    <line x1="430" y1="365" x2="1118" y2="365" stroke="#6a6a6a" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="770" y="355">질문 안전 정규화 · 분석 포커스 정리</text>
+    <circle cx="430" cy="365" r="12" fill="#4a4a44"/><text x="430" y="370" fill="#fff" font-size="14">2</text>
+    <!-- 3 -->
+    <line x1="1120" y1="410" x2="432" y2="410" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+    <text x="770" y="400">normalized_question · analysis_focus 반환</text>
+    <circle cx="1120" cy="410" r="12" fill="#4a4a44"/><text x="1120" y="415" fill="#fff" font-size="14">3</text>
+    <!-- 4 캐시 D/W/M 조회 -->
+    <line x1="430" y1="455" x2="698" y2="455" stroke="#6a6a6a" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="565" y="445">일·주·월봉 캐시 조회</text>
+    <circle cx="430" cy="455" r="12" fill="#4a4a44"/><text x="430" y="460" fill="#fff" font-size="14">4</text>
+    <!-- 5 -->
+    <line x1="700" y1="500" x2="432" y2="500" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+    <text x="565" y="490">캐시 히트 (과거분)</text>
+    <circle cx="700" cy="500" r="12" fill="#4a4a44"/><text x="700" y="505" fill="#fff" font-size="14">5</text>
+    <!-- 6 KIS D/W/M -->
+    <line x1="430" y1="545" x2="938" y2="545" stroke="#6a6a6a" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="685" y="535">D/W/M 필요분 호출 (FID_PERIOD_DIV_CODE)</text>
+    <circle cx="430" cy="545" r="12" fill="#4a4a44"/><text x="430" y="550" fill="#fff" font-size="14">6</text>
+    <!-- 7 -->
+    <line x1="940" y1="590" x2="432" y2="590" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+    <text x="685" y="580">타임프레임별 OHLCV 응답</text>
+    <circle cx="940" cy="590" r="12" fill="#4a4a44"/><text x="940" y="595" fill="#fff" font-size="14">7</text>
+  </g>
+
+  <!-- code block -->
+  <rect x="250" y="625" width="470" height="185" rx="12" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="275" y="658" font-size="19" font-weight="700" fill="#3d7a4f">코드 계산 (내부) — LLM 미개입</text>
+  <g font-size="16.5" fill="#3a5c44">
+    <text x="275" y="690">· 일봉·주봉·월봉 KIS 원본 (리샘플 없음)</text>
+    <text x="275" y="718">· 4. 지표 (일봉 기본 5 + 주/월 추세)</text>
+    <text x="275" y="746">· 5. 국면분류 (일봉 + 상위 보정 · 월봉 우선)</text>
+    <text x="275" y="774">· 6. 종합 / 7. 신뢰도 / 8. 리스크 / 9. 차트</text>
+  </g>
+
+  <g font-size="17" fill="#3a3a3a" text-anchor="middle">
+    <!-- 8 -->
+    <line x1="430" y1="855" x2="1118" y2="855" stroke="#6a6a6a" stroke-width="2" marker-end="url(#ah)"/>
+    <text x="775" y="845">국면 해석 요청 (확정 라벨·수치 전달)</text>
+    <circle cx="430" cy="855" r="12" fill="#4a4a44"/><text x="430" y="860" fill="#fff" font-size="14">8</text>
+    <!-- 9 -->
+    <line x1="1120" y1="900" x2="432" y2="900" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+    <text x="775" y="890">해석 문장 반환</text>
+    <circle cx="1120" cy="900" r="12" fill="#4a4a44"/><text x="1120" y="905" fill="#fff" font-size="14">9</text>
+  </g>
+
+  <!-- alt box -->
+  <rect x="255" y="925" width="895" height="150" rx="6" fill="none" stroke="#e0b96a" stroke-width="1.5"/>
+  <path d="M255 925 h95 v22 l-12 12 h-83 z" fill="#f0dcae" stroke="#e0b96a" stroke-width="1.5"/>
+  <text x="278" y="948" font-size="16" font-weight="700" fill="#9a7420">alt</text>
+  <text x="470" y="948" font-size="15.5" fill="#7a6020">[D검증 통과 · 코드 라벨 == LLM 라벨]</text>
+  <rect x="470" y="960" width="220" height="42" rx="8" fill="#d8ecdd" stroke="#9ccca8"/>
+  <text x="580" y="987" font-size="17" font-weight="700" fill="#3d7a4f" text-anchor="middle">리포트 확정</text>
+  <line x1="255" y1="1015" x2="1150" y2="1015" stroke="#e0b96a" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="278" y="1035" font-size="15.5" fill="#7a6020">[검증 실패]</text>
+  <text x="470" y="1035" font-size="15.5" fill="#7a6020">재생성 1회 → 또 실패 시 템플릿 문장으로 폴백</text>
+
+  <line x1="430" y1="1075" x2="152" y2="1075" stroke="#8a8a8a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ah)"/>
+  <text x="290" y="1065" font-size="17" fill="#3a3a3a" text-anchor="middle">리포트 반환 (JSON)</text>
+  <circle cx="430" cy="1075" r="12" fill="#4a4a44"/><text x="430" y="1080" fill="#fff" font-size="14" text-anchor="middle">12</text>
+
+  <defs><marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#6a6a6a"/></marker></defs>
+</svg>
