@@ -1,0 +1,50 @@
+// ============================================
+// news 에이전트 DB 스키마 (개념)
+// PostgreSQL(원본) + Neo4j(그래프)
+// 주의: 실제 테이블은 backend가 생성. 이 문서는 요청 명세.
+// ============================================
+
+// ─────────── PostgreSQL (News 원본) ───────────
+
+Table news [note: '기사 원본. Neo4j엔 news_id 참조만 두고 본문은 여기서 가져옴'] {
+  id             bigint    [pk, increment]
+  title          text      [not null]
+  content        text      [note: '본문']
+  summary        text      [note: 'LLM 통일 요약. 임베딩·병합의 기준']
+  url            text      [unique, note: '원문 직링크. 1차 중복 차단']
+  publisher      varchar   [note: '언론사명. importance 가중치에 사용']
+  sentiment      varchar   [note: 'KR-FinBert 결과: 긍정/중립/부정']
+  embedding      vector    [note: 'summary 임베딩. pgvector']
+  published_at   timestamp [note: '7일 롤링 기준']
+  event_id       integer   [note: '소속 이벤트. nullable(병합 전 NULL)']
+  created_at     timestamp
+}
+
+// ─────────── Neo4j (Event 중심 그래프) ───────────
+// DBML은 RDB 표기이므로 Neo4j는 주석으로 구조만 기술.
+//
+// (Event)   중심 노드
+//   id (canonical), canonical_title, importance
+//   ※ 감성 count는 저장 안 함 → 조회 시 실시간 집계
+//
+// 관계:
+//   (Company)-[:PARTICIPATES_IN]->(Event)   여러 회사가 한 이벤트 공유 가능
+//   (Company)-[:BELONGS_TO]->(Sector)
+//   (Company)-[:RELATED_TO]->(Company)      같은 이벤트 공유 등으로 파생
+//   (Event)-[:HAS_NEWS]->(NewsRef {news_id}) 본문은 PostgreSQL에서
+//   (Event)-[:HAS_KEYWORD]->(Keyword)
+//   (Event)-[:MENTIONS]->(Person)
+//   (Event)-[:ABOUT]->(Country)
+
+// ─────────── 삭제 규칙 (CASCADE) ───────────
+// published_at < now-168h 기사 삭제
+//   → Event 기사수 감소 → 0이면 Event 삭제
+//   → 고아 Keyword/Person/Country 삭제
+//   → Company는 유지
+
+Table _import_note [note: '''
+importance = 기사 개수 + 언론사 가중치 + 감성 절대값 (LLM 생성 아님, 객관 계산)
+감성 count는 저장하지 않고 조회 시 실시간 집계 (하루 수백 건 수준이라 충분)
+'''] {
+  note_only varchar
+}
