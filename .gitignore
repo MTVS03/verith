@@ -247,12 +247,8 @@ $RECYCLE.BIN/
 .nfs*
 
 ### Editors ###
-# VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# VSCode (개인 설정 — settings.json 포함 전체 무시)
+.vscode/
 *.code-workspace
 
 # JetBrains
@@ -288,3 +284,4 @@ service-account*.json
 docker-compose.yml
 docker-compose.override.yml
 
+.vscode
