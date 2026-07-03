@@ -3,13 +3,13 @@
 ## 0. 개요
 - **목적**: 배치 흐름이 저장해 둔 데이터를 읽어 **사용자 질문(또는 종목 프리셋)에 답하고 HTML 리포트 하나를 그리는** 질의 흐름 전체를 구현한다. 자유 질문형 B(query_spec §0). 흐름은 **① 질문이해(Qwen3→Pydantic) → ② 그래프순회(single/multi-hop) → ③ 원문요약조회(PostgreSQL) → ④ 답변생성(Qwen3, 근거 news_id) → HTML 리포트 렌더**이며(query_spec §1, sequence §2), ②③의 실제 DB 접근은 **TASK 08의 `query_client`가 backend HTTP로 대행**한다(절대규칙 1: 이 에이전트는 DB에 직접 붙지 않는다). 최종 출력은 **HTML 리포트 하나**이고, ④ 답변 텍스트는 별도 채널이 아니라 리포트 안 **`뉴스 흐름 요약` 섹션 + 근거 이슈 칩**으로 내장된다(CLAUDE.md §1). Supervisor는 `graph.py`만 호출하고, 이 흐름이 자기완결로 처리한다.
 - **선행 작업**:
-  - TASK 01(schemas: `Event`, `ReportModel`·`ReportEvent`·`SentimentGauge`·`ArticleRef`(report.py), `SubjectQueryResponse`·`EventWithArticles`(response.py)). 리포트 입력·조회 응답 모델. `schemas/query.py`는 **TASK 01 §3에서 "추가 예정"으로 명시**되었으므로 이 문서가 신규로 만든다(TASK 01 수정 아님).
+  - TASK 01(schemas: `Event`, `ReportModel`·`ReportEvent`·`SentimentGauge`·`ArticleRef`(report.py), `SubjectQueryResponse`·`EventWithArticles`(response.py)). 리포트 입력·조회 응답 모델. `schemas/query.py`(질문 파싱·답변)는 **질의측 전용 스키마이므로 이 문서(TASK 09)가 신규로 소유**한다. TASK 01은 배치측 스키마만 담당하며 질의 스키마를 알 필요가 없다(관심사 분리 — 배치/질의 흐름이 독립적).
   - TASK 03(`services/llm.py`의 Qwen3 클라이언트. **① 질문이해·④ 답변생성이 이 클라이언트를 재사용**한다 — TASK 03 §0.1). 감성 판정·점수는 여기서 하지 않는다(절대규칙 4).
   - TASK 07(`schemas/graph.py`의 `NodeLabel`/`RelType`·정체성 규칙 §0.2. ② 그래프 순회가 이 라벨·관계 타입으로 설계된다 — TASK 07 §0.1).
   - TASK 08(`services/backend/query_client.py`: `get_events_by_subject`(single-hop·importance순)·`get_shared_events`(multi-hop)·`get_articles_by_news_ids`(원문 요약). **②③의 backend HTTP 조회를 여기서 소비**한다. 감성 게이지는 backend가 실시간 집계해 `SentimentGauge`로 준다).
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — 질의·리포트 옵션(기본 조회 기간·TOP N·이벤트별 대표 기사 수·정렬(랭킹) 기준·프리셋 질문 문구·④ 답변 생성 프롬프트/토큰). 하드코딩 금지의 귀착점. **랭킹 점수는 미확정 → 잠정 importance순**(query_spec §6, CLAUDE.md §8).
-  - `schemas/query.py`(**신규** — TASK 09 소유) — ① 질문 파싱 결과(`QueryIntent` Enum·`QueryUnderstanding`) + ④ 답변 구조(`Answer`: answer 텍스트 + evidence news_id[]) + (선택) 흐름 번들(`QueryResult`). TASK 01 §3의 "query.py 추가 예정"을 채운다.
+  - `schemas/query.py`(**신규** — TASK 09 소유) — ① 질문 파싱 결과(`QueryIntent` Enum·`QueryUnderstanding`) + ④ 답변 구조(`Answer`: answer 텍스트 + evidence news_id[]) + (선택) 흐름 번들(`QueryResult`). 질의측 전용 스키마로 이 문서가 소유한다(TASK 01과 독립).
   - `services/query_understanding.py`(**신규**) — ① 자유 문장/종목을 Qwen3로 파싱해 `QueryUnderstanding`(companies·period·intent)로 강제(Pydantic). 종목 선택은 `intent=요약` 프리셋으로 변환.
   - `services/graph_query.py`(**신규**) — ② 그래프 탐색 **설계**: 회사 수·intent로 single-hop / multi-hop을 정하고 `query_client`를 호출해 `SubjectQueryResponse`를 얻는다. 실제 Neo4j 순회는 backend(HTTP).
   - `services/answer_generator.py`(**신규**) — ④ 답변 생성: ③의 요약·감성을 근거로 Qwen3가 `뉴스 흐름 요약` 본문을 작성하고 **주장마다 근거 news_id를 부착**한 `Answer`를 만든다. 근거 부족 시 "데이터 제한"(절대규칙 5).
@@ -23,7 +23,7 @@
   - **수집·분석(크롤링·추출·임베딩·병합·importance·저장)은 배치 흐름(TASK 02~08)**. 질의 흐름은 **저장된 데이터를 읽어 답하고 그릴 뿐** 새 데이터를 만들지 않는다(query_spec §0, pipeline_spec §11).
   - **importance(중요도) 계산은 TASK 06**. 정렬(랭킹)에 **이미 계산된 importance를 소비만** 한다(재계산 없음). 관련도(질문-이벤트 적합도) 별도 산출은 **미확정 → 잠정 importance순**(query_spec §6).
   - **backend 저장 API·엔드포인트·요청/응답 스키마는 backend 소유**(api_contract.md 미확정, TASK 08 config). 이 흐름은 `query_client`의 함수 계약만 본다.
-  - **`graph.py`(LangGraph 조립)·Supervisor 연동**: `graph.py`가 query→report 노드를 잇는 배선은 별도(전체 그래프 조립)로 두되, 이 문서는 그 배선이 호출할 **query·report 노드**를 제공한다. 노드 시그니처(`state` in/out)는 §4 규약을 따른다.
+  - **`graph.py`(LangGraph 조립)·Supervisor 연동은 TASK 11 소유**: `graph.py`가 query→report 노드를 잇는 배선(`build_query_graph`)·`state.py`(`QueryState` 키 계약)은 TASK 11이 만든다. 이 문서는 그 배선이 호출할 **query·report 노드**를 제공한다. 노드 시그니처(`state` in/out)는 §4 규약·TASK 11 `QueryState`를 따른다.
   - **리포트 이력 저장(`reports` 테이블: report_id·question·answer_text·evidence·html)은 backend**(erd.dbml). 이 흐름은 HTML을 **생성**하고, 저장이 필요하면 backend 계약을 통한다(이 문서 범위 밖, api_contract.md 확정 시). 여기서는 HTML 문자열 산출까지.
 
 ### 0.1 하위 의존성 (⚠️ 수정 시 영향 범위)
@@ -45,7 +45,7 @@
 |---|---|---|---|
 | 근거 이슈 칩 | 이벤트(canonical_title) | ② 그래프순회 결과 | `뉴스 흐름 요약`이 언급한 이벤트를 칩으로. 칩→이벤트 링크 |
 | 이벤트 | `canonical_id` | ② `EventWithArticles.event` | TOP N에 노출. importance순(§6 잠정) |
-| 근거 기사 | `news_id`(→`ArticleRef` summary+url) | ③ `query_client.get_articles_by_news_ids` | ④ 답변의 각 주장에 news_id 부착. 화면엔 대표 소수(`ReportEvent.articles`) |
+| 근거 기사 | `news_id`(→`ArticleRef` news_id+summary+url) | ② `EventWithArticles.articles`(대표 소수) / ③ `query_client.get_articles_by_news_ids`(추가 재조회) | ④ 답변의 각 주장에 news_id 부착. `ArticleRef.news_id`가 사슬의 원천(TASK 01·08). 화면엔 대표 소수(`ReportEvent.articles`) |
 
 - **모든 주장에 근거 news_id 부착**(query_spec §4·pipeline_spec §11). `Answer.evidence_news_ids`로 담고, 근거 없는 문장은 만들지 않는다(환각 금지, 절대규칙 5).
 - **근거가 없으면 "데이터 제한"** 을 해당 섹션에 표기한다(`ReportModel.data_limited`/`note`, `SubjectQueryResponse.subject_found`). "없는 종목"과 "뉴스 0건"을 `subject_found`로 구분해 문구를 다르게 쓴다(TASK 01 §3.4).
@@ -82,23 +82,30 @@
 2. **정렬(랭킹) 기준(잠정)**: `REPORT_RANKING: str = "importance"` — 관련도 점수 **미확정 → 잠정 importance순**(query_spec §6, CLAUDE.md §8). **주석으로 "관련도 점수 확정 시 교체" 명시.** 기준 문자열을 코드에 박지 않고 config에.
 3. **④ 답변 생성 옵션**: `QUERY_ANSWER_MAX_TOKENS`·`QUERY_ANSWER_TEMPERATURE`(재사용하는 `services/llm.py`에 넘길 값. LLM 공통 설정 `LLM_BASE_URL/MODEL/TIMEOUT/RETRIES`는 TASK 03 config 재사용). intent별 분량/초점은 프롬프트로 조절.
 4. **프리셋 질문 문구**: `QUERY_PRESET_QUESTION_TEMPLATE: str`(예: `"{company} 최근 뉴스 요약해줘"`) — 종목 선택을 자유 질문으로 변환(query_spec §2-①). 문구를 코드에 흩지 않고 config에.
+4b. **회사 별칭 사전(Dictionary First)**: `COMPANY_ALIASES: dict[str, list[str]]` — 별칭→canonical 회사명(`삼전→[삼성전자]`, `삼전닉스→[삼성전자, SK하이닉스]` 다중 매핑 가능). ⚠️ **미확정(CLAUDE.md §8)** → 초기 시드는 KOSPI/주요 종목+흔한 약어, 질의 로그의 미매칭 토큰으로 지속 보강. canonical은 그래프 Company 노드명과 일치. **사전이 비어도 ②LLM 보완으로 동작**(default). 코드에 흩지 않고 config에.
 5. **템플릿 경로**: `REPORT_TEMPLATE_PATH`(기본 `templates/report.html`). 렌더러가 읽을 위치.
 6. 라벨·관계 타입 문자열(②)은 **`schemas/graph.py` Enum(TASK 07)** 을 재사용하고 config에 흩지 않는다(계약은 스키마, 정책값만 config).
 
 ### 3.2 `schemas/query.py` — 질문 파싱·답변 구조 (신규, TASK 09 소유)
-> ① 출력·④ 출력을 강제하는 Pydantic 모델. LLM 출력은 반드시 이 모델로 파싱·검증(CLAUDE.md §2-3). TASK 01 §3의 "query.py 추가 예정"을 채운다.
+> ① 출력·④ 출력을 강제하는 Pydantic 모델. LLM 출력은 반드시 이 모델로 파싱·검증(CLAUDE.md §2-3). 질의측 전용 스키마로 이 문서(TASK 09)가 소유한다(TASK 01은 배치측만 — 질의 스키마와 독립).
 
 1. **`QueryIntent`(str Enum)**: `RELATION="관계"`, `REASON="이유"`, `SUMMARY="요약"`, `STATUS="현황"`(query_spec §2-①). `뉴스 흐름 요약` 섹션의 초점·분량을 결정.
-2. **`QueryUnderstanding`(BaseModel)**: `companies: list[str]`, `period_days: int`(기본 `QUERY_DEFAULT_PERIOD_DAYS`), `intent: QueryIntent`, `is_preset: bool = False`(종목 프리셋 여부), (선택) `original_question: str`(사용자 원문 질문. LLM 원출력·raw JSON과 혼동되지 않게 `raw_` 대신 `original_`). ①의 파싱 결과.
+2. **`QueryUnderstanding`(BaseModel)**: `companies: list[str]`, `period_days: int`(기본 `QUERY_DEFAULT_PERIOD_DAYS`), `intent: QueryIntent`, `is_preset: bool = False`(종목 프리셋 여부), **`dropped_tokens: list[str] = []`**(사전·LLM에서 회사로 확정 못 해 버린 토큰 — 관측/사전 보강용, query_spec §①-1·§4), (선택) `original_question: str`(사용자 원문 질문. `raw_` 대신 `original_`). ①의 파싱 결과.
 3. **`Answer`(BaseModel)**: `text: str`(`뉴스 흐름 요약` 본문 = ④ 답변 그 자체), `evidence_news_ids: list[int]`(모든 주장의 근거 news_id, §0.2), `cited_event_ids: list[str] = []`(근거 이슈 칩이 링크할 `canonical_id`), `data_limited: bool = False`(근거 부족 표기). LLM이 이 구조로 반환하도록 강제.
 4. **(선택) `QueryResult`(BaseModel)**: 흐름 번들 — `understanding: QueryUnderstanding`, `response: SubjectQueryResponse`, `answer: Answer`. `state` 대신 타입 안전하게 넘기고 싶을 때. 없어도 무방(노드가 `state` 키로 전달 가능).
 5. Pydantic v2. `evidence_news_ids`는 backend가 부여한 정수 news_id(`Article.id`, TASK 01). 근거 없는 값을 지어내지 않는다(환각 금지).
 
-### 3.3 `services/query_understanding.py` — ① 질문 이해 (Qwen3 → Pydantic)
-1. **`understand_query(question: str) -> QueryUnderstanding`**: 자유 문장을 `services/llm.py`(Qwen3)로 파싱해 `companies·period_days·intent`를 뽑고 **`QueryUnderstanding`으로 검증**(CLAUDE.md §2-3). 기간 표현 없으면 `QUERY_DEFAULT_PERIOD_DAYS`.
+### 3.3 `services/query_understanding.py` — ① 질문 이해 (Dictionary First → LLM Fallback)
+> **회사명 해석은 LLM 단독이 아니다.** `사전(규칙) 우선 → LLM 보완 → 그래프 검증 → 저신뢰 제거` 순(query_spec §①-1, CLAUDE.md §5). 오타·약어(`삼전`·`SK닉스`·`카겜`)를 사전으로 먼저 잡아 LLM 오인식·호출을 줄인다. 기간(period)·의도(intent)만 LLM 파싱.
+1. **`understand_query(question: str) -> QueryUnderstanding`**:
+   - **① 사전 매칭(Dictionary First)**: 입력을 가볍게 정규화(공백·조사 제거) 후 `config.COMPANY_ALIASES`(별칭→canonical)를 **최장일치 스캔**으로 적용. 대부분의 약어·별칭을 LLM 없이 해결.
+   - **② LLM 보완(잔여 토큰만)**: 사전에 안 잡힌 토큰만 `services/llm.py`(Qwen3)에 넘겨 `회사 후보+confidence`를 받는다(전체 문장 재해석 아님). period·intent 파싱도 이 호출에서.
+   - **③ 그래프 검증**: 사전+LLM으로 얻은 회사명을 backend(`query_client`, TASK 08) Company 노드/이벤트 존재로 확인. 없으면 그 회사를 제외(리포트가 해당 부분 "데이터 제한"). *전용 검증 엔드포인트 유무는 api_contract 확정 대상; 없으면 ②그래프순회 결과(`subject_found`)로 판정.*
+   - **④ 저신뢰 제거**: LLM confidence가 낮거나 "회사 아님"이면 그 토큰을 버리고 사전 결과만 사용(억지 매핑·환각 금지, 절대규칙 5). 버린 토큰은 **`dropped_tokens[]`** 로 남겨 관측·사전 보강에 쓴다.
+   - 결과를 **`QueryUnderstanding`으로 검증**(CLAUDE.md §2-3). 기간 표현 없으면 `QUERY_DEFAULT_PERIOD_DAYS`. **canonical 회사명은 그래프 Company 노드명과 일치**(사전 canonical == 노드명).
 2. **`from_subject(company: str) -> QueryUnderstanding`**(또는 `understand_query`가 프리셋 감지): 종목 선택은 LLM 없이 `intent=요약, companies=[company], is_preset=True`로 변환(query_spec §2-①). `QUERY_PRESET_QUESTION_TEMPLATE`로 `original_question` 채움.
-3. **파싱 실패 degrade**: LLM 응답이 스키마로 파싱 안 되면 예외로 흐름을 죽이지 말고 로깅 후 **보수적 기본값**(예: 회사 추출 실패 시 빈 리스트 → 리포트가 "데이터 제한")으로 통과(절대규칙 5·§7). 감성·영향도를 여기서 판정하지 않는다(절대규칙 4).
-4. LLM 호출은 `services/llm.py`만(타임아웃·재시도는 그쪽). 이 파일은 프롬프트 구성·파싱만.
+3. **파싱 실패 degrade**: LLM 응답이 스키마로 파싱 안 되면 예외로 흐름을 죽이지 말고 로깅 후 **보수적 기본값**(회사 추출 실패 시 빈 리스트 → 리포트가 "데이터 제한")으로 통과(절대규칙 5·§7). 감성·영향도를 여기서 판정하지 않는다(절대규칙 4).
+4. LLM 호출은 `services/llm.py`만(타임아웃·재시도는 그쪽). 사전(`COMPANY_ALIASES`)·정규화는 config/utils. 이 파일은 사전 적용·프롬프트 구성·파싱·검증만.
 
 ### 3.4 `services/graph_query.py` — ② 그래프 탐색 설계 (single/multi-hop)
 > 실제 Neo4j 순회는 backend(`query_client`, TASK 08). 여기서는 **어떤 조회를 부를지 설계**만 한다(절대규칙 1).
@@ -124,7 +131,7 @@
 
 1. **`build_report_model(understanding, response, answer) -> ReportModel`**: `SubjectQueryResponse`를 `ReportModel`로 조립.
    - `top_events`: `EventWithArticles`를 **`REPORT_RANKING`(잠정 importance)순**으로 정렬해 **TOP `REPORT_TOP_N`** 만. 각 `ReportEvent`에 `canonical_title`·`importance`·`gauge`(backend 집계)·`article_count`(총 건수)·`articles`(대표 `REPORT_MAX_ARTICLES_PER_EVENT`건). `article_count`(전체)와 `articles`(대표 소수)를 구분(TASK 01 §3.3).
-   - `overall_gauge`: **backend가 준 값**을 쓴다. 전체 게이지 제공 방식(전체 집계 필드 or 이벤트별 `gauge` 합산)은 backend 계약(api_contract.md 미확정) — **에이전트가 기사 감성을 다시 세지 않는다**(절대규칙 4). 합산이면 backend 제공 count의 산술 합만(판정 아님).
+   - `overall_gauge`: **`response.overall_gauge`(backend가 채운 전체 감성 집계, `sentiment=None` 제외)를 그대로** 쓴다(SCHEMA_SPEC §7.3에서 backend 제공으로 확정). **에이전트가 기사 감성을 다시 세지 않는다**(절대규칙 4). 렌더러는 비율(%)만 계산.
    - `data_limited`/`note`: `subject_found`·이벤트 0건·`answer.data_limited`를 반영("데이터 제한", 절대규칙 5).
 2. **`render_html(report_model, answer) -> str`**: `REPORT_TEMPLATE_PATH`(목업 템플릿)에 데이터를 주입해 **HTML 문자열** 반환. 매핑은 query_spec §3:
    - 헤더(종목·집계기간·건수) ← `subject`·`period_days`·건수(있으면). **없는 값은 지어내지 말고 생략/데이터 제한**(원문/중복제거 318→142·반응도 "평소比 1.8배"는 baseline·수집메타가 있어야 함 → backend가 안 주면 표시 안 함, 환각 금지).
@@ -155,6 +162,12 @@ REPORT_RANKING: str = "importance"                # ⚠️ 관련도 점수 미�
 QUERY_ANSWER_MAX_TOKENS: int = 1024               # ④ 답변 생성 토큰(services/llm.py에 전달)
 QUERY_ANSWER_TEMPERATURE: float = 0.3
 QUERY_PRESET_QUESTION_TEMPLATE: str = "{company} 최근 뉴스 요약해줘"  # 종목→자유질문 변환
+# ⚠️ 미확정(CLAUDE.md §8) — 별칭→canonical(그래프 Company 노드명과 일치). 비어도 LLM 보완으로 동작.
+COMPANY_ALIASES: dict[str, list[str]] = {
+    "삼전": ["삼성전자"], "하이닉스": ["SK하이닉스"], "SK닉스": ["SK하이닉스"],
+    "현차": ["현대자동차"], "카겜": ["카카오게임즈"], "삼전닉스": ["삼성전자", "SK하이닉스"],
+    # ... 실데이터·질의 로그로 지속 보강
+}
 REPORT_TEMPLATE_PATH: str = "templates/report.html"
 ```
 
@@ -174,6 +187,7 @@ class QueryUnderstanding(BaseModel):
     period_days: int = 7                    # 기본 QUERY_DEFAULT_PERIOD_DAYS
     intent: QueryIntent = QueryIntent.SUMMARY
     is_preset: bool = False                 # 종목 선택 프리셋 여부
+    dropped_tokens: list[str] = Field(default_factory=list)  # 회사로 확정 못 해 버린 토큰(관측·사전 보강, §①-1)
     original_question: str | None = None   # 사용자 원문 질문(raw llm output·raw json과 혼동 방지)
 
 class Answer(BaseModel):
@@ -195,8 +209,10 @@ from __future__ import annotations
 from schemas.query import QueryUnderstanding
 
 def understand_query(question: str) -> QueryUnderstanding:
-    """자유 문장을 Qwen3로 파싱 → companies·period·intent를 QueryUnderstanding으로 검증.
-    파싱 실패 시 로깅 후 보수적 기본값(빈 회사 → 리포트가 '데이터 제한'). 감성 판정 안 함."""
+    """회사명 = Dictionary First → LLM Fallback → 그래프 검증 → 저신뢰 제거(§3.3, query_spec §①-1):
+    ① COMPANY_ALIASES 최장일치 매칭 → ② 잔여 토큰만 Qwen3 보완(+period·intent) →
+    ③ query_client로 Company 존재 검증 → ④ 저신뢰·미매칭은 dropped_tokens로 버림.
+    결과를 QueryUnderstanding으로 검증. 실패 시 보수적 기본값(빈 회사→'데이터 제한'). 감성 판정 안 함."""
     ...
 
 def from_subject(company: str) -> QueryUnderstanding:
@@ -274,7 +290,7 @@ def report_node(state: dict) -> dict:
 ### 4.1 질의 단계 요약 (① → ④ → 렌더)
 | 단계 | 함수 | 모델/서비스 | 산출물 | 규칙 |
 |---|---|---|---|---|
-| ① 질문이해 | `understand_query`/`from_subject` | Qwen3(`llm.py`) | `QueryUnderstanding` | Pydantic 강제(§2-3). 종목은 프리셋(요약) |
+| ① 질문이해 | `understand_query`/`from_subject` | 사전(COMPANY_ALIASES) + Qwen3(`llm.py`) | `QueryUnderstanding` | Dictionary First→LLM 보완→그래프 검증→저신뢰 제거(§3.3). Pydantic 강제. 종목은 프리셋(요약) |
 | ② 그래프순회 | `graph_query.fetch_events` | backend(`query_client`) | `SubjectQueryResponse` | 1개=single-hop, 2개=multi-hop. Cypher 없음(절대규칙 1) |
 | ③ 원문요약 | `query_client.get_articles_by_news_ids` | backend(TASK 08) | `ArticleRef`·`SentimentGauge` | 감성 게이지는 backend 실시간 집계(§5) |
 | ④ 답변생성 | `answer_generator.generate_answer` | Qwen3(`llm.py`) | `Answer` | 근거 news_id 부착(§0.2). 텍스트만(절대규칙 4) |
@@ -302,9 +318,9 @@ def report_node(state: dict) -> dict:
 - **§8 미확정 존중.** 관련도(랭킹) 점수 미확정 → 잠정 importance순(`REPORT_RANKING` config + 주석). backend 조회 계약(api_contract.md)·`reports` 저장은 backend 소유.
 
 ## 6. 완료 조건 (DoD)
-- [ ] `schemas/query.py`가 **신규 생성**되어 `QueryIntent`(관계/이유/요약/현황)·`QueryUnderstanding`(companies·period_days·intent·is_preset)·`Answer`(text·evidence_news_ids·cited_event_ids·data_limited)를 Pydantic v2로 정의.
-- [ ] `config.py`에 `QUERY_DEFAULT_PERIOD_DAYS`·`REPORT_TOP_N`·`REPORT_MAX_ARTICLES_PER_EVENT`·`REPORT_RANKING`("importance", 주석)·프리셋 문구·템플릿 경로가 정의됨. 기간·TOP N·랭킹·프롬프트 토큰 하드코딩 없음.
-- [ ] `query_understanding.understand_query`가 Qwen3(`services/llm.py`)로 파싱해 **`QueryUnderstanding`으로 검증**하고, 종목 선택은 `intent=요약` 프리셋(`from_subject`)으로 변환. 파싱 실패 시 예외 없이 "데이터 제한"으로 degrade. 감성 판정 없음.
+- [ ] `schemas/query.py`가 **신규 생성**되어 `QueryIntent`(관계/이유/요약/현황)·`QueryUnderstanding`(companies·period_days·intent·is_preset·**dropped_tokens**)·`Answer`(text·evidence_news_ids·cited_event_ids·data_limited)를 Pydantic v2로 정의.
+- [ ] `config.py`에 `QUERY_DEFAULT_PERIOD_DAYS`·`REPORT_TOP_N`·`REPORT_MAX_ARTICLES_PER_EVENT`·`REPORT_RANKING`("importance", 주석)·프리셋 문구·`COMPANY_ALIASES`(별칭 사전, ⚠️미확정 주석)·템플릿 경로가 정의됨. 기간·TOP N·랭킹·프롬프트 토큰·별칭 하드코딩 없음.
+- [ ] `query_understanding.understand_query`가 **Dictionary First → LLM Fallback → 그래프 검증 → 저신뢰 제거** 순으로 회사명을 해석함(§3.3): ① `COMPANY_ALIASES` 사전 매칭 → ② 잔여 토큰만 Qwen3 보완(+period·intent) → ③ `query_client`로 Company 존재 검증 → ④ 저신뢰·미매칭은 `dropped_tokens`로 버림. 결과를 **`QueryUnderstanding`으로 검증**. 종목 선택은 `from_subject` 프리셋. 파싱 실패 시 예외 없이 "데이터 제한" degrade. 감성 판정 없음. canonical == 그래프 Company 노드명.
 - [ ] `graph_query.fetch_events`가 회사 1개=`get_events_by_subject`(single-hop)·2개=`get_shared_events`(multi-hop)로 분기하고 `within_days`를 넘김. `BackendError` 시 빈/`subject_found=False`로 degrade. **Cypher·직접 DB 접근 없음**(절대규칙 1).
 - [ ] `answer_generator.generate_answer`가 ③ 요약을 근거로 `뉴스 흐름 요약` 본문을 만들고 **모든 주장에 근거 news_id(`evidence_news_ids`)·`cited_event_ids`를 부착**(§0.2). 데이터 없으면 `data_limited=True`. **LLM은 텍스트만**(감성 판정·집계 없음, 절대규칙 4). 출력은 `Answer`로 검증.
 - [ ] `report_renderer.build_report_model`이 `SubjectQueryResponse`→`ReportModel`을 조립: `top_events`는 **importance순 TOP `REPORT_TOP_N`**, 이벤트별 대표 기사 `REPORT_MAX_ARTICLES_PER_EVENT`건(`article_count`(총 건수)와 구분), `overall_gauge`는 **backend 집계값**(감성 재계산 없음), `subject_found`·0건·`answer.data_limited`→`data_limited`/`note`.
@@ -327,3 +343,8 @@ def report_node(state: dict) -> dict:
 - **경계 케이스**: 회사 0개(없는 종목)·이벤트 0건(뉴스 0건, `subject_found`로 구분)·근거 news_id 빈 값·multi-hop 공유 이벤트 없음·LLM 타임아웃·backend 조회 실패·특수문자/긴 요약·TOP N보다 이벤트가 적음.
 - **evals 연계**: 자유 질문은 **answer 축이 핵심**(query_spec §5). faithfulness(환각)·answer correctness/relevancy는 `evals/metrics/judge`(RAGAS 어댑터), source_traceability(근거 news_id 추적)는 `evals/metrics/deterministic`. 정답셋은 `evals/datasets/qa_goldset.jsonl`(질의→정답+evidence_path). 여기 tests는 계약·매핑·degrade·근거 부착을 검증하고, 답변 품질은 evals가 채점한다.
 - 이 문서는 여러 TASK의 산출물(01 report/response·query 스키마, 03 llm, 07 라벨·관계, 08 query_client)을 **소비·조립**하므로, 그 계약이 바뀌면 함께 수정한다(스키마·조회 계약 소유는 각 TASK, 질의·렌더 조립은 여기).
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `state["question"]`(또는 종목) | `state["html"]`(리포트 하나, ④ 답변 내장) | `services/query_understanding`·`graph_query`·`answer_generator`·`report_renderer`(→ `llm`·`query_client`) | DB 직접, 감성 판정, importance 재계산, gauge 재집계 | 단계 실패→예외 없이 "데이터 제한" 리포트 |
