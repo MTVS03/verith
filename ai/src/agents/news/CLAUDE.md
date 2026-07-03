@@ -10,8 +10,8 @@
 국내 언론사 뉴스를 수집·분석해 종목별 여론과 핵심 이벤트를 지식 그래프로 구성하고,
 최종적으로 **HTML 리포트**를 출력하는 자기완결 에이전트.
 
-- **입력**: 종목(또는 섹터)
-- **출력**: HTML 리포트 (감성 게이지 + TOP 이벤트)
+- **입력**: 자유 질문 문장 또는 종목(= "이 종목 요약해줘" 프리셋 질문). 질의 흐름은 자유 질문형(B) 확정.
+- **출력**: HTML 리포트 하나 (감성 게이지 + TOP 이벤트). ④ 답변 텍스트는 별도 채널이 아니라 리포트 안 `뉴스 흐름 요약` 섹션 + 근거 이슈 칩으로 내장.
 - Supervisor는 `graph.py`만 호출한다. 내부는 이 에이전트가 자기완결로 처리.
 
 ---
@@ -38,11 +38,16 @@ scheduler → crawl → extract → sentiment → embedding → merge_event → 
 ```
 데이터를 수집·분석해 backend에 저장. HTML은 만들지 않는다.
 
-### 리포트 흐름 (사용자 요청 시)
+### 질의(리포트) 흐름 (사용자 요청 시) — 자유 질문형 B
 ```
-graph → query(backend 조회) → report(HTML 생성)
+graph → query → report
+  query = ① 질문이해(Qwen3→Pydantic: companies·period·intent)
+        → ② 그래프순회(Neo4j single/multi-hop)
+        → ③ 원문요약조회(PostgreSQL)
+        → ④ 답변생성(Qwen3, 근거 news_id)
+  report = HTML 리포트 하나. ④ 답변은 "뉴스 흐름 요약" 섹션(+ 근거 이슈 칩)으로 내장(별도 텍스트 출력 없음).
 ```
-저장된 데이터를 읽어 HTML만 그린다. 수집·분석하지 않는다.
+저장된 데이터를 읽어 답하고 그린다. 수집·분석하지 않는다. 상세: docs/query_spec.md.
 
 ---
 
@@ -50,9 +55,11 @@ graph → query(backend 조회) → report(HTML 생성)
 
 | 역할 | 모델 | 서비스 파일 |
 |---|---|---|
-| 추출(요약·개체·이벤트) | Qwen3 30B-A3B (로컬) | services/llm.py |
+| 추출(요약·개체·이벤트) + 질의 답변 생성 | Qwen3 30B-A3B (로컬) | services/llm.py |
 | 감성분석 | KR-FinBert-SC | services/finbert.py |
 | 임베딩(summary) | arctic-embed-l-v2.0-ko | services/embedder.py |
+
+- 배치 추출과 질의 답변 생성은 모두 **Qwen3**로 통일한다(목업의 "Gemma" 표기는 Qwen3로 대체).
 
 ---
 
@@ -90,7 +97,9 @@ RSS_CANDIDATES = [
 
 - `nodes/` : LangGraph 노드 (파이프라인 단계, 얇게)
 - `services/` : 실제 로직 (모델 호출·계산·크롤링)
+  - 질의측 신규 파일 **추가 예정**: `query_understanding.py`(① 질문 파싱), `graph_query.py`(② Neo4j 탐색 설계). 아직 미작성.
 - `services/backend/` : backend HTTP 클라이언트 (저장·조회)
+- `schemas/` 에 질의측 **`query.py` 추가 예정**(질문 파싱 결과 + 답변 구조: answer 텍스트 + evidence news_id[]). 아직 미작성.
 - `schemas/` : Pydantic 데이터 구조
 - `scheduler/` : 매시간 배치 (RSS 수집·7일 삭제)
 - `templates/` : HTML 출력 (report.html + css/js)
@@ -112,7 +121,7 @@ RSS_CANDIDATES = [
 ---
 ## 8. 작업 시 참고
 
-- `verith\ai\agents\news` 안의 폴더만 사용한다. 절대 그 밖의 폴더를 건들면 안 된다.
+- `verith\ai\src\agents\news` 안의 폴더만 사용한다. 절대 그 밖의 폴더를 건들면 안 된다.
 - 개별 작업은 `tasks/` 폴더의 번호순 지시서를 따른다(01_schemas부터).
 - 설계 배경은 `docs/` 참고.
 - 새 파일을 만들 때 위 폴더 역할(6번)에 맞는 위치에 둔다.
@@ -123,4 +132,6 @@ RSS_CANDIDATES = [
 ## 미확정 (작업 전 확인 필요)
 - 이벤트 병합 임계값·가중치 계수: 실데이터 튜닝 예정 (config.py에 임시값)
 - importance 계산식의 언론사 가중치 테이블: 미정
+- **질의 관련도(랭킹) 점수 정의: 미확정.** 잠정은 importance순 정렬로 대체(추후 튜닝).
 - backend API 계약(엔드포인트·요청/응답): verith/docs/api_contract.md에서 확정 예정
+- **DB 모델 정의 위치: `verith\backend\db\models\news`** (backend 소유). news는 절대규칙 1대로 HTTP로만 접근. 명세는 docs/erd.dbml.

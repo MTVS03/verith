@@ -31,26 +31,32 @@ sequenceDiagram
   Note over N,BE: HTML은 만들지 않음 (데이터만 저장)
 ```
 
-## 2. 리포트 흐름 (사용자 요청)
+## 2. 질의(리포트) 흐름 (사용자 요청) — 자유 질문형 B
 
 ```mermaid
 sequenceDiagram
   participant U as Supervisor
   participant G as graph.py
   participant N as nodes
-  participant BE as backend(:8000)
   participant SV as services
-  U->>G: 종목 분석 요청
+  participant BE as backend(:8000)
+  U->>G: 질문/종목 입력
   G->>N: query 노드
-  N->>SV: query_client.py 조회
-  SV->>BE: [HTTP] 종목 이벤트·감성·news_id
-  BE-->>SV: 이벤트(importance순)+기사요약
-  SV-->>N: 조회 결과
-  N->>SV: report_renderer.py HTML 생성
-  SV-->>N: HTML (게이지·TOP이벤트)
-  N-->>G: HTML 리포트
+  N->>SV: query_understanding.py ① 질문이해(Qwen3→Pydantic)
+  SV-->>N: companies·period·intent
+  N->>SV: graph_query.py ② 그래프 탐색 설계(single/multi-hop)
+  SV->>BE: [HTTP] Neo4j 순회(관련 이벤트·관계)
+  BE-->>SV: 이벤트(importance순)+news_id
+  N->>SV: query_client.py ③ 원문 요약 조회
+  SV->>BE: [HTTP] PostgreSQL news_id→요약·감성
+  BE-->>SV: 기사 요약·감성·출처
+  N->>SV: llm.py ④ 답변생성(Qwen3, 근거 news_id)
+  SV-->>N: 답변 텍스트 + evidence news_id[]
+  N->>SV: report_renderer.py HTML 생성(④ 답변을 "뉴스 흐름 요약" 섹션에 삽입)
+  SV-->>N: HTML (뉴스 흐름 요약+근거 칩·게이지·TOP이벤트)
+  N-->>G: HTML 리포트 하나
   G-->>U: 최종 출력
-  Note over N,BE: 수집·분석 안 함. 저장된 데이터로 그리기만
+  Note over N,BE: 수집·분석 안 함. 답변은 HTML 안에 내장(별도 텍스트 출력 없음)
 ```
 
 ## 3. 삭제 흐름 (매시간)
