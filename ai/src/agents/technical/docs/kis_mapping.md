@@ -182,24 +182,70 @@ allowlist 밖 종목은 KIS 호출 자체를 하지 않고 `OUT_OF_SCOPE_TICKER`
 
 ---
 
-## 11. 실제 응답 샘플 TODO
+## 11. 실제 응답 샘플 (검증 완료)
 
-아래는 KIS 접근토큰 발급 후 **실제 호출 결과로 채운다.** 현재 문서의 필드 구조·매핑은 KIS 공식 저장소로 검증했으나, 실제 응답 값·건수·정렬 방향은 호출해야 확정된다.
+> **검증 방법:** `ai/src/agents/technical/scripts/test_kis_ohlcv.py` — 실전 도메인(`https://openapi.koreainvestment.com:9443`)에 토큰 발급 후 2차전지 10종목 × D/W/M = 30호출.
+> **검증일:** 2026-07-03. **결과:** 단일종목(373220) D/W/M 전부 OK, 10종목 확장 30/30 성공, 실패 0.
+> 샘플 CSV: `ai/src/agents/technical/scripts/kis_sample_output/{ticker}_{D|W|M}.csv` (내부 OHLCV 구조).
 
-**대상 예시:**
-- `373220` (LG에너지솔루션), `FID_PERIOD_DIV_CODE=D`, 최근 일봉 구간
-- 가능하면 주봉(`W`)·월봉(`M`)도 각 1건
+### 11.1 인증·엔드포인트 실측
+- 토큰: `POST {base}/oauth2/tokenP` `{grant_type=client_credentials, appkey, appsecret}` → `access_token`, `expires_in=86400`(24h). 스크립트는 파일 캐시로 재사용(만료 5분 전 갱신).
+- 시세: `GET {base}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`, 헤더 `tr_id=FHKST03010100`, `custtype=P`. **계좌번호 불필요**(확인됨).
+- **`.env` 키 이름 주의:** 실제 `.env`는 `KIS_API_KEY`/`KIS_API_SECRET`(공식명 `KIS_APP_KEY`/`KIS_APP_SECRET`과 다름). `services/kis_client.py`는 둘 중 하나로 통일 필요 — 스크립트는 양쪽을 모두 허용하도록 임시 처리.
 
-**채울 항목:**
-- 실제 `output1` 원문 (종목 요약 필드)
-- 실제 `output2` 원문 (OHLCV 배열, 실제 값)
-- 한 호출당 실제 반환 건수 (100건 제한 확인)
-- **날짜 정렬 방향** (최신→과거 / 과거→최신 — §8 병합 로직에 영향)
-- 휴장일·거래정지 종목의 응답 형태
-- **주봉(W)·월봉(M) 실제 반환 건수** (5년 요청 시 몇 개 오는지 → 구간 분할 필요 여부)
-- **주/월봉 stale 신선도 기준** 확정 (`config.md` `STALE_CACHE_MAX_AGE_BY_PERIOD`의 W·M 값)
+### 11.2 실제 `output1` 구조 (종목 요약 — **단일 객체**, 배열 아님)
+`373220` D 응답 기준. 존재 필드:
+```
+prdy_vrss, prdy_vrss_sign, prdy_ctrt, stck_prdy_clpr, acml_vol, acml_tr_pbmn,
+hts_kor_isnm, stck_prpr, stck_shrn_iscd, prdy_vol, stck_mxpr, stck_llam,
+stck_oprc, stck_hgpr, stck_lwpr, stck_prdy_oprc, stck_prdy_hgpr, stck_prdy_lwpr,
+askp, bidp, prdy_vrss_vol, vol_tnrt, stck_fcam, lstn_stcn, cpfn, hts_avls,
+per, eps, pbr, itewhol_loan_rmnd_ratem
+```
+예: `hts_kor_isnm="LG에너지솔루션"`, `stck_prpr="362500"`(현재가), `acml_tr_pbmn="141122636250"`. output1은 "오늘 시점 요약"이라 OHLCV 시계열이 아니다 — 시계열은 output2에서만 취한다.
 
-토큰 발급·인증은 KIS 공식 저장소 `kis_auth.py` 방식(앱키·앱시크릿, `~/KIS/config/kis_devlp.yaml`)을 참고한다.
+### 11.3 실제 `output2` 구조 (OHLCV 배열)
+문서 §7 매핑 필드가 **실제 응답과 100% 일치**(필드명 변경 없음). 원소 예(373220 D, 최신):
+```json
+{"stck_bsop_date":"20260703","stck_clpr":"362500","stck_oprc":"359500","stck_hgpr":"363500",
+ "stck_lwpr":"342500","acml_vol":"397490","acml_tr_pbmn":"141122636250","flng_cls_code":"00",
+ "prtt_rate":"0.00","mod_yn":"N","prdy_vrss_sign":"2","prdy_vrss":"8500","revl_issu_reas":""}
+```
+- 매핑 대상 7개 필드(`stck_bsop_date/oprc/hgpr/lwpr/clpr, acml_vol, acml_tr_pbmn`)는 **D/W/M 전부 존재**. §7 매핑 그대로 확정.
+- 값은 모두 **문자열**로 온다 → `kis_client.py`에서 float/int 캐스팅 필요.
+- 매핑 외 부가 필드: `flng_cls_code`(락 구분), `prtt_rate`(분할비율), `mod_yn`(수정여부), `prdy_vrss_sign/prdy_vrss`(전일대비), `revl_issu_reas`(재평가 사유). MVP 매핑엔 불필요.
+
+### 11.4 반환 건수 · 100건 제한 · 구간 분할
+| 타임프레임 | 요청 구간 | 반환 건수 | 100건 제한 | 실제 날짜 범위(373220) |
+| --- | --- | --- | --- | --- |
+| **D** (일봉) | 최근 ~480일 | **100건 (상한)** | **도달** → 구간 분할 필요 | 20260204 ~ 20260703 |
+| **W** (주봉) | 최근 5년 | **100건 (상한)** | **도달** → 구간 분할 필요 | 20240805 ~ 20260629 |
+| **M** (월봉) | 최근 5년 | **55~60건** | 미도달 → 분할 불필요 | 20220128 ~ 20260703 |
+
+- **D 100건 ≈ 달력 약 5개월(20260204~20260703, 거래일 100일).** 1년치 일봉(약 240거래일)은 **3구간** 분할 필요.
+- **W 100건 ≈ 약 1.9년(20240805~20260629).** 5년 주봉(약 260개)은 **약 3구간** 분할 필요(§8 예상과 일치).
+- **M은 5년 요청에 55~60건**으로 100건 안에 들어옴 → **월봉은 구간 분할 불필요.** (건수 차이는 상장일 — 예: 373220=55, 엔켐=57, 대부분 60.)
+- **구간 파라미터(`FID_INPUT_DATE_1/2`) 정상 동작 확인:** `20260504~20260603` 요청 → 20건, 전부 구간 내. 본 구현의 구간 분할 병합에 사용 가능.
+
+### 11.5 날짜 정렬 방향
+- **D/W/M 전부 `최신 → 과거`(descending).** `output2[0]`이 가장 최신 봉, `output2[-1]`이 가장 과거 봉.
+- §8 병합 로직: 구간별 output2를 이어붙인 뒤 **날짜 오름차순 정렬**로 정규화(내부 OHLCV는 과거→최신 권장). CSV 산출물은 KIS 원본 순서(최신 우선) 그대로 저장돼 있으니 소비 측에서 재정렬.
+
+### 11.6 `acml_tr_pbmn`(거래대금) 존재 여부
+- **D/W/M 3개 타임프레임 모두 존재.** 10종목 30호출 전부 `거래대금=O`. 유동성 판정(`MIN_AVG_TRADING_VALUE`, §7·`config.md §6`) 근거값을 타임프레임별로 확보 가능.
+
+### 11.7 유량 제한(rate limit) 실측
+- 호출 간격 0.35s(초당 ~2.8건)에서도 `EGW00201`("초당 거래건수를 초과") 간헐 발생 → **1초 백오프 후 재시도로 전부 복구, 최종 실패 0.**
+- 실전계좌 조회 API의 초당 상한이 공표치보다 빡빡하게 걸릴 수 있음. **본 구현 권장:** 호출 간격을 0.5s 이상으로 넉넉히 두거나, `EGW00201` 수신 시 지수 백오프 재시도(1·2·4s)를 표준 방어로 포함(§10 재시도 정책과 정합).
+
+### 11.8 stale 신선도 기준 제안 (`config.md STALE_CACHE_MAX_AGE_BY_PERIOD`)
+- 관찰: **W 최신봉은 당주(월요일 시작, 20260629)**, **M 최신봉은 당월 진행분(20260703)**으로 갱신됨(장중에도 진행봉 반영).
+- **제안값** (실운영 검증 후 확정): `D=1거래일`, `W=1주(약 5거래일)`, `M=1개월(약 22거래일)`. 상위 타임프레임은 갱신 주기가 길어 D보다 stale 허용을 넉넉히 둔다.
+
+### 11.9 휴장일·거래정지 응답
+- 이번 10종목은 모두 정상 상장·거래 종목이라 거래정지/상장폐지 케이스는 미검증. output2에 결측 없이 연속 반환됨. 거래정지 종목 응답 형태(빈 output2 / rt_cd 오류)는 **후속 검증 항목으로 남김.**
+
+> (참고) 토큰 발급·인증은 KIS 공식 저장소 `kis_auth.py` 방식(앱키·앱시크릿)을 참고하되, 본 프로젝트는 `.env` + 파일 토큰 캐시 방식으로 구현했다(`ai/src/agents/technical/scripts/test_kis_ohlcv.py`).
 
 ---
 
