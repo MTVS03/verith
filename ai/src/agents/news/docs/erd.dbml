@@ -1,7 +1,10 @@
 // ============================================
 // news 에이전트 DB 스키마 (개념)
 // PostgreSQL(원본) + Neo4j(그래프)
-// 주의: 실제 테이블은 backend가 생성. 이 문서는 요청 명세.
+// 주의: 이 문서는 news가 제시하는 *명세*일 뿐이다.
+//   실제 모델 정의·테이블 생성은 backend 소유:
+//   → C:\verith\backend\db\models\news  (구현 지시서: 그곳 SCHEMA_SPEC.md)
+//   news는 절대규칙 1대로 DB 직접 접근 금지, backend HTTP로만 조회/저장한다.
 // ============================================
 
 // ─────────── PostgreSQL (News 원본) ───────────
@@ -18,6 +21,19 @@ Table news [note: '기사 원본. Neo4j엔 news_id 참조만 두고 본문은 �
   published_at   timestamp [note: '7일 롤링 기준']
   event_id       integer   [note: '소속 이벤트. nullable(병합 전 NULL)']
   created_at     timestamp
+}
+
+// ─────────── PostgreSQL (리포트 저장) ───────────
+// 질의 흐름 산출물(HTML 리포트 하나)의 식별·이력 저장.
+// ④ 답변 텍스트는 별도 출력이 아니라 HTML 안 "뉴스 흐름 요약" 섹션으로 렌더된다.
+Table reports [note: '질의 결과 리포트. report_id는 uuid4(랜덤), 시간순 정렬은 created_at으로'] {
+  report_id      uuid      [pk, note: 'Pydantic Field(default_factory=lambda: str(uuid.uuid4())). 컬럼 타입 UUID 권장(TEXT도 무방, backend와 합의)']
+  question       text      [note: '사용자 질문(또는 종목 프리셋)']
+  intent         varchar   [note: '관계/이유/요약/현황']
+  answer_text    text      [note: '④ 답변 텍스트(원본). HTML "뉴스 흐름 요약" 섹션으로 렌더됨']
+  evidence       jsonb     [note: '근거 news_id 목록(근거 이슈 칩→이벤트→기사 추적)']
+  html           text      [note: '렌더된 HTML 리포트(답변 내장). 또는 경로']
+  created_at     timestamp [note: '시간순 정렬 기준(아이디에 시간정보 안 넣음)']
 }
 
 // ─────────── Neo4j (Event 중심 그래프) ───────────
