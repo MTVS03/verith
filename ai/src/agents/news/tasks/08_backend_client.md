@@ -101,9 +101,9 @@
 ### 3.5 `services/backend/query_client.py` — 질의(리포트) 흐름 조회
 > query_spec §4의 ②③ backend HTTP. 리포트(TASK 09)가 소비할 조회만. 질문 이해(①)·답변 생성(④)·렌더는 질의 흐름 소관(범위 밖).
 
-1. **`get_events_by_subject(companies, within_days) -> SubjectQueryResponse`**: single-hop(`(Company)-[:PARTICIPATES_IN]->(Event)`) 이벤트를 **importance 내림차순**으로 조회. 각 이벤트에 근거 기사(`ArticleRef`=summary+url) 소수 + **실시간 집계된 `SentimentGauge`** + `article_count`(총 건수)를 담아 `EventWithArticles` 리스트로. **"없는 종목" vs "뉴스 0건"** 구분 위해 `subject_found` 채움(TASK 01 §3.4). 감성 분포는 backend가 집계(감성 None 제외).
+1. **`get_events_by_subject(companies, within_days) -> SubjectQueryResponse`**: single-hop(`(Company)-[:PARTICIPATES_IN]->(Event)`) 이벤트를 **importance 내림차순**으로 조회. 각 이벤트에 근거 기사(`ArticleRef`=**news_id**+summary+url) 소수 + **실시간 집계된 `SentimentGauge`** + `article_count`(총 건수)를 담아 `EventWithArticles` 리스트로. **`ArticleRef.news_id`가 있어야** ④ 답변생성이 근거 news_id 사슬(TASK 09 §0.2)을 만들 수 있다. **"없는 종목" vs "뉴스 0건"** 구분 위해 `subject_found` 채움(TASK 01 §3.4). 감성 분포는 backend가 집계(감성 None 제외).
 2. **`get_shared_events(company_a, company_b, within_days) -> SubjectQueryResponse`**(또는 동등): multi-hop — 두 회사가 함께 `PARTICIPATES_IN`한 **공유 이벤트**(관계 질문 핵심, query_spec §2). importance순.
-3. **`get_articles_by_news_ids(news_ids) -> list[ArticleRef]`**: ③ 원문 요약 조회 — news_id → 요약·감성·출처·published_at(PostgreSQL, query_spec §3). 근거(evidence) 추적용. HAS_NEWS로 이어진 news_id를 backend가 해소해 둔 것을 소비.
+3. **`get_articles_by_news_ids(news_ids) -> list[ArticleRef]`**: ③ 원문 요약 조회 — news_id → 요약·감성·출처·published_at(PostgreSQL, query_spec §3). 근거(evidence) 추적용. HAS_NEWS로 이어진 news_id를 backend가 해소해 둔 것을 소비. **반환 `ArticleRef`에 입력 `news_id`를 그대로 담아**(news_id+summary+url) 요약↔news_id 매핑이 끊기지 않게 한다. (②의 `EventWithArticles.articles`가 이미 `ArticleRef`(news_id 포함)를 주므로, 이 함수는 대표 소수 밖의 추가 근거를 news_id로 재조회할 때 쓴다.)
 4. 관련도(랭킹) 점수는 **미확정 → 잠정 importance순**(pipeline_spec §11, query_spec §6). 정렬 기준을 코드에 박지 말고 backend/후속 튜닝에 맞춰 둔다. HTTP는 `BackendClient`로만.
 
 ### 3.6 `nodes/save.py` — 저장 노드 (얇게)
@@ -198,7 +198,7 @@ class BackendEventArticleStatsProvider:  # implements services.importance.EventA
 # services/backend/query_client.py — 질의(리포트) 흐름 조회 (query_spec §4 ②③)
 # ⚠️ 감성 분포는 backend가 실시간 집계해 반환(이 에이전트는 집계 안 함, CLAUDE.md §5).
 from __future__ import annotations
-from schemas.article import ArticleRef  # (또는 schemas.report)
+from schemas.report import ArticleRef   # ArticleRef는 schemas/report.py 소유(단일 경로, TASK 01 §3.3)
 from schemas.response import SubjectQueryResponse
 
 def get_events_by_subject(companies: list[str], within_days: int) -> SubjectQueryResponse:
@@ -288,3 +288,8 @@ def save_node(state: dict) -> dict:
 - **경계 케이스**: 저장 payload 0건, `graph_batch` 비었음, backend 연결 실패(전 오퍼레이션), `within_days` 경계, news_id 리스트 빈 값, 대용량 payload 분할(`BACKEND_SAVE_BATCH_SIZE`) 시 순서·완전성.
 - **evals 연계**: 없음(통합 계약은 tests 레벨). 다만 저장→조회 왕복이 그래프 구축/질의 품질 evals의 전제이므로, 계약이 바뀌면 evals 픽스처(backend mock)도 갱신.
 - 이 문서는 여러 TASK의 인터페이스(05/06 Provider, 07 GraphBatch, 01 응답 스키마)를 **구현**하므로, backend 계약(api_contract.md)이나 그 인터페이스가 바뀌면 **해당 TASK와 함께** 수정한다(계약 소유는 각 TASK, 구현은 여기).
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `state["articles"]`·`graph_batch` / 조회 파라미터 | `SaveResponse` / Provider·`query_client` 응답(schemas) | `services/backend/client`(HTTP만) | SQL·Cypher·DB 드라이버, HTTP를 client 밖에서 | **쓰기=`ok=false` 정확 보고**, **읽기=degrade(`[]`/`None`)** (§4.2) |

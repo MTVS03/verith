@@ -3,7 +3,7 @@
 ## 0. 개요
 - **목적**: 배치 흐름의 네 번째 단계. 추출 노드까지 지난 분석 대상 기사에 대해, **KR-FinBert-SC 전용 모델**로 기사별 감성(긍정/중립/부정)을 판정하고 그 confidence를 남긴다. 결과를 `Article.sentiment`(`Sentiment` Enum)와 `Article.sentiment_score`(0~1)에 채운다. **감성은 LLM에게 시키지 않는다**(CLAUDE.md §2-4). LLM은 추출만, 감성은 전용 모델이 담당한다.
 - **선행 작업**: TASK 01(schemas: `Article.sentiment`/`sentiment_score`, `Sentiment` Enum), TASK 02(`crawl_status`/`content_available`, §4.1 본문 없는 기사 규칙), TASK 03(extract가 `content`·`crawl_status`·`content_available`를 갱신 — 감성 입력이 될 본문 확보 여부가 여기서 확정됨).
-  - ⚠️ **TASK 01 동반 수정 필요**: 이 문서 §3.2·§4는 감성 결과 모델 `SentimentResult`를 **`services/`의 dataclass가 아니라 `schemas/`의 Pydantic 모델로 승격**할 것을 요구한다(`schemas/article.py`에 추가). 계약(schema)이므로 TASK 01부터 고치고 이 문서를 따른다.
+  - ✅ **TASK 01에 반영됨**: 감성 결과 모델 `SentimentResult`는 이제 TASK 01 `schemas/article.py`에 Pydantic 모델로 정의되어 있다(services dataclass 아님). 이 문서는 그 계약을 import·반환한다(별도 동반 수정 불필요).
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — 감성 모델 설정(모델명·디바이스·배치 크기·입력 상한·(원격 추론 시) 타임아웃·재시도·라벨 매핑). 하드코딩 금지의 귀착점.
   - `schemas/article.py`(발췌 추가 — ⚠️ TASK 01) — `SentimentResult` Pydantic 모델(`sentiment` + `score`=confidence). 감성 결과 계약을 schemas에 두어 서비스·노드·테스트가 같은 모델을 공유한다.
@@ -102,7 +102,7 @@ FINBERT_LABEL_MAP: dict[str, str] = {
 ```
 
 ```python
-# schemas/article.py (발췌 — ⚠️ TASK 01에서 확정할 스키마 승격. 여기서는 계약만 표시)
+# schemas/article.py (발췌 — TASK 01에 정의됨. 여기서는 계약 재확인)
 from __future__ import annotations
 from pydantic import BaseModel
 
@@ -203,3 +203,8 @@ def sentiment_node(state: dict) -> dict:
 - **경계 케이스**: 본문 길이 = `FINBERT_MAX_INPUT_CHARS` 경계, 전 기사 `no_content`(전부 skip → 감성 0건), confidence 경계값(0.0/1.0).
 - **evals 연계**: 감성 품질(정답 대비 정확도·F1)은 이후 `evals/` 축에서 정답셋 대조로 다룬다(모델 없이 결정적 채점, model_choice §5). 여기서는 tests 레벨(매핑·분기·계약) 검증.
 - 후속 TASK(06 importance의 감성 절대값, 09 리포트 게이지)가 `Article.sentiment`/`sentiment_score`를 재사용하므로, 필드 의미(Enum 3종·None=skip)를 바꾸면 TASK 01부터 함께 수정한다.
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `state["articles"]`(본문=`content`, summary 아님) | Article.`sentiment`(Enum)·`sentiment_score` | `services/finbert` | LLM 감성, DB, 게이지 집계 | 본문 없음(`no_content`/`failed`) skip→None, 배치 실패 개별 fallback |

@@ -3,7 +3,7 @@
 ## 0. 개요
 - **목적**: 배치 흐름의 세 번째 단계. 크롤 노드가 확정한 분석 대상 기사에 대해, **Qwen3가 Tool Calling(`fetch_article`)으로 필요한 본문만 가져와** 요약·개체·이벤트를 추출하고, 결과를 **`ExtractResult`(Pydantic)로 강제 파싱**한다. 기사당 **1회 호출**로 `{summary, companies, people, industries, events, countries, keywords, event_date}`를 반환한다(항목별 호출 안 함). `events`는 문자열이 아니라 **`EventCandidate`(title+confidence) 리스트**다(§3.2·§4). **감성·영향도는 뽑지 않는다**(감성=KR-FinBert, 영향도=importance).
 - **선행 작업**: TASK 01(schemas: `ExtractResult`, `Article`, `source_type`, `CrawlStatus`), TASK 02(`services/crawler.fetch_content` 계약, `Article` 메타데이터, `nodes/crawl.py`).
-  - ⚠️ **TASK 01 동반 수정 필요**: 이 문서의 §3.2·§4가 요구하는 스키마 변경 — `source_type` Enum 3종(`article`/`rss_summary`/`title_only`), `ExtractResult.event_date` 추가, `events: list[EventCandidate]`(신규 모델) — 은 `schemas/article.py`에 반영되어야 한다. 계약 변경이므로 TASK 01부터 고치고 이 문서를 따른다.
+  - ✅ **TASK 01에 반영됨**: `source_type` Enum 3종(`article`/`rss_summary`/`title_only`), `ExtractResult.event_date`, `events: list[EventCandidate]`, `EventCandidate` 모델은 이제 TASK 01 `schemas/article.py`에 통합되어 있다(별도 동반 수정 불필요). 이 문서는 그 계약을 소비·구현한다.
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — LLM 설정(모델명·엔드포인트·temperature·max_tokens·타임아웃·재시도·Tool 루프 상한·본문 입력 상한·추출 프롬프트). 하드코딩 금지의 귀착점.
   - `services/llm.py` — Qwen3 클라이언트 + `extract()` + `fetch_article(url)` **Tool 정의·등록·Tool Calling 루프** + `ExtractResult` 파싱. (무거운 로직은 여기, CLAUDE.md §2-2)
@@ -53,7 +53,7 @@
 6. **추출 프롬프트**: `EXTRACT_SYSTEM_PROMPT`(추출 지시 + 출력 스키마 설명). 프롬프트에서 **감성·영향도를 요청하지 않는다**. 하드코딩 금지 원칙에 따라 코드가 아니라 config(또는 별도 프롬프트 상수)에서 읽는다.
 
 ### 3.2 `services/llm.py` — Qwen3 추출 서비스
-> **주(Tool 위치)**: TASK 02는 Tool을 "extract.py에서만 호출"이라 표현했다. 여기서 "extract.py"는 **extract 단계의 LLM 서비스(`services/llm.py`)**를 가리킨다. CLAUDE.md §2-2(로직은 services, nodes는 얇게)에 따라 Tool 정의·등록·Tool Calling 루프를 `services/llm.py`에 둔다.
+> **주(Tool 위치)**: TASK 02 §4.2 계약대로, `fetch_article` Tool 정의·등록·Tool Calling 루프는 **extract 단계의 `services/llm.py`에만** 둔다(CLAUDE.md §2-2: 로직은 services, nodes는 얇게). `nodes/extract.py`·다른 노드는 Tool도 `services/crawler.py`도 직접 부르지 않는다.
 
 > **⚠️ Tool 경계 규칙 (아키텍처 규칙 — 반드시 지킴)**
 > - `services/crawler.py`에 접근하는 **유일한 경로**는 `services/llm.py` 내부의 `fetch_article` Tool이다.
@@ -120,7 +120,7 @@ EXTRACT_SYSTEM_PROMPT: str = "..."       # 추출 지시 + 출력 스키마. 감
 ```
 
 ```python
-# schemas/article.py (발췌 — ⚠️ TASK 01에서 확정할 스키마 변경. 여기서는 계약만 표시)
+# schemas/article.py (발췌 — TASK 01에 정의됨. 여기서는 계약 재확인)
 from __future__ import annotations
 from datetime import datetime
 from enum import Enum
@@ -227,3 +227,8 @@ def extract_node(state: dict) -> dict:
 - **경계 케이스**: 분석 대상 0건, 매우 긴 본문(`EXTRACT_CONTENT_MAX_CHARS` 초과 → 잘림), Tool 미호출(제목만) 경로.
 - **evals 연계**: 추출 품질(요약·개체 정확도)은 이후 `evals/` 축에서 정답셋 대조로 다룬다. 여기서는 tests 레벨(계약·파싱·분기) 검증.
 - 후속 TASK(05 병합·07 그래프·08 저장)가 `ExtractResult`를 재사용하므로, 필드·`source_type` 의미를 바꾸면 TASK 01부터 함께 수정한다.
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `state["articles"]` | `state["extracts_by_url"]` + Article(`summary`·`crawl_status`·`content` 갱신) | `services/llm`(Qwen3)·(내부 Tool)`crawler` | 감성·importance, DB, 노드에서 crawler 직접 import | ValidationError 1회 재시도 후 skip, 0건 통과 |

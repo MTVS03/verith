@@ -6,7 +6,7 @@
   - TASK 01(schemas: `Article.embedding`/`event_id`, `Event`(`canonical_id`/`canonical_title`/`importance`/`companies`), `MergeCandidate`, `MergeDecision`).
   - TASK 03(`ExtractResult`: `summary`·`companies`·`events: list[EventCandidate]`(title+confidence)·`event_date`. `state["extracts_by_url"]`로 기사와 짝지어 전달됨).
   - TASK 04(감성은 병합의 입력이 아니지만, 파이프라인상 sentiment 다음 단계다. `Article.sentiment`는 병합에 쓰지 않는다).
-  - ⚠️ **TASK 01 동반 수정 필요**: 이 문서 §3.4·§4는 병합 후보 조회 결과를 담는 `CandidateEvent` 모델을 **`schemas/event.py`의 Pydantic 모델로 추가**할 것을 요구한다(서비스·백엔드 클라이언트·테스트가 같은 계약을 공유). 계약(schema)이므로 TASK 01부터 고치고 이 문서를 따른다.
+  - ✅ **TASK 01에 반영됨**: 병합 후보 조회 결과 `CandidateEvent`는 이제 TASK 01 `schemas/event.py`에 Pydantic 모델로 정의되어 있다(서비스·백엔드 클라이언트·테스트가 같은 계약 공유). 이 문서는 그 계약을 소비한다(별도 동반 수정 불필요).
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — 임베딩 설정(모델·디바이스·배치·입력 상한) + 병합 설정(가중치 0.6/0.3/0.1·임계값·후보 창(7일)·시간 감쇠). 하드코딩 금지의 귀착점.
   - `schemas/event.py`(발췌 추가 — ⚠️ TASK 01) — `CandidateEvent`(후보 이벤트 조회 결과: canonical_id·companies·대표 임베딩·event_time). 병합 후보 계약.
@@ -76,7 +76,8 @@
 
 ### 3.3 `utils/similarity.py` — 유사도·중복도·근접도 (순수 함수)
 1. **`cosine_similarity(a, b)`**: 두 벡터의 코사인 유사도(−1~1, 실무상 0~1로 clamp 가능). 네트워크·모델 호출 없음(순수 계산).
-2. **`company_overlap(a, b)`**: 두 회사 리스트의 중복도(0~1). **Jaccard**(`|A∩B| / |A∪B|`) 권장. **한쪽이라도 비어 있으면 0**(회사 일치를 확인할 수 없으므로 병합 신호로 인정하지 않음 — 다른 회사 사건 병합 방지, event_merge.md §3). 회사명 정규화(공백·표기 흔들림)는 최소한으로 하고 규칙은 주석에 남긴다.
+2. **`company_overlap(a, b)`**: 두 회사 리스트의 중복도(0~1). **Jaccard**(`|A∩B| / |A∪B|`) 권장. **한쪽이라도 비어 있으면 0**(회사 일치를 확인할 수 없으므로 병합 신호로 인정하지 않음 — 다른 회사 사건 병합 방지, event_merge.md §3).
+   - **회사명 정규화 = 공유 유틸 `normalize_entity_name`(결정적·최소)**: 앞뒤/중복 공백 정리 + `㈜`/`(주)`/`（주）` 제거. **이게 전부다** — 복잡한 별칭·오타 정규화(`삼전`→`삼성전자`)는 하지 않는다. 별칭→canonical 해석은 **질의측 Dictionary First**가 담당하고, 배치측 추출 회사명은 이미 표준형에 가깝다. TASK 07(그래프 Company 노드 key)이 **같은 함수**를 써 병합 신호와 노드 정체성이 갈리지 않게 한다.
 3. **`time_proximity(t1, t2)`**: 두 시각의 근접도(0~1). Δ가 커질수록 0에 수렴하는 감쇠(예: `exp(-Δdays / MERGE_TIME_DECAY_DAYS)`). **입력이 이벤트 발생 시점**임에 유의(§3.4). 한쪽이 `None`이면 시간 신호 없음으로 처리(0 또는 중립 — §3.4에서 규칙 확정).
 4. 세 함수 모두 입력→출력 순수 함수로 두어 병합 로직·테스트가 재사용한다.
 
@@ -140,7 +141,7 @@ MERGE_TIME_DECAY_DAYS: float = 7.0             # time_proximity 감쇠 스케일
 ```
 
 ```python
-# schemas/event.py (발췌 — ⚠️ TASK 01에서 확정할 스키마 추가. 여기서는 계약만 표시)
+# schemas/event.py (발췌 — TASK 01에 정의됨. 여기서는 계약 재확인)
 from __future__ import annotations
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -313,3 +314,8 @@ def merge_event_node(state: dict, provider=None) -> dict:
 - **경계 케이스**: 후보 0건, 임계값 경계값, 회사 리스트 빈 기사, event_date·published_at 모두 없음, 배치 내 동일 사건 다건.
 - **evals 연계**: 병합 품질(과병합/과분할: ARI·purity·과병합률)은 `evals/axes/event.py` + `evals/datasets/event_goldset.jsonl`로 정답셋 대조(모델 없이 결정적, event_merge.md §9). 여기 tests는 계약·점수·판정 분기 검증.
 - 후속 TASK(06 importance·07 그래프·08 저장)가 `Article.event_id`·`Event`·`RecentEventProvider`를 재사용하므로, 필드·인터페이스를 바꾸면 TASK 01부터 함께 수정한다.
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `state["articles"]`·`extracts_by_url` (+ 주입 `RecentEventProvider`) | Article.`embedding`·`event_id`, `state["events_by_id"]` | `services/embedder`·`event_merge`·`utils/similarity` | canonical LLM 생성, DB/backend 직접 호출 | 임계 미만→신규, 임베딩 없음 skip, provider 미주입=모두 신규 |

@@ -6,7 +6,7 @@
   - TASK 02(`services/rss.py`·`nodes/crawl.py`: 배치의 첫 단계. `config.RSS_CANDIDATES`·타임아웃·재시도. TASK 02 하위의존성에 "TASK 10 scheduler가 수집 트리거" 명시).
   - TASK 03~07(`nodes/extract.py`·`sentiment.py`·`embedding.py`·`merge_event.py`·`importance.py`·`graph.py`(graph_builder): 배치 파이프라인의 나머지 단계. 스케줄러는 이 노드들을 이은 **배치 파이프라인**을 invoke만 한다).
   - TASK 08(`services/backend/save_client.py`: `save_batch()`(배치 저장)·`request_cleanup()`(삭제 트리거). **TASK 08 §0 범위 밖에 "스케줄링(매시간 트리거)은 TASK 10. TASK 08은 저장·삭제 호출 함수를 제공하고, 언제 부를지는 스케줄러가 정한다" 명시**. cleanup의 호출 주체가 이 문서).
-  - `state.py`(배치 파이프라인이 쓰는 `state` 컨테이너. `run_batch_once`가 초기 `state`를 만들어 파이프라인에 넘긴다).
+  - **TASK 11**(`graph.py`·`state.py`: 배치 그래프 배선·상태 컨테이너). `run_batch_once`는 TASK 11의 **컴파일된 배치 앱**(`build_batch_graph`/`run_batch`)을 invoke하고, 초기 `state`(TASK 11 `BatchState`)를 만들어 넘긴다.
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — 스케줄 설정(주기·타임존·기동 즉시 실행·겹침 상한·misfire 유예). 하드코딩 금지의 귀착점. **주기·타임존은 운영 환경 튜닝 대상(주석 표기)**.
   - `scheduler/__init__.py` — 스케줄러 엔트리포인트 재노출(`start_all`/`run_batch_once`/`run_cleanup_once`).
@@ -14,7 +14,7 @@
   - `scheduler/cleanup_scheduler.py` — 삭제 스케줄러: `run_cleanup_once()`(`save_client.request_cleanup()` 호출) + `start_cleanup_scheduler()`(주기 반복 트리거).
   - (선택) `scheduler/runner.py`(또는 `__main__`) — 두 스케줄러를 함께 기동하고 graceful shutdown을 처리하는 프로세스 엔트리포인트.
 - **범위 밖(주의)**:
-  - **실제 수집·크롤링·추출·감성·임베딩·병합·중요도·그래프 조립·저장 로직은 배치 파이프라인(TASK 02~08)**. 스케줄러는 그 파이프라인을 **invoke만** 하고, 노드 안으로 로직을 끌어오지 않는다(절대규칙 2). 배치 노드 배선(LangGraph 조립) 자체는 배치 그래프(별도, 노드 소유 TASK) — 스케줄러는 **조립된 배치 앱/러너를 부른다**.
+  - **실제 수집·크롤링·추출·감성·임베딩·병합·중요도·그래프 조립·저장 로직은 배치 파이프라인(TASK 02~08)**. 스케줄러는 그 파이프라인을 **invoke만** 하고, 노드 안으로 로직을 끌어오지 않는다(절대규칙 2). 배치 노드 배선(LangGraph 조립)·상태 컨테이너는 **TASK 11(`graph.py`·`state.py`)** 소유 — 스케줄러는 **TASK 11이 조립한 배치 앱/러너를 부른다**.
   - **실제 삭제(168h 경과 판정·CASCADE·고아 Keyword/Person/Country 정리·Company 유지)는 backend**(SCHEMA_SPEC §5, erd.dbml 삭제 규칙). 스케줄러는 `request_cleanup()`으로 **타이밍만** 준다. 삭제 SQL/Cypher를 이 에이전트가 쓰지 않는다(절대규칙 1).
   - **DB 직접 접근 없음.** 저장은 `nodes/save.py`→`save_client.save_batch`(backend HTTP), 삭제는 `save_client.request_cleanup`(backend HTTP). 스케줄러 어디에도 SQL·Cypher·DB 드라이버·직접 HTTP-to-DB가 없다(절대규칙 1).
   - **질의(리포트) 흐름은 사용자 요청 시(graph.py→Supervisor, TASK 09)** 실행되며 스케줄과 무관하다. 스케줄러는 **배치·삭제**만 돌린다(리포트는 저장된 데이터를 읽기만, sequence §2).
@@ -63,7 +63,7 @@
 ### 3.2 `scheduler/rss_scheduler.py` — 배치 스케줄러
 > 매시간 배치 한 pass를 실행하는 트리거. 파이프라인 로직은 nodes/services(TASK 02~08). 스케줄러는 타이밍·겹침·예외 격리만.
 
-1. **`run_batch_once() -> BatchRunResult`**: 초기 `state`를 만들어 **배치 파이프라인을 한 번 invoke**한다. 파이프라인 순서는 CLAUDE.md §3: `crawl → extract → sentiment → embedding → merge_event → importance → graph → save`. 노드 배선(LangGraph 조립)은 배치 그래프(별도) — 여기서는 **조립된 배치 앱/러너를 부른다**. 결과(저장 건수·`SaveResponse.ok`)를 **로깅**하고 반환한다.
+1. **`run_batch_once() -> BatchRunResult`**: 초기 `state`를 만들어 **배치 파이프라인을 한 번 invoke**한다. 파이프라인 순서는 CLAUDE.md §3: `crawl → extract → sentiment → embedding → merge_event → importance → graph → save`. 노드 배선(LangGraph 조립)은 배치 그래프(TASK 11) — 여기서는 **TASK 11이 조립한 배치 앱/러너를 부른다**. 결과(저장 건수·`SaveResponse.ok`)를 **로깅**하고 반환한다.
    - **예외 격리**: 파이프라인 중 한 단계가 예외를 던져도 **`run_batch_once`가 삼켜 로깅**하고(스케줄러 루프 보호) 실패를 결과에 정확히 담는다(성공 위장 금지, §2-5). 개별 기사 실패 skip·저장 실패 `ok=False`는 각 노드(TASK 02~08)가 이미 처리하므로, 여기서는 파이프라인 전체를 감싸는 최후 방어만 둔다.
    - **대상 0건**: 수집 0건이면 예외 없이 통과(환각 금지: 없으면 없는 대로, TASK 02 §3.6). backend를 굳이 부르지 않아도 되는 처리는 각 노드가 담당.
 2. **`start_rss_scheduler()`**: `BATCH_INTERVAL_MINUTES`·`SCHEDULER_TIMEZONE`으로 `run_batch_once`를 **주기 반복 등록**한다. **겹침 방지**: `BATCH_MAX_INSTANCES=1`(이전 실행 미완료면 이번 주기 skip)·`BATCH_MISFIRE_GRACE_SEC`. `BATCH_RUN_ON_START`면 등록 직후 1회 실행. 스케줄링 라이브러리(APScheduler 등) import는 **이 함수에만** 가둔다(§2 격리).
@@ -207,3 +207,8 @@ def start_all():
 - **경계 케이스**: 이전 배치 미완료 중 다음 트리거(skip), 파이프라인 중간 예외, 저장/삭제 `ok=False`, 수집 0건, misfire(유예 초과), graceful shutdown 중 진행 배치 완료 대기, 타임존 변경 시 트리거 시각.
 - **evals 연계**: 없음(스케줄링은 tests 레벨 계약). 다만 배치가 도는 주기·성공률이 그래프 구축/질의 품질 evals의 데이터 신선도 전제이므로, 주기·실패 정책이 바뀌면 픽스처 가정도 갱신.
 - 이 문서는 배치 파이프라인(TASK 02~07)과 저장·삭제(TASK 08)를 **트리거**하므로, 파이프라인 노드 계약이나 `save_client`(`save_batch`/`request_cleanup`) 계약이 바뀌면 함께 수정한다(로직 소유는 각 TASK, 실행 타이밍은 여기).
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| 스케줄 트리거(주기·타임존) | `BatchRunResult`/`CleanupResponse`(로깅) | TASK 11 배치 앱(invoke)·`save_client.request_cleanup` | 파이프라인 로직 복제, DB·삭제 판정, HTTP 직접 | 예외 격리 로깅, 겹침·misfire skip, **다음 주기 재시도** |

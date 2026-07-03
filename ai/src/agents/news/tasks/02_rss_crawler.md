@@ -223,7 +223,7 @@ def fetch_article(url: str) -> dict:
 - **감성 분석 입력**(TASK 04 연계, 여기서는 계약만 명시): KR-FinBert는 **기사 본문 전체**를 입력으로 쓴다. 본문이 없으면(`no_content`) 제목만으로 감성을 추론하지 않고 감성 분석을 **수행하지 않거나 정책에 따라 Skip**한다. 그래서 `crawl_status`를 후속 노드가 반드시 참조할 수 있도록 정확히 기록해야 한다.
 
 ### 4.2 Tool Calling 책임 분리 (변경사항 §6)
-- Tool(`fetch_article`)은 **`extract.py`에서만** 호출한다(TASK 03). 다른 노드는 Tool도 `crawler.py`도 직접 호출하지 않는다.
+- Tool(`fetch_article`)은 **extract 단계의 `services/llm.py`에서만** 호출한다(TASK 03 §3.2). 다른 노드는 Tool도 `crawler.py`도 직접 호출하지 않는다.
 - Tool은 기사 URL **하나**를 입력받아 기사 **본문만** 반환한다(단일 책임).
 - Tool 내부에서는 `services/crawler.py`를 사용한다.
 - 이 분리를 코드 위치·import 방향으로 강제한다: `nodes/crawl.py`는 `services/crawler.py`를 import 하지 않는다.
@@ -261,3 +261,8 @@ def fetch_article(url: str) -> dict:
 - **경계 케이스**: RSS 0건, 날짜 파싱 실패(→None), 중복 URL 다수, 본문 길이 = `MIN_CONTENT_LEN` 경계.
 - **evals 연계**: 없음(수집·크롤링은 tests 레벨 검증). 추출·감성 품질은 이후 evals 축에서 다룬다.
 - 후속 TASK(03 extract의 `fetch_article` Tool)가 `crawler.fetch_content` 계약을 재사용하므로, 반환 타입·상태 매핑을 바꾸면 여기부터 수정한다.
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `config.RSS_CANDIDATES` | `state["articles"]`(메타만, `crawl_status="pending"`) | `services/rss`·`utils/rss_parser`·`html_parser` | 노드에서 crawler 직접 크롤·DB·저장 | 피드 단위 실패 skip, 0건이면 빈 리스트 |

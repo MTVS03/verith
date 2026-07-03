@@ -1,4 +1,4 @@
-# TASK 07 — 지식그래프 조립 (schemas/graph.py · services/graph_builder.py · nodes/graph.py)
+# TASK 07 — 지식그래프 조립 (schemas/graph.py · services/graph_builder.py · nodes/graph_builder.py)
 
 ## 0. 개요
 - **목적**: 배치 흐름의 여덟 번째 단계. importance(TASK 06)까지 끝나 각 기사에 `Article.event_id`가 배정되고 이벤트마다 `importance`가 매겨진 뒤, **이번 배치의 기사·이벤트·개체를 Neo4j 지식그래프의 노드·관계 구조로 조립**한다. 산출물은 backend가 저장할 수 있는 **in-memory 그래프 payload(`GraphBatch`)** 하나이며, `state["graph_batch"]`로 저장 단계(TASK 08)에 넘긴다. 그래프 중심 노드는 **Event**이고, 관계는 erd.dbml/SCHEMA_SPEC §3 그대로 `(Company)-[:PARTICIPATES_IN]->(Event)`, `(Event)-[:HAS_NEWS|HAS_KEYWORD|MENTIONS|ABOUT]->(…)` 이다. **이 단계는 그래프를 "조립"만 하고 "저장"하지 않는다** — 실제 Neo4j MERGE/쓰기는 TASK 08이 backend HTTP로 수행한다(절대규칙 1).
@@ -11,7 +11,7 @@
   - `config.py`(발췌 추가) — 그래프 조립 옵션(3차 보류 관계 토글: `GRAPH_ENABLE_BELONGS_TO`/`GRAPH_ENABLE_RELATED_TO`(기본 `False`, pipeline_spec §12) + NewsRef 참조 키 방식). 하드코딩 금지의 귀착점.
   - `schemas/graph.py`(**신규** — TASK 07 소유) — Neo4j 노드/관계 Pydantic 모델(`NodeLabel`·`RelType` Enum, `GraphNode`·`GraphRelationship`·`GraphBatch`). backend 저장 계약(payload)이자 조립 결과.
   - `services/graph_builder.py` — 순수 조립: event별 서브그래프 생성(`build_event_subgraph`) + 배치 전체 조립(`build_graph_batch`) + 노드 dedup. LLM·DB 없음.
-  - `nodes/graph.py` — 얇은 노드: `event_id`가 배정된 기사를 이벤트별로 묶어 `build_graph_batch`를 호출하고 `state["graph_batch"]`에 실는다.
+  - `nodes/graph_builder.py` — 얇은 노드: `event_id`가 배정된 기사를 이벤트별로 묶어 `build_graph_batch`를 호출하고 `state["graph_batch"]`에 실는다.
 - **범위 밖(주의)**:
   - **실제 Neo4j 저장(MERGE/CREATE)은 TASK 08**. 여기서는 backend가 upsert할 수 있는 payload(`GraphBatch`)만 만든다. Cypher·드라이버·backend HTTP를 이 단계에서 직접 부르지 않는다(절대규칙 1).
   - **기존 그래프 조회·병합은 backend(TASK 08)**. 그래프 빌더는 기존 그래프를 읽지 않는다. 이번 배치가 **추가/갱신할 노드·관계만** 기술하고, 기존과의 합치기는 backend가 **MERGE(upsert)** 로 처리한다(증분, event_merge §7 정신). 즉 이 단계는 "이번 배치 델타"만 만든다.
@@ -45,7 +45,7 @@
 | `Person` | 인물명 | `ExtractResult.people` | `name` | |
 | `Country` | 국가명 | `ExtractResult.countries` | `name` | |
 | `Sector` | 산업명 | `ExtractResult.industries` | `name` | **3차·보류**(BELONGS_TO off면 미생성) |
-| `NewsRef` | `url`(1차 중복차단 UNIQUE 키) | `Article.url` | `url`·(선택)`published_at` | **news_id는 backend가 저장 시 url로 해소**(§2) |
+| `NewsRef` | `str(url)`(1차 중복차단 UNIQUE 키) | `Article.url`(HttpUrl→str) | `url`·(선택)`published_at` | **news_id는 backend가 저장 시 url로 해소**(§2) |
 
 **관계 정체성 (`type` + start 노드 정체성 + end 노드 정체성 으로 MERGE)**
 
@@ -60,7 +60,7 @@
 | `RELATED_TO` | (`Company`, 회사명) | (`Company`, 회사명) | `(type, start, end)` — **3차·보류** |
 
 - **관계는 식별 property가 없다**: 위 관계들은 방향·양끝 노드만으로 유일하다. 그래서 정체성 = **`(type, start_label, start_key, end_label, end_key)`** 이며, 같은 삼중쌍은 MERGE로 항상 1개로 수렴한다(배치 내 dedup도 이 키로 한다). 관계에 property를 추가하려면 이 표부터 갱신한다.
-- **key는 안정적이어야 한다**: Event는 UUID(TASK 05 부여)라 배치·재실행에도 불변. 개체는 이름이 곧 key이므로 **이름 정규화 규칙이 곧 정체성**이다 — 정규화가 흔들리면 같은 회사가 다른 노드로 갈라진다. 그래서 정규화는 최소·결정적으로 두고 규칙을 `services/graph_builder.py` 주석에 명시한다.
+- **key는 안정적이어야 한다**: Event는 UUID(TASK 05 부여)라 배치·재실행에도 불변. 개체는 이름이 곧 key이므로 **이름 정규화 규칙이 곧 정체성**이다 — 정규화가 흔들리면 같은 회사가 다른 노드로 갈라진다. 그래서 정규화는 **TASK 05 `company_overlap`과 동일한 공유 유틸 `normalize_entity_name`(결정적·최소: 앞뒤/중복 공백 정리 + `㈜`/`(주)`/`（주）` 제거)** 로 통일한다. 복잡한 별칭·오타 canonical(`삼전`→`삼성전자`)은 질의측 Dictionary First가 담당하고, 그래프 빌더는 이 최소 정규화만 한다(같은 함수를 05·07이 공유해 병합 신호와 노드 key가 어긋나지 않게).
 - **NewsRef만 2단계 정체성**: 그래프 빌드 시점 key=`url`, 저장 후 backend가 `news_id`로 해소한다(§2). 질의(HAS_NEWS로 근거 기사 추적)는 backend가 해소한 news_id를 쓴다. url↔news_id 매핑 계약은 TASK 08에서 확정한다.
 
 ## 1. 참고 문서
@@ -114,7 +114,7 @@
    - **인물** → `Person` 노드 + `(Event)-[:MENTIONS]->(Person)`.
    - **국가** → `Country` 노드 + `(Event)-[:ABOUT]->(Country)`.
    - 각 개체는 **member 기사 union**으로 모으고 이름 기준 distinct(같은 회사가 이벤트 내 여러 기사에 나와도 관계 1개). 빈/공백 이름은 제외(환각 금지). `BELONGS_TO`·`RELATED_TO`는 config 토글이 켜진 경우에만(기본 미생성).
-3. **`news_nodes_and_rels(event_id, articles) -> tuple[list[GraphNode], list[GraphRelationship]]`**: 그 이벤트 기사마다 `NewsRef` 노드(`key=url`, `properties={url, (선택)published_at}`) + `(Event)-[:HAS_NEWS]->(NewsRef)`. **본문·요약·감성은 넣지 않는다**(PostgreSQL 소유). news_id는 저장 시 backend 해소(§2).
+3. **`news_nodes_and_rels(event_id, articles) -> tuple[list[GraphNode], list[GraphRelationship]]`**: 그 이벤트 기사마다 `NewsRef` 노드(`key=str(article.url)` — `Article.url`이 `HttpUrl`이므로 **문자열로 변환해** 키·property 일관 유지, `properties={url, (선택)published_at}`) + `(Event)-[:HAS_NEWS]->(NewsRef)`. **본문·요약·감성은 넣지 않는다**(PostgreSQL 소유). news_id는 저장 시 backend 해소(§2).
 4. **`build_event_subgraph(event_id, event, articles, importance) -> tuple[list[GraphNode], list[GraphRelationship]]`**: 위 셋을 합쳐 한 이벤트의 노드·관계를 만든다.
 5. **`build_graph_batch(articles, extracts_by_url, events_by_id, importance_by_event_id) -> GraphBatch`**:
    - `event_id`가 배정된 기사만 대상(병합 통과, TASK 05). **이벤트별로 묶어** 각 이벤트에 `build_event_subgraph`.
@@ -123,7 +123,7 @@
    - 반환은 `GraphBatch(nodes, relationships)`.
 6. **부수효과·판정 없음**: 저장·DB·모델 호출 없음(CLAUDE.md §2-1). 감성·importance·병합을 여기서 계산하지 않는다(소비만). `state` 갱신은 노드가 한다.
 
-### 3.4 `nodes/graph.py` — 그래프 노드 (얇게)
+### 3.4 `nodes/graph_builder.py` — 그래프 노드 (얇게)
 1. `state["articles"]` 중 **`event_id`가 배정된 기사**(= 병합 통과)를 대상으로, `state["extracts_by_url"]`·`state["events_by_id"]`·`state["importance_by_event_id"]`를 넘겨 `graph_builder.build_graph_batch`를 호출한다. 노드는 순서만 담당하는 얇은 껍데기(CLAUDE.md §2-2).
 2. **결과 반영**: `state["graph_batch"] = batch`(TASK 08이 backend로 MERGE 저장). 노드는 backend를 직접 호출하지 않는다(절대규칙 1).
 3. **편입 이벤트 처리**: 이번 배치 기사들의 `event_id` 중 `events_by_id`에 없는 것(편입)도 그래프 델타에 포함된다(§3.3-5). 노드는 이를 걸러내지 않는다(HAS_NEWS·개체 관계가 기존 이벤트에도 붙어야 함).
@@ -233,7 +233,7 @@ def build_graph_batch(
 ```
 
 ```python
-# nodes/graph.py — 얇은 그래프 노드
+# nodes/graph_builder.py — 얇은 그래프 노드
 # ⚠️ backend를 직접 호출하지 않는다(payload만 만든다). 조립 로직은 services에.
 from __future__ import annotations
 import services.graph_builder as graph_builder
@@ -281,7 +281,7 @@ def graph_node(state: dict) -> dict:
 - [ ] 개체가 **member 기사 union·이름 distinct**로 모임(같은 회사 중복 기사→관계 1개). 빈/공백 이름 제외. `BELONGS_TO`/`RELATED_TO`는 config 토글 off면 **미생성**.
 - [ ] `build_graph_batch`가 배치 전체 노드 `(label,key)`·관계 `(type,start_key,end_key)`로 **dedup**하고 **정렬 방출**(결정성: 같은 입력→같은 GraphBatch). 난수·시간·LLM·UUID 생성 없음.
 - [ ] **그래프 조립에 LLM·backend·DB를 호출하지 않음**(순수 매핑, 절대규칙 1). 감성·importance·병합을 재계산하지 않고 소비만 함.
-- [ ] `nodes/graph.py`가 `event_id` 배정 기사를 `build_graph_batch`로 조립해 `state["graph_batch"]`에 실음. services만 호출.
+- [ ] `nodes/graph_builder.py`가 `event_id` 배정 기사를 `build_graph_batch`로 조립해 `state["graph_batch"]`에 실음. services만 호출.
 - [ ] 편입(기존) 이벤트도 델타에 포함(HAS_NEWS·개체 관계가 기존 이벤트에 붙음). 한 이벤트 실패 시 로깅 후 skip, 나머지 계속. 대상 0건이면 **빈 GraphBatch**로 예외 없이 통과.
 
 ## 7. 테스트
@@ -301,3 +301,8 @@ def graph_node(state: dict) -> dict:
 - **경계 케이스**: event_id 배정 기사 0건, 이벤트 1개에 기사 1건, 개체 전부 빈 리스트, 편입 이벤트만, 한 배치에 여러 이벤트가 회사 공유, `importance_by_event_id`에 값 없음(None property).
 - **evals 연계**: 그래프 구축 품질(노드·관계 정확도·과연결/누락)은 이후 `evals/`의 그래프 축에서 정답셋 대조로 다룬다(모델 없이 결정적 채점). 여기 tests는 매핑·방향·dedup·계약 검증.
 - 후속 TASK(08 저장)가 `GraphBatch`·`NodeLabel`/`RelType`·NewsRef url 키 규약을 재사용하므로, 노드/관계 계약을 바꾸면 `schemas/graph.py`부터 함께 수정한다(그리고 erd.dbml/SCHEMA_SPEC §3과 정합 유지).
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `state["articles"]`·`extracts_by_url`·`events_by_id`·`importance_by_event_id` | `state["graph_batch"]`(`GraphBatch` 델타) | `services/graph_builder`(순수 매핑) | LLM, backend/DB, 감성 판정, UUID 생성 | 이벤트별 실패 skip, 0건이면 빈 `GraphBatch` |

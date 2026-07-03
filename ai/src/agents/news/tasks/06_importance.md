@@ -6,7 +6,7 @@
   - TASK 01(schemas: `Event.importance`(`float | None`), `Article.publisher`·`Article.sentiment`(`Sentiment` Enum)·`Article.sentiment_score`·`Article.event_id`).
   - TASK 04(`Article.sentiment`/`sentiment_score` 채움. **본문 없으면 `sentiment=None` → 집계 제외** 규칙, §4.1).
   - TASK 05(`Article.event_id` 배정 + 이번 배치 `Event`를 `state["events_by_id"]`에 등록. importance는 여기서 만든 이벤트에 점수를 부여).
-  - ⚠️ **TASK 01 동반 수정 필요**: 이 문서 §3.3·§4는 **기존 이벤트의 누적 기사 통계**를 담는 `EventArticleStats` 모델을 **`schemas/event.py`의 Pydantic 모델로 추가**할 것을 요구한다(서비스·백엔드 클라이언트·테스트가 같은 계약을 공유). 계약(schema)이므로 TASK 01부터 고치고 이 문서를 따른다. (반면 `Event.importance` **필드 자체는 TASK 01에 이미 존재**하므로 그 필드는 새로 만들지 않는다.)
+  - ✅ **TASK 01에 반영됨**: **기존 이벤트의 누적 기사 통계** `EventArticleStats`는 이제 TASK 01 `schemas/event.py`에 정의되어 있다(서비스·백엔드 클라이언트·테스트가 같은 계약 공유). 이 문서는 그 계약을 소비한다(별도 동반 수정 불필요). (`Event.importance` 필드도 TASK 01에 이미 존재.)
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — importance 설정(세 신호 가중치 + **언론사 가중치 테이블**(⚠️ 미확정, CLAUDE.md §8) + 미등록 언론사 기본값 + 기사 수 감쇠 옵션). 하드코딩 금지의 귀착점.
   - `schemas/event.py`(발췌 추가 — ⚠️ TASK 01) — `EventArticleStats`(기존 이벤트의 누적 통계: article_count·publishers·감성 강도 합). 전체 재계산의 조회 계약.
@@ -61,6 +61,7 @@
 ### 3.1 `config.py` — importance 설정 (하드코딩 금지)
 1. **세 신호 가중치**: `IMPORTANCE_W_VOLUME`, `IMPORTANCE_W_PUBLISHER`, `IMPORTANCE_W_SENTIMENT`. 계수는 임시값(실데이터 튜닝, pipeline_spec §9). 세 신호의 하위 점수는 서로 크기 스케일이 다를 수 있으므로, 각 하위 점수를 비슷한 범위로 정규화하거나(권장) 가중치로 스케일을 흡수한다(주석으로 튜닝 대상 표기).
 2. **언론사 가중치 테이블**: `IMPORTANCE_PUBLISHER_WEIGHTS: dict[str, float]` — 언론사명 → 가중치. **⚠️ 미확정(CLAUDE.md §8) → 임시값**임을 주석으로 명시. 키는 `RSS_CANDIDATES`(CLAUDE.md §5)의 언론사명과 정합을 맞춘다(표기 흔들림 주의).
+   - **확정 전 운용 정책(default-only)**: 표가 확정되기 전에는 `IMPORTANCE_PUBLISHER_WEIGHTS`를 **비우고 전 매체를 `IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT`로** 운용해도 된다(언론사 항이 상수화 → 랭킹은 volume·감성이 결정). **임의값을 "확정값"처럼 굳히지 않는다** — 실데이터로 확정될 때 표를 채운다.
 3. **미등록 언론사 기본값**: `IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT` — 테이블에 없는 언론사(또는 `publisher=None`)의 기본 가중치. 누락돼도 계산이 죽지 않게(방어값).
 4. **기사 수 변환 방식**: `IMPORTANCE_VOLUME_MODE: str`(예: `"log1p"` | `"sqrt"` | `"linear"`). bool 토글이 아니라 **문자열 모드**로 둔다 — 나중에 `log1p`·`sqrt`·`linear` 등을 실험할 여지가 크므로 값 하나로 감쇠 함수를 갈아끼울 수 있게 한다. 기본은 `"log1p"`(근접 중복 홍수가 순위를 독점하지 못하게, §2). 변환은 `services/importance.py`가 이 모드에 따라 선택하고, 미지원 값이면 로깅 후 기본 모드로 폴백한다. 튜닝/실험 대상.
 
@@ -123,7 +124,7 @@ IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT: float = 0.5   # 테이블에 없는 언론�
 ```
 
 ```python
-# schemas/event.py (발췌 — ⚠️ TASK 01에서 확정할 스키마 추가. 여기서는 계약만 표시)
+# schemas/event.py (발췌 — TASK 01에 정의됨. 여기서는 계약 재확인)
 from __future__ import annotations
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -245,3 +246,8 @@ def importance_node(state: dict, provider=None) -> dict:
 - **경계 케이스**: 이벤트 기사 1건, 전 기사 `sentiment=None`, `publisher=None`, 미등록 언론사, `existing` 있음/없음, 배치 내 여러 이벤트.
 - **evals 연계**: 중요도 품질(랭킹 상관 등)은 이후 `evals/` 축에서 정답셋 대조로 다룬다(모델 없이 결정적 채점). 여기 tests는 공식·신호·분기·합산 검증.
 - 후속 TASK(07 그래프·08 저장·09 리포트 정렬)가 `Event.importance`·`state["importance_by_event_id"]`·`EventArticleStatsProvider`를 재사용하므로, 필드·인터페이스를 바꾸면 TASK 01부터 함께 수정한다.
+
+## 8. 구현 계약 요약 (I/O)
+| 입력 | 출력 | 호출 가능 | 호출 금지 | 실패 시 |
+|---|---|---|---|---|
+| `event_id` 배정 기사 (+ 주입 `EventArticleStatsProvider`) | `state["importance_by_event_id"]`, 신규 Event.`importance` | `services/importance`(순수 계산) | LLM, 감성 재판정, DB/backend 직접 | 이벤트별 실패 skip, provider 미주입=배치만 근사 |
