@@ -11,11 +11,10 @@ sequenceDiagram
   participant SV as services
   participant BE as backend(:8000)
   SCH->>N: 매시간 트리거
-  N->>SV: rss.py 뉴스 목록 수집
+  N->>SV: rss.py 뉴스 목록 수집·중복제거 (메타데이터만)
   SV-->>N: 기사 링크·제목
-  N->>SV: crawler.py 본문 크롤링
-  SV-->>N: 본문 (실패 시 skip)
-  N->>SV: llm.py 추출 (Pydantic)
+  N->>SV: llm.py 추출 (Qwen3, Pydantic)
+  SV->>SV: fetch_article Tool → crawler.py 본문 온디맨드 (실패 시 skip)
   SV-->>N: summary·개체·이벤트
   N->>SV: finbert.py 감성
   SV-->>N: 긍/중/부
@@ -25,6 +24,8 @@ sequenceDiagram
   SV-->>N: 이벤트 배정 (편입 or 신규)
   N->>SV: importance.py 중요도
   SV-->>N: importance 점수
+  N->>SV: graph_builder.py 그래프 조립(GraphBatch)
+  SV-->>N: 노드·관계 델타
   N->>SV: save_client.py 저장 요청
   SV->>BE: [HTTP] 뉴스·이벤트 저장
   BE-->>SV: 저장 완료
@@ -42,7 +43,7 @@ sequenceDiagram
   participant BE as backend(:8000)
   U->>G: 질문/종목 입력
   G->>N: query 노드
-  N->>SV: query_understanding.py ① 질문이해(Qwen3→Pydantic)
+  N->>SV: query_understanding.py ① 질문이해(사전 매칭→Qwen3 보완→그래프 검증)
   SV-->>N: companies·period·intent
   N->>SV: graph_query.py ② 그래프 탐색 설계(single/multi-hop)
   SV->>BE: [HTTP] Neo4j 순회(관련 이벤트·관계)

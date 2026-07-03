@@ -34,9 +34,10 @@
 
 ### 배치 흐름 (매시간, 백그라운드)
 ```
-scheduler → crawl → extract → sentiment → embedding → merge_event → importance → save
+scheduler → crawl(RSS 수집·중복제거) → extract(Qwen3, fetch_article Tool로 본문 온디맨드)
+  → sentiment → embedding → merge_event → importance → graph → save
 ```
-데이터를 수집·분석해 backend에 저장. HTML은 만들지 않는다.
+데이터를 수집·분석해 backend에 저장. HTML은 만들지 않는다. 본문은 일괄 크롤이 아니라 extract의 Tool Calling으로 필요한 기사만 가져온다(TASK 02·03).
 
 ### 질의(리포트) 흐름 (사용자 요청 시) — 자유 질문형 B
 ```
@@ -65,6 +66,7 @@ graph → query → report
 
 ## 5. 핵심 로직 규칙
 
+- **질문 이해(회사명 해석)**: LLM 단독 금지. **사전(규칙) 우선 → LLM 보완** 2단계(Dictionary First → LLM Fallback). ① `config.py`의 별칭 사전(`COMPANY_ALIASES`)으로 오타·약어를 먼저 매핑 → ② 잔여 토큰만 Qwen3로 보완 → ③ 그래프 Company 노드로 검증. 저신뢰·미매칭 토큰은 버린다(억지 매핑·환각 방지, 절대규칙 5). 상세: docs/query_spec.md.
 - **이벤트 병합**: summary 임베딩 유사도만 쓰지 않는다. 가중 점수 사용:
   `score = 0.6·summary + 0.3·company_overlap + 0.1·time_proximity`.
   임계값 미만이면 새 이벤트 생성(억지 병합 금지). 후보는 같은 회사·최근 7일로 축소.
@@ -130,8 +132,12 @@ RSS_CANDIDATES = [
 ---
 
 ## 미확정 (작업 전 확인 필요)
+
+> **미확정 config 처리 원칙(공통)**: 아래 미확정 값(별칭 사전·언론사 가중치·랭킹 기준 등)은 각각 task 문서에 (a) **확정 전 기본동작**, (b) **임시값 허용 여부**, (c) **확정 시 교체 위치(=config)**, (d) **구현자 하드코딩 금지**를 명시한다. 임의값을 "확정값"처럼 굳히지 않는다. (예: 언론사 가중치 = 확정 전 default-only, TASK 06 §3.1.)
+
 - 이벤트 병합 임계값·가중치 계수: 실데이터 튜닝 예정 (config.py에 임시값)
 - importance 계산식의 언론사 가중치 테이블: 미정
 - **질의 관련도(랭킹) 점수 정의: 미확정.** 잠정은 importance순 정렬로 대체(추후 튜닝).
-- backend API 계약(엔드포인트·요청/응답): verith/docs/api_contract.md에서 확정 예정
+- **회사 별칭 사전(`COMPANY_ALIASES`) 초기 구성: 미확정.** KOSPI/주요 종목 + 흔한 약어로 시드하고, 질의 로그의 미매칭 토큰으로 지속 보강. canonical은 그래프 Company 노드명과 일치시킨다.
+- backend API 계약(엔드포인트·요청/응답): **초안은 `backend/db/models/news/SCHEMA_SPEC.md §7`**, 정식 `verith/docs/api_contract.md`로 승격 예정
 - **DB 모델 정의 위치: `verith\backend\db\models\news`** (backend 소유). news는 절대규칙 1대로 HTTP로만 접근. 명세는 docs/erd.dbml.
