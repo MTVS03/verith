@@ -19,7 +19,7 @@ Table news [note: '기사 원본. Neo4j엔 news_id 참조만 두고 본문은 �
   sentiment      varchar   [note: 'KR-FinBert 결과: 긍정/중립/부정']
   embedding      vector    [note: 'summary 임베딩. pgvector']
   published_at   timestamp [note: '7일 롤링 기준']
-  event_id       integer   [note: '소속 이벤트. nullable(병합 전 NULL)']
+  event_id       uuid      [note: '소속 이벤트 = Event.canonical_id(UUID). nullable(병합 전 NULL). ai Article.event_id(str)와 정합. news.id(=news_id)만 정수 PK로 별개']
   created_at     timestamp
 }
 
@@ -51,6 +51,10 @@ Table reports [note: '질의 결과 리포트. report_id는 uuid4(랜덤), 시�
 //   (Event)-[:HAS_KEYWORD]->(Keyword)
 //   (Event)-[:MENTIONS]->(Person)
 //   (Event)-[:ABOUT]->(Country)
+//
+// NewsRef 키 전환: ai GraphBatch 입력은 NewsRef.key=url(저장 전 news_id 미부여).
+//   backend가 save 시 news.url upsert로 얻은 news.id를 Neo4j NewsRef.news_id로 해소.
+//   → 입력=url, 최종 그래프=news_id 참조 (SCHEMA_SPEC §3·§7.3, TASK 07 §0.2).
 
 // ─────────── 삭제 규칙 (CASCADE) ───────────
 // published_at < now-168h 기사 삭제
