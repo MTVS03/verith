@@ -212,6 +212,29 @@ STALE_CACHE_MAX_AGE_BY_PERIOD = {
 *연결: `services/kis_client.py`(재시도·timeout)·`supervisor/technical_supervisor.py`(폴백 분기), UseCase T2*
 *`STALE_CACHE_MAX_AGE_BY_PERIOD`의 D는 일봉(1거래일) 기준. 주/월봉(W·M) 신선도 기준은 KIS 실제 응답·갱신 주기 확인 후 확정한다(kis_mapping §11 TODO).*
 
+### 8.1 구간 분할 조회 (pagination)
+
+KIS 단일 호출은 최대 100건이라(kis_mapping §11.4), 1y 일봉·5y 주봉은 여러 번 나눠 조회해 합친다.
+
+```python
+# 타임프레임별 KIS에서 확보할 데이터 기간 (fetch 기간 — 프론트 표시 slice가 아님).
+KIS_FETCH_LOOKBACK_DAYS = {
+    "D": 460,    # 1y(365) + 60MA 계산 여유 약 90일
+    "W": 2250,   # 5y(1825) + 60주 MA 여유 약 420일
+    "M": 1900,   # monthly_trend/regime 및 보조용 5년 수준
+}
+# 단일 호출 100건 제한을 피하기 위한 청크 폭 (달력일).
+KIS_FETCH_CHUNK_DAYS = {
+    "D": 100,    # ≈68거래일 < 100건
+    "W": 600,    # ≈85주 < 100건
+    "M": 1900,   # ≈60개월 < 100건 (분할 없이 1청크)
+}
+KIS_MAX_CHUNKS = 10             # 무한 루프 방지 상한 (D≈5·W≈4청크면 충분)
+```
+
+*연결: `services/kis_client.py`(`fetch_ohlcv`·`fetch_ohlcv_range`), `charts/chart_builder.py`(표시 slice `CHART_PERIOD_DAYS`), `kis_mapping.md` §8.*
+***`KIS_FETCH_LOOKBACK_DAYS`(원천 데이터 확보 기간)와 `CHART_PERIOD_DAYS`(§10, 프론트 표시 slice)는 다른 축이다.*** fetch가 표시 창보다 넓어야 차트 왼쪽 끝 candle의 MA overlay까지 계산된다. D→W/M 리샘플은 하지 않는다 — D/W/M은 각각 KIS `FID_PERIOD_DIV_CODE`로 직접 조회한다.
+
 ## 9. 검증·재생성 (verification)
 
 ```python

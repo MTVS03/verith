@@ -147,6 +147,17 @@ KIS 기간별시세는 **한 호출에 최대 100건**을 반환한다. 1년치 
 
 **구간 분할은 D/W/M 각각에 적용한다.** 일봉은 1년 약 240개라 여러 번 호출이 필요하고, 주봉은 5년 기준 약 260개라 역시 분할이 필요할 수 있다. 월봉은 5년 약 60개로 100건 안에 들어올 수 있으나, 실제 반환 건수는 KIS 호출 후 확인한다(§11).
 
+### 8.1 구간 분할 구현 정책 (확정)
+
+`services/kis_client.py`의 `fetch_ohlcv_range(ticker, period, start, end)`가 아래 정책으로 구현한다. 파라미터·상수 정본은 `config.md §8.1`.
+
+1. **청크 방향·폭:** `end_date`에서 **과거 방향**으로 `KIS_FETCH_CHUNK_DAYS[period]` 단위 청크. 각 청크는 `FID_INPUT_DATE_1/2`(YYYYMMDD)로 조회한다. 인접 청크는 경계일 1일 겹쳐도 되며, 중복은 date dedup으로 제거한다.
+2. **기본 fetch 기간:** `fetch_ohlcv(ticker, period)`는 `end=오늘`, `start=오늘−KIS_FETCH_LOOKBACK_DAYS[period]`로 위 range 조회를 수행한다.
+3. **정지 조건(하나라도 만족 시 중단):** ① 목표 `start_date` 이전까지 확보 / ② 청크 응답이 빈 배열 / ③ 가장 오래된 date가 직전 청크보다 더 과거로 가지 않음 / ④ `KIS_MAX_CHUNKS` 도달.
+4. **병합:** 전 청크 결과를 **date 기준 dedup → `start ≤ date ≤ end` 필터 → 과거→최신 오름차순 정렬**(§11.5). KIS 원본이 최신→과거로 와도 최종 반환은 오름차순이다.
+5. **재시도:** 청크별 호출 실패·`EGW00201`은 기존 `_call_chart`의 retry/backoff(§10·config §8)를 그대로 재사용한다. 새 재시도 로직을 만들지 않는다.
+6. **리샘플 금지:** D/W/M은 각각 `FID_PERIOD_DIV_CODE`로 직접 조회한다. 일봉에서 주/월봉을 파생하지 않는다.
+
 ---
 
 ## 9. Redis 캐시 저장 구조
