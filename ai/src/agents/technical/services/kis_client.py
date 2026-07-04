@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from datetime import date, datetime, timedelta
@@ -135,14 +136,17 @@ def _to_iso_date(raw: object, field: str = KIS_FIELD_DATE) -> str:
 
 
 def _to_price(raw: object, field: str) -> int | float:
-    """가격 문자열 → 숫자. 정수면 int, 소수면 float."""
+    """가격 문자열 → 숫자. 정수면 int, 소수면 float. inf/-inf/nan은 fail-fast(비정상 응답)."""
     text = str(raw).strip()
     if not text:
         raise KisFieldError(f"가격 값이 비어 있음 ({field})")
     try:
-        return int(text) if text.lstrip("-").isdigit() else float(text)
+        value = int(text) if text.lstrip("-").isdigit() else float(text)
     except ValueError as exc:
         raise KisFieldError(f"가격 숫자 변환 실패 ({field}={raw!r})") from exc
+    if isinstance(value, float) and not math.isfinite(value):  # Infinity/-Infinity/NaN
+        raise KisFieldError(f"비정상 숫자(inf/nan) ({field}={raw!r})")
+    return value
 
 
 def _to_int(raw: object, field: str) -> int:

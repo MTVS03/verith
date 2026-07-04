@@ -13,10 +13,11 @@ HTML 렌더링·DB 저장은 이 파일 책임이 아니다(각각 frontend·bac
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .chart import ChartData
 from .enums import (
     AlignmentFlag,
     ChartPeriod,
@@ -99,10 +100,23 @@ class RiskSummary(_StrictModel):
 
 
 class ChartPayload(_StrictModel):
-    """기간별 차트. → REPORT_CHARTS. chart_data 세부 구조는 chart_annotation_spec.md 소관이며
-    이번 단계에서는 계산하지 않는다(빈 dict 허용)."""
+    """기간별 차트. → REPORT_CHARTS. chart_data는 자유 dict가 아니라 chart_annotation_spec.md 정본
+    구조를 따르는 ChartData 계약으로 검증한다(schemas/chart.py). chart_builder가 만든 dict가 여기서
+    ChartData로 파싱·검증된다."""
     period: ChartPeriod
-    chart_data: dict[str, Any] = Field(default_factory=dict)
+    chart_data: ChartData
+
+    # period ↔ candle_unit 정합 (chart_annotation_spec §3): 3m·1y=D, 5y=W.
+    @model_validator(mode="after")
+    def _period_matches_candle_unit(self) -> ChartPayload:
+        expected = {ChartPeriod.THREE_MONTHS: "D", ChartPeriod.ONE_YEAR: "D",
+                    ChartPeriod.FIVE_YEARS: "W"}[self.period]
+        if self.chart_data.candle_unit != expected:
+            raise ValueError(
+                f"period={self.period.value}의 candle_unit은 {expected}여야 합니다: "
+                f"{self.chart_data.candle_unit}"
+            )
+        return self
 
 
 class InterpretationResult(_StrictModel):
