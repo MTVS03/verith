@@ -1377,7 +1377,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "pandas", specifier = ">=2.2.0" },
-    { name = "pydantic", specifier = ">=2.8.0" },
+    { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.4.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "redis", specifier = ">=5.0.0" },

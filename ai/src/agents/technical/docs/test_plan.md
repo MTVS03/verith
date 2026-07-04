@@ -301,6 +301,10 @@ LLM-07이 중요하다 — 정상 문장인데 "상승 전환"이 downtrend 충�
 
 **MVP 구현 범위 주의:** 크로스 kind는 `golden_cross`/`dead_cross`로 확정한다(chart_annotation_spec §7). `box_breakout_candidate`·`cup_handle_candidate`는 **이번 MVP 구현 범위에서 제외**(후속). 기간별 candles는 `config.md §10 CHART_PERIOD_DAYS`(3m=90/1y=365/5y=1825일) 기준으로 기본 candle source의 마지막 candle date에서 slice하며, 데이터 부족 시 확보된 봉까지만 쓰고 예외를 내지 않는다. chart_data에는 regime/synthesis/risk 값을 넣지 않는다(순수 chart JSON).
 
+**chart_data 계약 검증(CONTRACT-CHART-*):** `ChartPayload.chart_data`는 `schemas/chart.py`의 `ChartData`로 검증한다(자유 dict 아님). 잘못된 구조·문서에 없는 key(extra)·잘못된 Literal(`candle_unit`·SR `type`·annotation `source`/`importance`)·범위 밖 수치(음수 가격/volume, RSI 0~100 밖, window/period ≤0)는 거부한다. `annotation.kind`는 문서 10종 전체를 계약상 허용하되 chart_builder는 8종만 생성한다. `from` key는 `model_dump(mode="json")`(by_alias 유무 무관)에서 `"from"`으로 유지되고 `"from_"`은 새어나오지 않는다. `test_chart_builder`는 dict 접근 대신 `payload.chart_data.model_dump(mode="json", by_alias=True)`로 최종 JSON을 검증한다.
+
+추가 강화 검증: **inf/nan 거부**(`_to_price` 및 chart/OHLCV float 필드), date/from/to **ISO `YYYY-MM-DD`만**(형식·달력), `annotation.source` **누락 거부(필수)**, candle **`high < low` 거부**, RSI **`oversold >= overbought` 거부**, `ChartPayload` **`period ↔ candle_unit` 불일치 거부**(3m·1y=D, 5y=W).
+
 annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발생일·가격·패턴 구간을 만들지 않는다.
 
 ---

@@ -393,3 +393,20 @@ def test_pagination_rejects_out_of_scope(monkeypatch):
         kc.fetch_ohlcv_range("005930", "D", "20260101", "20260704")
     with pytest.raises(InvalidPeriodError):
         kc.fetch_ohlcv_range("373220", "Y", "20260101", "20260704")
+
+
+# ── inf/nan fail-fast (_to_price) ─────────────────────────────────────────────
+@pytest.mark.parametrize("bad", ["Infinity", "-Infinity", "NaN", "nan", "inf", "-inf"])
+def test_to_price_rejects_non_finite(bad):
+    with pytest.raises(KisFieldError):
+        kc._to_price(bad, "stck_clpr")
+
+
+def test_to_price_accepts_normal():
+    assert kc._to_price("359500", "x") == 359500
+    assert kc._to_price("1000.5", "x") == 1000.5
+
+
+def test_parse_item_rejects_infinity_price():
+    with pytest.raises(KisFieldError):
+        kc.parse_kis_ohlcv_item({**SAMPLE_ITEM, "stck_hgpr": "Infinity"})
