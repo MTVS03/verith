@@ -109,3 +109,7 @@
 입력: 일봉 과열 + 월봉 상승              → 기대: final_regime=과열, alignment_flag=중립
 입력: 봉 40개 (60MA 불가)               → 기대: 판단 불가
 ```
+
+### regime(상태)과 지표별 signal(방향)은 다른 축
+
+이 문서의 regime은 **국면(상태)** 판정이다. 종합 신호에 쓰는 **지표별 `signal`(positive/neutral/negative, 방향)**은 별개 축이며 그 산출 규칙은 `config.md §4.1`(synthesis)에 있다. 예: `final_regime=overheated`(상태)면서 `consensus=weak_positive`(방향)일 수 있다(glossary "final_regime vs consensus"). 같은 지표(RSI 등)를 쓰더라도 regime 조건과 signal 조건은 다르게 정의된다 — 특히 RSI 극단(≥`RSI_OVERBOUGHT`/≤`RSI_OVERSOLD`)은 regime에서는 과열/과매도 반등으로, synthesis signal에서는 방향 불명확으로 보아 neutral로 둔다.
