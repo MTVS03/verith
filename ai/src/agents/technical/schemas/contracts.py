@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .chart import ChartData
 from .enums import (
@@ -105,6 +105,18 @@ class ChartPayload(_StrictModel):
     ChartData로 파싱·검증된다."""
     period: ChartPeriod
     chart_data: ChartData
+
+    # period ↔ candle_unit 정합 (chart_annotation_spec §3): 3m·1y=D, 5y=W.
+    @model_validator(mode="after")
+    def _period_matches_candle_unit(self) -> ChartPayload:
+        expected = {ChartPeriod.THREE_MONTHS: "D", ChartPeriod.ONE_YEAR: "D",
+                    ChartPeriod.FIVE_YEARS: "W"}[self.period]
+        if self.chart_data.candle_unit != expected:
+            raise ValueError(
+                f"period={self.period.value}의 candle_unit은 {expected}여야 합니다: "
+                f"{self.chart_data.candle_unit}"
+            )
+        return self
 
 
 class InterpretationResult(_StrictModel):

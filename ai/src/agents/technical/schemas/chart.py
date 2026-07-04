@@ -9,15 +9,16 @@ dict를 생성하고, contracts가 이 모델로 파싱·검증한다(생성 로
   - 필드 타입은 chart_builder 실제 출력 타입에 맞춰(int/float) JSON 표현을 보존한다.
   - candles는 내부 표준 OHLCV를 재사용한다(중복 모델 금지).
   - support_resistance의 `from`은 파이썬 예약어라 alias 처리하고, 출력에서 항상 "from"을 유지한다.
+  - 수치는 inf/nan·음수를 허용하지 않고, date는 ISO만, RSI oversold<overbought를 강제한다.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .ohlcv import OHLCV
+from .ohlcv import OHLCV, IsoDate
 
 # annotation kind 정본은 chart_annotation_spec.md §7 — 전체 10종을 계약상 허용한다.
 # (chart_builder는 MVP 8종만 생성; box_breakout·cup_handle은 후속.)
@@ -42,8 +43,8 @@ class _StrictModel(BaseModel):
 
 # ── overlays ──────────────────────────────────────────────────────────────────
 class MaPoint(_StrictModel):
-    date: str
-    value: float = Field(ge=0)
+    date: IsoDate
+    value: float = Field(ge=0, allow_inf_nan=False)
 
 
 class MovingAverageOverlay(_StrictModel):
@@ -56,9 +57,9 @@ class SupportResistanceOverlay(_StrictModel):
     model_config = ConfigDict(extra="forbid", serialize_by_alias=True)
 
     type: Literal["support", "resistance"]
-    price: float = Field(ge=0)
-    from_: str = Field(alias="from")
-    to: str
+    price: float = Field(ge=0, allow_inf_nan=False)
+    from_: IsoDate = Field(alias="from")
+    to: IsoDate
     touch_count: int = Field(ge=0)
 
 
@@ -69,8 +70,8 @@ class Overlays(_StrictModel):
 
 # ── subcharts ─────────────────────────────────────────────────────────────────
 class RsiPoint(_StrictModel):
-    date: str
-    value: float = Field(ge=0, le=100)
+    date: IsoDate
+    value: float = Field(ge=0, le=100, allow_inf_nan=False)
 
 
 class RsiSubchart(_StrictModel):
@@ -79,11 +80,17 @@ class RsiSubchart(_StrictModel):
     oversold: int = Field(ge=0, le=100)
     points: list[RsiPoint]
 
+    @model_validator(mode="after")
+    def _oversold_lt_overbought(self) -> RsiSubchart:
+        if self.oversold >= self.overbought:
+            raise ValueError(f"oversold({self.oversold}) must be < overbought({self.overbought})")
+        return self
+
 
 class VolumeBar(_StrictModel):
-    date: str
+    date: IsoDate
     volume: int = Field(ge=0)
-    avg_volume: float | None = Field(default=None, ge=0)
+    avg_volume: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     is_spike: bool
 
 
@@ -101,18 +108,18 @@ class Subcharts(_StrictModel):
 class ChartAnnotation(_StrictModel):
     id: str
     kind: AnnotationKind
-    date: str
-    price: float | None = Field(default=None, ge=0)
+    date: IsoDate
+    price: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     label: str
     importance: Literal["low", "medium", "high"]
-    source: Literal["code"] = "code"
+    source: Literal["code"]  # 필수 (chart_annotation_spec §6). default 없음.
     meta: dict[str, Any] = Field(default_factory=dict)  # 계산 근거 자유 bag
 
 
 # ── chart_data 최상위 ─────────────────────────────────────────────────────────
 class ChartData(_StrictModel):
     candle_unit: Literal["D", "W", "M"]
-    candles: list[OHLCV]  # 내부 표준 OHLCV 재사용
+    candles: list[OHLCV]  # 내부 표준 OHLCV 재사용 (finite·비음수·ISO·high>=low 상속)
     overlays: Overlays
     subcharts: Subcharts
     annotations: list[ChartAnnotation]

@@ -94,6 +94,8 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 이 구조는 `schemas/chart.py`의 `ChartData` Pydantic 모델로 계약 검증한다(자유 dict 아님). key 이름은 이 문서를 정본으로 하며 바꾸지 않는다 — 특히 `support_resistance`의 `from`은 alias로 유지한다. 하위 모델은 `extra="forbid"`(단 `annotation.meta`는 자유 `dict`)이고, candles는 내부 표준 `OHLCV`를 재사용한다.
 
+**계약 강화 규칙:** 수치 필드는 **inf/nan을 허용하지 않는다**(비정상 값은 fail-fast, `_to_price`도 동일). 모든 date/from/to는 **ISO `YYYY-MM-DD`만** 허용한다(실제 달력 날짜 검증). `annotation.source`는 **필수**이며 `"code"`만 허용한다(§6). candle은 `high >= low`, RSI 서브차트는 `oversold < overbought`여야 한다. `ChartPayload.period`와 `chart_data.candle_unit`은 §3 규정(3m·1y=D, 5y=W)과 정합해야 한다.
+
 ```json
 {
   "period": "1y",
@@ -118,7 +120,7 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
       "volume": { "avg_window": 20, "bars": [ { "date": "2026-06-30", "volume": 12345678, "avg_volume": 10000000, "is_spike": false } ] }
     },
     "annotations": [
-      { "id": "ann_001", "kind": "moving_average_golden_cross", "date": "2026-05-14", "price": 83200.0, "label": "골든크로스", "importance": "medium", "source": "code" }
+      { "id": "ann_001", "kind": "golden_cross", "date": "2026-05-14", "price": 83200.0, "label": "골든크로스", "importance": "medium", "source": "code" }
     ]
   }
 }
@@ -178,7 +180,7 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 ### 8.2 골든크로스
 
-이전 봉 `short_ma <= long_ma`, 현재 봉 `short_ma > long_ma`이면 `moving_average_golden_cross`를 생성한다.
+이전 봉 `short_ma <= long_ma`, 현재 봉 `short_ma > long_ma`이면 `golden_cross`를 생성한다.
 
 | 조합 | 중요도 |
 | --- | --- |
@@ -187,7 +189,7 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 ### 8.3 데드크로스
 
-이전 봉 `short_ma >= long_ma`, 현재 봉 `short_ma < long_ma`이면 `moving_average_dead_cross`를 생성한다.
+이전 봉 `short_ma >= long_ma`, 현재 봉 `short_ma < long_ma`이면 `dead_cross`를 생성한다.
 
 | 조합 | 중요도 |
 | --- | --- |
@@ -377,7 +379,7 @@ annotation 생성 과정은 trace(`chart_generate` 노드)에 남긴다: `period
   "node": "chart_generate",
   "output_summary": {
     "period": "1y", "candle_unit": "D",
-    "generated_annotations": { "moving_average_golden_cross": 2, "volume_spike": 3, "support_touch": 1, "resistance_touch": 2 },
+    "generated_annotations": { "golden_cross": 2, "volume_spike": 3, "support_touch": 1, "resistance_touch": 2 },
     "skipped_annotations": [ { "kind": "cup_handle_candidate", "reason": "not enough bars" } ]
   }
 }
@@ -391,8 +393,8 @@ annotation 생성 과정은 trace(`chart_generate` 노드)에 남긴다: `period
 
 | ID | 입력 | 기대 결과 |
 | --- | --- | --- |
-| CHART-01 | 5MA가 20MA를 상향 돌파 | moving_average_golden_cross 생성 |
-| CHART-02 | 5MA가 20MA를 하향 이탈 | moving_average_dead_cross 생성 |
+| CHART-01 | 5MA가 20MA를 상향 돌파 | golden_cross 생성 |
+| CHART-02 | 5MA가 20MA를 하향 이탈 | dead_cross 생성 |
 | CHART-03 | 거래량이 20봉 평균의 2배 이상 | volume_spike 생성 |
 | CHART-04 | 현재가가 최근 지지선 ±2% 이내 | support_touch 생성 |
 | CHART-05 | 현재가가 최근 저항선 ±2% 이내 | resistance_touch 생성 |
