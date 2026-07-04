@@ -153,10 +153,12 @@ KIS 기간별시세는 **한 호출에 최대 100건**을 반환한다. 1년치 
 
 1. **청크 방향·폭:** `end_date`에서 **과거 방향**으로 `KIS_FETCH_CHUNK_DAYS[period]` 단위 청크. 각 청크는 `FID_INPUT_DATE_1/2`(YYYYMMDD)로 조회한다. 인접 청크는 경계일 1일 겹쳐도 되며, 중복은 date dedup으로 제거한다.
 2. **기본 fetch 기간:** `fetch_ohlcv(ticker, period)`는 `end=오늘`, `start=오늘−KIS_FETCH_LOOKBACK_DAYS[period]`로 위 range 조회를 수행한다.
-3. **정지 조건(하나라도 만족 시 중단):** ① 목표 `start_date` 이전까지 확보 / ② 청크 응답이 빈 배열 / ③ 가장 오래된 date가 직전 청크보다 더 과거로 가지 않음 / ④ `KIS_MAX_CHUNKS` 도달.
-4. **병합:** 전 청크 결과를 **date 기준 dedup → `start ≤ date ≤ end` 필터 → 과거→최신 오름차순 정렬**(§11.5). KIS 원본이 최신→과거로 와도 최종 반환은 오름차순이다.
-5. **재시도:** 청크별 호출 실패·`EGW00201`은 기존 `_call_chart`의 retry/backoff(§10·config §8)를 그대로 재사용한다. 새 재시도 로직을 만들지 않는다.
-6. **리샘플 금지:** D/W/M은 각각 `FID_PERIOD_DIV_CODE`로 직접 조회한다. 일봉에서 주/월봉을 파생하지 않는다.
+3. **자연 종료(정상 반환):** ① 목표 `start_date` 이전까지 확보 / ② 청크 응답이 빈 배열(더 과거 데이터 없음) / ③ 가장 오래된 date가 직전 청크보다 더 과거로 가지 않음(정체). 이 셋은 데이터가 소진된 정상 종료다.
+4. **불완전 종료(예외):** `KIS_MAX_CHUNKS`를 모두 소진했는데도 요청 `start_date`까지 못 간 경우 — 잘린 partial 결과를 **조용히 반환하지 않고 예외(`KisRangeIncompleteError`)를 던진다.** 예외 메시지에 `ticker·period·requested_start·requested_end·oldest_fetched·KIS_MAX_CHUNKS`를 담는다. (기본 `fetch_ohlcv()`의 D=460·W=2250·M=1900은 10청크 이내라 정상적으로는 이 예외가 나지 않는다.)
+5. **입력 fail-fast(KIS 호출 전):** ⓐ 날짜 입력은 `YYYYMMDD` 또는 `YYYY-MM-DD` **두 형식만** 허용(정규식 검증 후 실제 달력 검증), 그 외는 거부. ⓑ `start_date > end_date`(역전 범위)는 토큰 발급·네트워크 호출 전에 거부한다.
+6. **병합:** 전 청크 결과를 **date 기준 dedup → `start ≤ date ≤ end` 필터 → 과거→최신 오름차순 정렬**(§11.5). KIS 원본이 최신→과거로 와도 최종 반환은 오름차순이다.
+7. **재시도:** 청크별 호출 실패·`EGW00201`은 기존 `_call_chart`의 retry/backoff(§10·config §8)를 그대로 재사용한다. 새 재시도 로직을 만들지 않는다.
+8. **리샘플 금지:** D/W/M은 각각 `FID_PERIOD_DIV_CODE`로 직접 조회한다. 일봉에서 주/월봉을 파생하지 않는다.
 
 ---
 

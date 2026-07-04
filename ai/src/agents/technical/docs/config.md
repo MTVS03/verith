@@ -233,6 +233,7 @@ KIS_MAX_CHUNKS = 10             # 무한 루프 방지 상한 (D≈5·W≈4청�
 ```
 
 *연결: `services/kis_client.py`(`fetch_ohlcv`·`fetch_ohlcv_range`), `charts/chart_builder.py`(표시 slice `CHART_PERIOD_DAYS`), `kis_mapping.md` §8.*
+*`KIS_MAX_CHUNKS`는 상한이자 완전성 가드다 — `fetch_ohlcv_range`가 이 상한을 다 쓰고도 요청 `start_date`까지 못 가면 잘린 결과를 반환하지 않고 예외(`KisRangeIncompleteError`)를 던진다(kis_mapping §8.1). 지나치게 넓은 명시 범위 요청에서 데이터가 조용히 잘리는 것을 막기 위함이다.*
 ***`KIS_FETCH_LOOKBACK_DAYS`(원천 데이터 확보 기간)와 `CHART_PERIOD_DAYS`(§10, 프론트 표시 slice)는 다른 축이다.*** fetch가 표시 창보다 넓어야 차트 왼쪽 끝 candle의 MA overlay까지 계산된다. D→W/M 리샘플은 하지 않는다 — D/W/M은 각각 KIS `FID_PERIOD_DIV_CODE`로 직접 조회한다.
 
 ## 9. 검증·재생성 (verification)
