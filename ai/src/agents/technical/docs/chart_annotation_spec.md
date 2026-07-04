@@ -147,18 +147,20 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 ## 7. annotation kind
 
-| kind | 표시 라벨 | 의미 |
-| --- | --- | --- |
-| `moving_average_golden_cross` | 골든크로스 | 단기 이동평균선이 중장기 이동평균선을 상향 돌파 |
-| `moving_average_dead_cross` | 데드크로스 | 단기 이동평균선이 중장기 이동평균선을 하향 돌파 |
-| `volume_spike` | 거래량 급증 | 거래량이 최근 평균 대비 크게 증가 |
-| `support_touch` | 지지선 근접 | 가격이 주요 지지 구간에 근접 |
-| `resistance_touch` | 저항선 근접 | 가격이 주요 저항 구간에 근접 |
-| `rsi_overbought` | RSI 과열 | RSI가 과열 기준 이상 |
-| `rsi_oversold` | RSI 과매도 | RSI가 과매도 기준 이하 |
-| `box_range_candidate` | 박스권 후보 | 일정 기간 가격이 제한된 범위에서 움직임 |
-| `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 |
-| `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 |
+| kind | 표시 라벨 | 의미 | MVP |
+| --- | --- | --- | --- |
+| `golden_cross` | 골든크로스 | 단기 이동평균선이 중장기 이동평균선을 상향 돌파 | ✅ |
+| `dead_cross` | 데드크로스 | 단기 이동평균선이 중장기 이동평균선을 하향 돌파 | ✅ |
+| `volume_spike` | 거래량 급증 | 거래량이 최근 평균 대비 크게 증가 | ✅ |
+| `support_touch` | 지지선 근접 | 가격이 주요 지지 구간에 근접 | ✅ |
+| `resistance_touch` | 저항선 근접 | 가격이 주요 저항 구간에 근접 | ✅ |
+| `rsi_overbought` | RSI 과열 | RSI가 과열 기준 이상 | ✅ |
+| `rsi_oversold` | RSI 과매도 | RSI가 과매도 기준 이하 | ✅ |
+| `box_range_candidate` | 박스권 후보 | 일정 기간 가격이 제한된 범위에서 움직임 | ✅ |
+| `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 | ⏳ 후속 |
+| `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 | ⏳ 후속 |
+
+크로스 kind는 MVP 구현에서 `golden_cross`/`dead_cross`로 확정한다(§8은 이동평균선 크로스 규칙을 정의한다). `box_breakout_candidate`·`cup_handle_candidate`는 오탐 가능성이 크고 구현 난도가 높아 **MVP 구현 범위에서 제외**하고 후속 단계에서 별도 문서·테스트 보강 후 구현한다(§12.2·§13 규칙은 정본으로 유지).
 
 패턴 관련 annotation은 확정이 아니라 **후보(candidate)**로 표기한다. 패턴 탐지는 오탐 가능성이 높으므로 "확정" 표현을 쓰지 않는다(honest scoping).
 
@@ -194,11 +196,13 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 같은 종류의 크로스가 가까운 기간 안에 반복되면 중복 표시를 줄인다.
 
-| 기간 | 중복 제거 기준 |
-| --- | --- |
-| `3m` | 5거래일 이내 동일 kind 중복 제거 |
-| `1y` | 10거래일 이내 동일 kind 중복 제거 |
-| `5y` | 4주 이내 동일 kind 중복 제거 |
+중복 제거는 **달력일이 아니라 candle(봉) index 거리**로 계산한다(주말·휴장일 왜곡 방지). 창 값 정본은 `config.md §10 ANNOTATION_DEDUP_BARS`다.
+
+| 기간 | 기본 봉 | 중복 제거 창(봉 index) |
+| --- | --- | --- |
+| `3m` | 일봉 | 5봉 이내 동일 kind 중복 제거 |
+| `1y` | 일봉 | 10봉 이내 동일 kind 중복 제거 |
+| `5y` | 주봉 | 4봉(≈4주) 이내 동일 kind 중복 제거 |
 
 ---
 

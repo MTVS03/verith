@@ -122,10 +122,11 @@ MTF-01·05·06이 중립 국면 케이스다 — 상위 추세가 무엇이든 `
 
 | ID | 입력 조건 | 기대 결과 |
 | --- | --- | --- |
-| REG-UNAV-01 | 일봉 40개(60MA 계산 불가) | `data_status=regime_unavailable`, `final_regime=unavailable` |
+| REG-UNAV-01 | 일봉 < `MIN_DAILY_BARS`(예: 40개) | `data_status=regime_unavailable`, `final_regime=unavailable` |
 | REG-UNAV-02 | final_regime=unavailable | `signal=null`, `risk=null`, `technical_signals=[]`, 6~8 스킵하고 차트로 |
+| REG-UNAV-03 | 일봉 ≥ `MIN_DAILY_BARS`이나 60MA **기울기**만 계산 불가 | `unavailable` 아님 — 해당 조건만 False, 어디에도 안 걸리면 `sideways`로 착지 |
 
-`contracts.md`와 연결된다 — 판단 불가면 신호·리스크는 null이고, 차트는 가능한 범위만 제공한다. **억지 판정을 하지 않는 것**이 정직성의 핵심이다.
+`contracts.md`·`regime_rules.md`(판단 불가 vs 조건 False)와 연결된다 — **필수 데이터 자체 부족(봉 수 < MIN_DAILY_BARS)**만 `unavailable`이고, 값은 있으나 보조 계산(기울기 등)만 부족하면 그 조건만 False 처리해 `sideways` 등으로 정상 착지한다. **억지 판정을 하지 않는 것**이 정직성의 핵심이다.
 
 ---
 
@@ -264,8 +265,8 @@ LLM-07이 중요하다 — 정상 문장인데 "상승 전환"이 downtrend 충�
 
 | ID | 입력 | 기대 결과 |
 | --- | --- | --- |
-| CHART-01 | 5MA가 20MA를 상향 돌파 | `moving_average_golden_cross` 생성 |
-| CHART-02 | 5MA가 20MA를 하향 이탈 | `moving_average_dead_cross` 생성 |
+| CHART-01 | 5MA가 20MA를 상향 돌파 | `golden_cross` 생성 |
+| CHART-02 | 5MA가 20MA를 하향 이탈 | `dead_cross` 생성 |
 | CHART-03 | 거래량이 20봉 평균의 2배 이상 | `volume_spike` 생성 |
 | CHART-04 | 현재가가 최근 지지선 ±2% 이내 | `support_touch` 생성 |
 | CHART-05 | 현재가가 최근 저항선 ±2% 이내 | `resistance_touch` 생성 |
@@ -274,6 +275,8 @@ LLM-07이 중요하다 — 정상 문장인데 "상승 전환"이 downtrend 충�
 | CHART-08 | 박스권 조건 충족 | `box_range_candidate` 생성 |
 | CHART-09 | 데이터 부족 | 해당 annotation 생성하지 않음 (억지 생성 없음) |
 | CHART-10 | 같은 kind가 가까운 기간 내 반복 | 중복 제거 규칙 적용 |
+
+**MVP 구현 범위 주의:** 크로스 kind는 `golden_cross`/`dead_cross`로 확정한다(chart_annotation_spec §7). `box_breakout_candidate`·`cup_handle_candidate`는 **이번 MVP 구현 범위에서 제외**(후속). 기간별 candles는 `config.md §10 CHART_PERIOD_DAYS`(3m=90/1y=365/5y=1825일) 기준으로 기본 candle source의 마지막 candle date에서 slice하며, 데이터 부족 시 확보된 봉까지만 쓰고 예외를 내지 않는다. chart_data에는 regime/synthesis/risk 값을 넣지 않는다(순수 chart JSON).
 
 annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발생일·가격·패턴 구간을 만들지 않는다.
 
