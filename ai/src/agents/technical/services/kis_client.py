@@ -108,11 +108,20 @@ def validate_period(period: str) -> None:
 # 값 변환 헬퍼 — KIS는 OHLCV 값을 전부 문자열로 반환(kis_mapping §11.3)
 # ─────────────────────────────────────────────────────────────────────────────
 def _to_iso_date(raw: object, field: str = KIS_FIELD_DATE) -> str:
-    """KIS 원본 'YYYYMMDD' → 내부 표준 ISO 'YYYY-MM-DD'."""
+    """KIS 원본 'YYYYMMDD' → 내부 표준 ISO 'YYYY-MM-DD'.
+
+    8자리 여부만 보지 않고 실제 달력 날짜인지 검증한다(20260231·20261301 등 거부).
+    """
     text = str(raw).strip()
+    # 정확히 8자리 숫자 + 실제 달력 날짜여야 한다 (strptime은 "2026731" 같은 7자리도
+    # 관대하게 파싱하므로 길이를 먼저 강제한다).
     if len(text) != 8 or not text.isdigit():
-        raise KisFieldError(f"날짜 형식 오류 ({field}={raw!r}), 'YYYYMMDD' 기대")
-    return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+        raise KisFieldError(f"날짜 형식 오류 ({field}={raw!r}), 'YYYYMMDD' 8자리 기대")
+    try:
+        parsed = datetime.strptime(text, "%Y%m%d")
+    except ValueError as exc:
+        raise KisFieldError(f"존재하지 않는 날짜 ({field}={raw!r})") from exc
+    return parsed.strftime("%Y-%m-%d")
 
 
 def _to_price(raw: object, field: str) -> int | float:
@@ -307,7 +316,14 @@ def fetch_ohlcv(ticker: str, period: str, *, client: httpx.Client | None = None)
         if owns_client:
             client.close()
 
-    return parse_kis_ohlcv_output(data.get("output2") or [])
+    # output2 키 부재(비정상 응답)와 빈 배열(거래정지 등 정상)을 구분한다.
+    # 키 자체가 없거나 list가 아니면 fail-fast(technical_coding_guidelines §8.3·§9.1).
+    if "output2" not in data:
+        raise KisFieldError("KIS 응답에 output2 키가 없습니다 (비정상 응답)")
+    output2 = data["output2"]
+    if not isinstance(output2, list):
+        raise KisFieldError(f"output2가 list가 아닙니다: {type(output2).__name__}")
+    return parse_kis_ohlcv_output(output2)
 
 
 def fetch_multi_timeframe_ohlcv(ticker: str) -> dict[str, list[OHLCV]]:

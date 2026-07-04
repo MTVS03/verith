@@ -13,7 +13,7 @@ HTML 렌더링·DB 저장은 이 파일 책임이 아니다(각각 frontend·bac
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -64,8 +64,8 @@ class RegimeResult(_StrictModel):
 class SignalSummary(_StrictModel):
     """신호 종합·신뢰도. regime 판단 불가 시 상위에서 null 가능(종합·신뢰도 스킵)."""
     consensus: Consensus
-    signal_score: float
-    confidence: float
+    signal_score: float = Field(ge=-1.0, le=1.0)  # 방향·세기 (glossary: -1.0 ~ 1.0)
+    confidence: float = Field(ge=0.0, le=1.0)     # 신뢰도 (0.0 ~ 1.0)
     # confidence_level 은 confidence(float)에서 재계산 가능한 파생값이라 DB에 저장하지 않는다
     # (contracts.md §3·§4, enums.md §6). 출력 JSON에는 표시용으로 포함한다.
     confidence_level: ConfidenceLevel
@@ -84,7 +84,7 @@ class TechnicalSignal(_StrictModel):
     metrics: list[str]  # 코드 확정 (표시용 수치 칩 배열, 예: "5MA 82,900")
     detail: str  # LLM 서술 (위 확정값을 자연어로 풀이)
     detail_source: GenerationSource  # detail 문장의 최종 출처
-    weight: float  # 코드 확정 (config.md INDICATOR_WEIGHTS)
+    weight: float = Field(ge=0.0, le=1.0)  # 코드 확정 (config.md INDICATOR_WEIGHTS)
 
 
 class RiskItem(_StrictModel):
@@ -128,7 +128,9 @@ class TechnicalAgentOutput(_StrictModel):
     request_id: str  # 런타임 필드(입력에서 되돌려줌). DB 저장 대상 아님.
     ticker: str
     as_of: datetime
-    source: str  # 데이터 출처 라벨. "KIS" / "KIS (stale)" 등 자유 문자열(enum 아님).
+    # 데이터(시세) 출처 라벨. test_plan §7: 최상위 source는 KIS / KIS (stale)만 허용.
+    # 문장 출처(interpretation.source·detail_source = GenerationSource, llm 등)와 혼동 금지.
+    source: Literal["KIS", "KIS (stale)"]
     trace_id: str  # AI Technical Supervisor가 생성.
     data_status: DataStatus
 

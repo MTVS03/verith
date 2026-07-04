@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ..config import (
+    MA_WINDOWS,
     MIN_DAILY_BARS,
     NEAR_BAND_THRESHOLD,
     NEAR_SUPPORT_THRESHOLD_PCT,
@@ -34,6 +35,9 @@ from ..indicators.rsi import calculate_rsi
 from ..indicators.support_resistance import calculate_support_resistance
 from ..schemas.enums import Regime
 from ..schemas.ohlcv import OHLCV
+
+# 단기/중기/장기 이동평균 창 (config.md MA_WINDOWS). 규칙의 "20MA" 등은 이 창을 가리킨다.
+_SHORT_MA, _MID_MA, _LONG_MA = MA_WINDOWS
 
 
 def _slope(series: Sequence[float | None], lookback: int) -> float | None:
@@ -89,14 +93,14 @@ def classify_daily_regime(ohlcv: Sequence[OHLCV]) -> Regime:
 
     close = float(ohlcv[-1].close)
     rsi = rsis[-1]
-    ma5, ma20, ma60 = mas[5][-1], mas[20][-1], mas[60][-1]
+    ma5, ma20, ma60 = mas[_SHORT_MA][-1], mas[_MID_MA][-1], mas[_LONG_MA][-1]
     upper = bands[-1]["upper"]
     support = supports[-1]["support"]
     candle = candles[-1]
 
-    slope20 = _slope(mas[20], SLOPE_LOOKBACK_DAYS)
-    slope60 = _slope(mas[60], SLOPE_LOOKBACK_DAYS)
-    prev_slope20 = _slope(mas[20][:-1], SLOPE_LOOKBACK_DAYS)  # 한 봉 전 20MA 기울기
+    slope20 = _slope(mas[_MID_MA], SLOPE_LOOKBACK_DAYS)
+    slope60 = _slope(mas[_LONG_MA], SLOPE_LOOKBACK_DAYS)
+    prev_slope20 = _slope(mas[_MID_MA][:-1], SLOPE_LOOKBACK_DAYS)  # 한 봉 전 중기MA 기울기
 
     # 파생 조건 (None-safe)
     perfect_order = None not in (ma5, ma20, ma60) and ma5 > ma20 > ma60      # 정배열

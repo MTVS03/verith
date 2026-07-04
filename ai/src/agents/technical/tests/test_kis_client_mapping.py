@@ -160,3 +160,51 @@ def test_multi_timeframe_rejects_out_of_scope(monkeypatch):
 def test_no_resample_symbols():
     names = [n for n in dir(kc) if "resample" in n.lower()]
     assert names == []
+
+
+# ── Phase A hardening ─────────────────────────────────────────────────────────
+def test_kissettings_repr_hides_secret():
+    s = kc.KISSettings(api_key="APPKEY123", api_secret="SECRET456", base_url="https://x:9443")
+    text = repr(s)
+    assert "SECRET456" not in text and "APPKEY123" not in text
+    assert "https://x:9443" in text  # base_url은 노출 OK
+
+
+def test_to_iso_date_valid():
+    assert kc._to_iso_date("20260703") == "2026-07-03"
+
+
+@pytest.mark.parametrize("bad", ["20260231", "20261301", "2026731", "abcd1234", "20260700"])
+def test_to_iso_date_invalid_calendar_raises(bad):
+    with pytest.raises(KisFieldError):
+        kc._to_iso_date(bad)
+
+
+def _patch_fetch_deps(monkeypatch, chart_response):
+    monkeypatch.setattr(kc, "load_kis_settings",
+                        lambda: kc.KISSettings("k", "s", "https://x:9443"))
+    monkeypatch.setattr(kc, "get_access_token", lambda **kw: "tok")
+    monkeypatch.setattr(kc, "_call_chart", lambda *a, **kw: chart_response)
+
+
+def test_fetch_ohlcv_output2_key_missing_raises(monkeypatch):
+    _patch_fetch_deps(monkeypatch, {"rt_cd": "0"})  # output2 키 자체 없음
+    with pytest.raises(KisFieldError):
+        kc.fetch_ohlcv("373220", "D")
+
+
+def test_fetch_ohlcv_output2_not_list_raises(monkeypatch):
+    _patch_fetch_deps(monkeypatch, {"rt_cd": "0", "output2": "oops"})
+    with pytest.raises(KisFieldError):
+        kc.fetch_ohlcv("373220", "D")
+
+
+def test_fetch_ohlcv_output2_empty_returns_empty(monkeypatch):
+    _patch_fetch_deps(monkeypatch, {"rt_cd": "0", "output2": []})
+    assert kc.fetch_ohlcv("373220", "D") == []
+
+
+def test_fetch_ohlcv_output2_normal(monkeypatch):
+    _patch_fetch_deps(monkeypatch, {"rt_cd": "0", "output2": [SAMPLE_ITEM]})
+    result = kc.fetch_ohlcv("373220", "D")
+    assert len(result) == 1 and result[0].date == "2026-07-03"
