@@ -118,6 +118,20 @@ def test_parse_invalid_raises():
         node.parse_llm_output("[1, 2, 3]")  # 최상위 object 아님
 
 
+def test_parse_rejects_extra_top_key():
+    with pytest.raises(node.LlmOutputParseError):
+        node.parse_llm_output(json.dumps(
+            {"interpretation_text": "x", "extra": {"signal_score": 1.0}}, ensure_ascii=False))
+
+
+def test_parse_rejects_extra_detail_key():
+    with pytest.raises(node.LlmOutputParseError):
+        node.parse_llm_output(json.dumps(
+            {"interpretation_text": "x",
+             "details": [{"indicator": "moving_average", "detail": "d", "signal": "negative"}]},
+            ensure_ascii=False))
+
+
 def test_generate_single_call():
     client = FakeLlm(VALID_OUTPUT)
     out = node.generate(client, template="{payload_json}", payload={"a": 1})
@@ -137,6 +151,28 @@ def test_verify_pass_and_fail():
                              {"indicator": "volume", "detail": "거래량은 중립 수준입니다."}]}
     bad = node.verify(distorted, regime=_regime(), signal=_signal(), signals=_signals())
     assert not bad.passed
+
+
+def test_verify_low_confidence_high_claim_fails():
+    out = {"interpretation_text": "과열 국면이며 약한 긍정입니다. 신뢰도가 높습니다.",
+           "details": [{"indicator": "moving_average", "detail": "이동평균선 긍정 신호."},
+                       {"indicator": "rsi", "detail": "RSI는 중립 구간입니다."},
+                       {"indicator": "volume", "detail": "거래량은 중립 수준입니다."}]}
+    result = node.verify(out, regime=_regime(), signal=_signal(level=ConfidenceLevel.LOW),
+                         signals=_signals())
+    assert not result.passed
+    assert any(f.reason.startswith("conflict") for f in result.failures)
+
+
+def test_verify_risk_omission_fails():
+    out = {"interpretation_text": "과열 국면이며 약한 긍정입니다.",  # 거래량/위험 언급 없음
+           "details": [{"indicator": "moving_average", "detail": "이동평균선 긍정 신호."},
+                       {"indicator": "rsi", "detail": "RSI는 중립 구간입니다."},
+                       {"indicator": "volume", "detail": "거래량은 중립 수준입니다."}]}
+    risks = [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="거래량 확인이 약합니다.")]
+    result = node.verify(out, regime=_regime(), signal=_signal(), signals=_signals(), risks=risks)
+    assert not result.passed
+    assert any(f.reason == "risk_not_mentioned" for f in result.failures)
 
 
 # ── 병합 (detail만·source 처리) ─────────────────────────────────────────────

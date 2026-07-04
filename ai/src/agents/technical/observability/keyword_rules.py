@@ -111,33 +111,74 @@ ALIGNMENT_RULES: dict[AlignmentFlag, LabelRule] = {
 }
 
 
-# ── 지표별 detail signal — 확정 signal과 반대 뉘앙스만 잡는다(대표어 미요구, test_plan §5.6).
+# ── 지표별 detail signal — 대표어 필수 + 반전 서술 차단(test_plan §5.4·§5.6).
+# neutral 충돌어는 "긍정/부정" 단독이 아니라 방향 단정 표현으로 둔다 — "긍정도 부정도 아닌 중립"
+# 같은 정상 중립 서술을 오탐하지 않기 위함.
 SIGNAL_RULES: dict[Signal, LabelRule] = {
     Signal.POSITIVE: LabelRule(
-        conflict_any=("부정적", "약세"),
-        require_representative=False,
+        required_any=("긍정",),
+        conflict_any=("부정", "약세"),
     ),
     Signal.NEUTRAL: LabelRule(
-        conflict_any=("부정적", "긍정적"),
-        require_representative=False,
+        required_any=("중립",),
+        conflict_any=("강한 긍정", "강한 부정", "긍정 우세", "부정 우세"),
     ),
     Signal.NEGATIVE: LabelRule(
-        conflict_any=("긍정적", "강세"),
-        require_representative=False,
+        required_any=("부정",),
+        conflict_any=("긍정", "강세"),
     ),
 }
 
 
+# ── confidence_level — 반대 라벨 신뢰도 단정만 잡는다(대표어 미요구, test_plan §5.4).
+# medium은 양방향 단정을 결정론으로 가르기 어려워 검사하지 않는다(Future Work).
+CONFIDENCE_RULES: dict[ConfidenceLevel, LabelRule] = {
+    ConfidenceLevel.LOW: LabelRule(
+        conflict_any=("높은 신뢰도", "신뢰도가 높", "신뢰도는 높", "신뢰도 높음", "매우 높은 신뢰"),
+        require_representative=False,
+    ),
+    ConfidenceLevel.HIGH: LabelRule(
+        conflict_any=("낮은 신뢰도", "신뢰도가 낮", "신뢰도는 낮", "신뢰도 낮음"),
+        require_representative=False,
+    ),
+    ConfidenceLevel.MEDIUM: LabelRule(require_representative=False),
+}
+
+
+# ── risk 언급 판정어 — risk.items가 있는데 interpretation이 하나도 언급 안 하면 실패(test_plan §5.4).
+# 확정 flag 중 최소 1개의 판정어가 문장에 있으면 통과(전부 나열할 필요 없음).
+RISK_MENTION_TERMS: dict[RiskFlag, tuple[str, ...]] = {
+    RiskFlag.VOLUME_NOT_CONFIRMED: ("거래량",),
+    RiskFlag.NEAR_RESISTANCE: ("저항",),
+    RiskFlag.NEAR_SUPPORT: ("지지",),
+    RiskFlag.MIXED_SIGNALS: ("엇갈", "혼재"),
+    RiskFlag.OVERHEATED_MOMENTUM: ("과열", "과매수"),
+    RiskFlag.COUNTER_HIGHER_TREND: ("역행", "상위 추세"),
+    RiskFlag.LOW_LIQUIDITY: ("유동성", "거래대금"),
+}
+
+
 # ── 금지어 — test_plan §5.4. 부정문 안에 있어도 실패(사용자 노출 문구 정책 위반).
+# 투자 조언성 표현·미래 단정·수익 보장·목표가(회피형 포함). 출력 숫자 전면 대조는 하지 않되,
+# 조언성 숫자 표현(목표 가격/목표주가)은 금지어로 막는다(§5.4·§5.8).
 FORBIDDEN_TERMS: tuple[str, ...] = (
     "매수",
     "매도",
     "손절",
     "목표가",
+    "목표 가격",
+    "목표주가",
     "진입",
+    "추천",
     "예상 수익률",
     "목표 수익률",
+    "수익 가능성",
     "수익 보장",
+    "보장합니다",
+    "보장됩니다",
+    "확실합니다",
+    "상승할 가능성",
+    "하락할 것",
 )
 
 
