@@ -208,3 +208,150 @@ def test_fetch_ohlcv_output2_normal(monkeypatch):
     _patch_fetch_deps(monkeypatch, {"rt_cd": "0", "output2": [SAMPLE_ITEM]})
     result = kc.fetch_ohlcv("373220", "D")
     assert len(result) == 1 and result[0].date == "2026-07-03"
+
+
+# ── KIS pagination (PAGE-*, mock 전용) ────────────────────────────────────────
+from datetime import date, datetime, timedelta  # noqa: E402
+
+from src.agents.technical.config import (  # noqa: E402
+    KIS_FETCH_LOOKBACK_DAYS,
+    KIS_MAX_CHUNKS,
+)
+
+
+def _d(ymd: str) -> date:
+    return date(int(ymd[:4]), int(ymd[4:6]), int(ymd[6:8]))
+
+
+def _item(ymd: str) -> dict:
+    return {**SAMPLE_ITEM, "stck_bsop_date": ymd}
+
+
+def _mock_market(available_ymd, *, recorder=None, ignore_from=False):
+    """KIS mock: 요청 [date_from, date_to] 창의 available date를 최신순 100건 반환."""
+    dset = sorted(set(available_ymd))
+
+    def _mock(settings, token, ticker, period, date_from, date_to, client):
+        if recorder is not None:
+            recorder.append((date_from, date_to))
+        lo = "00000000" if ignore_from else date_from
+        got = sorted((x for x in dset if lo <= x <= date_to), reverse=True)[:100]
+        return {"rt_cd": "0", "output2": [_item(x) for x in got]}
+    return _mock
+
+
+def _mock_fixed(fixed_ymd, *, recorder=None):
+    """창과 무관하게 항상 같은 date 1건 반환 (정체 시나리오)."""
+    def _mock(settings, token, ticker, period, date_from, date_to, client):
+        if recorder is not None:
+            recorder.append((date_from, date_to))
+        return {"rt_cd": "0", "output2": [_item(fixed_ymd)]}
+    return _mock
+
+
+def _mock_endpoint(*, recorder=None):
+    """창의 date_to(최신)만 1건 반환 — 매 청크 과거로 이동(무한 진행 시나리오)."""
+    def _mock(settings, token, ticker, period, date_from, date_to, client):
+        if recorder is not None:
+            recorder.append((date_from, date_to))
+        return {"rt_cd": "0", "output2": [_item(date_to)]}
+    return _mock
+
+
+def _patch(monkeypatch, mock):
+    monkeypatch.setattr(kc, "load_kis_settings", lambda: kc.KISSettings("k", "s", "https://x:9443"))
+    monkeypatch.setattr(kc, "get_access_token", lambda **kw: "tok")
+    monkeypatch.setattr(kc, "_call_chart", mock)
+
+
+def _dates_every(end: date, days: int, step: int = 10) -> list[str]:
+    return [(end - timedelta(days=k)).strftime("%Y%m%d") for k in range(0, days + 1, step)]
+
+
+# PAGE-01 / PAGE-10: period별 기본 lookback을 range 조회에 사용
+@pytest.mark.parametrize("period", ["D", "W", "M"])
+def test_fetch_ohlcv_uses_period_lookback(monkeypatch, period):
+    today = datetime.now().date()
+    rec = []
+    _patch(monkeypatch, _mock_market(_dates_every(today, KIS_FETCH_LOOKBACK_DAYS[period] + 20), recorder=rec))
+    kc.fetch_ohlcv("373220", period)
+    expected_start = (today - timedelta(days=KIS_FETCH_LOOKBACK_DAYS[period])).strftime("%Y%m%d")
+    assert min(f for f, _ in rec) == expected_start   # start까지 확보
+    assert max(t for _, t in rec) == today.strftime("%Y%m%d")  # end=오늘
+
+
+# PAGE-02 / PAGE-03: 여러 청크 + 과거 방향 진행
+def test_multiple_chunks_walk_backward(monkeypatch):
+    end = date(2026, 7, 4)
+    avail = _dates_every(end, 300, step=15)
+    rec = []
+    _patch(monkeypatch, _mock_market(avail, recorder=rec))
+    kc.fetch_ohlcv_range("373220", "D", (end - timedelta(days=300)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    assert len(rec) >= 3                                   # 여러 청크
+    date_tos = [t for _, t in rec]
+    assert date_tos == sorted(date_tos, reverse=True)      # date_to 감소(과거 방향)
+
+
+# PAGE-04 / PAGE-05: 경계 dedup + 오름차순
+def test_dedup_and_ascending(monkeypatch):
+    end = date(2026, 7, 4)
+    avail = _dates_every(end, 250, step=5)
+    _patch(monkeypatch, _mock_market(avail))
+    result = kc.fetch_ohlcv_range("373220", "D",
+                                  (end - timedelta(days=250)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    dates = [b.date for b in result]
+    assert dates == sorted(dates)                          # 과거→최신
+    assert len(dates) == len(set(dates))                   # date dedup(경계 중복 제거)
+
+
+# PAGE-06: 범위 밖 date 제거
+def test_range_filter_drops_out_of_range(monkeypatch):
+    end = date(2026, 7, 4)
+    avail = _dates_every(end, 400, step=10)   # start보다 과거 date도 포함
+    # ignore_from=True → 청크가 date_from 아래 date도 반환 → 최종 filter가 제거해야 함
+    _patch(monkeypatch, _mock_market(avail, ignore_from=True))
+    start = end - timedelta(days=120)
+    result = kc.fetch_ohlcv_range("373220", "D", start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    assert result and all(start.isoformat() <= b.date <= end.isoformat() for b in result)
+
+
+# PAGE-07: 빈 청크 시 중단
+def test_empty_chunk_stops(monkeypatch):
+    end = date(2026, 7, 4)
+    avail = _dates_every(end, 40, step=5)      # 최근 40일에만 데이터
+    rec = []
+    _patch(monkeypatch, _mock_market(avail, recorder=rec))
+    result = kc.fetch_ohlcv_range("373220", "D",
+                                  (end - timedelta(days=300)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    assert len(rec) == 2                        # 1청크 데이터 + 2청크 빈 배열 → 중단
+    assert result and all(b.date >= (end - timedelta(days=40)).isoformat() for b in result)
+
+
+# PAGE-08: 가장 오래된 date 정체 시 중단
+def test_stops_when_oldest_not_progressing(monkeypatch):
+    end = date(2026, 7, 4)
+    rec = []
+    _patch(monkeypatch, _mock_fixed("20260601", recorder=rec))
+    kc.fetch_ohlcv_range("373220", "D",
+                         (end - timedelta(days=300)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    assert len(rec) == 2                        # 2청크째 같은 date → 중단
+
+
+# PAGE-09: KIS_MAX_CHUNKS 상한에서 중단
+def test_stops_at_max_chunks(monkeypatch):
+    end = date(2026, 7, 4)
+    rec = []
+    _patch(monkeypatch, _mock_endpoint(recorder=rec))
+    # 매우 넓은 범위 + 작은 청크 → 정상 종료 전에 상한 도달
+    kc.fetch_ohlcv_range("373220", "D",
+                         (end - timedelta(days=5000)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    assert len(rec) == KIS_MAX_CHUNKS
+
+
+# PAGE-11: allowlist/period는 pagination에서도 KIS 호출 전 거부
+def test_pagination_rejects_out_of_scope(monkeypatch):
+    _patch(monkeypatch, _mock_fixed("20260601"))
+    with pytest.raises(OutOfScopeTickerError):
+        kc.fetch_ohlcv_range("005930", "D", "20260101", "20260704")
+    with pytest.raises(InvalidPeriodError):
+        kc.fetch_ohlcv_range("373220", "Y", "20260101", "20260704")

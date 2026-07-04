@@ -21,6 +21,9 @@ import httpx
 
 from ..config import (
     KIS_BACKOFF_SECONDS,
+    KIS_FETCH_CHUNK_DAYS,
+    KIS_FETCH_LOOKBACK_DAYS,
+    KIS_MAX_CHUNKS,
     KIS_MAX_RETRIES,
     KIS_PERIOD_DAILY,
     KIS_PERIOD_MONTHLY,
@@ -59,9 +62,6 @@ REQUIRED_KIS_FIELDS = (
     KIS_FIELD_CLOSE, KIS_FIELD_VOLUME, KIS_FIELD_TRADING_VALUE,
 )
 
-# 단일 호출 조회 창(달력일). §11.4 실측 기준: D 100건≈5개월, W/M은 100건 미만.
-_LOOKBACK_DAYS_DAILY = 480
-_LOOKBACK_DAYS_WEEKLY_MONTHLY = 365 * 5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -229,12 +229,14 @@ def get_access_token(*, client: httpx.Client | None = None) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # 기간별시세 호출
 # ─────────────────────────────────────────────────────────────────────────────
-def _default_date_range(period: str, today: date | None = None) -> tuple[str, str]:
-    """단일 호출용 조회 구간(YYYYMMDD). 최근 봉 위주로 받는다(구간 분할은 후속 단계)."""
-    today = today or datetime.now().date()
-    lookback = _LOOKBACK_DAYS_DAILY if period == KIS_PERIOD_DAILY else _LOOKBACK_DAYS_WEEKLY_MONTHLY
-    start = today - timedelta(days=lookback)
-    return start.strftime("%Y%m%d"), today.strftime("%Y%m%d")
+def _normalize_to_date(value: str) -> date:
+    """'YYYYMMDD' 또는 'YYYY-MM-DD' 입력 → date. 실제 달력 유효성은 _to_iso_date로 검증."""
+    text = str(value).strip().replace("-", "")
+    return date.fromisoformat(_to_iso_date(text))
+
+
+def _ymd(d: date) -> str:
+    return d.strftime("%Y%m%d")
 
 
 def _sleep_backoff(attempt: int) -> None:
@@ -299,31 +301,91 @@ def _call_chart(
     raise KisApiError(f"KIS 최대 재시도({KIS_MAX_RETRIES}) 초과: {last_err}")
 
 
-def fetch_ohlcv(ticker: str, period: str, *, client: httpx.Client | None = None) -> list[OHLCV]:
-    """한 종목·한 타임프레임(D/W/M)의 내부 표준 OHLCV(과거→최신)를 반환한다(단일 호출)."""
-    validate_ticker(ticker)
-    validate_period(period)
+def _extract_output2(data: dict) -> list:
+    """output2 키 부재(비정상 응답)·비-list는 fail-fast, 빈 배열([])은 정상으로 반환.
 
-    settings = load_kis_settings()
-    token = get_access_token(client=client)
-    date_from, date_to = _default_date_range(period)
-
-    owns_client = client is None
-    client = client or httpx.Client(timeout=KIS_TIMEOUT_SECONDS)
-    try:
-        data = _call_chart(settings, token, ticker, period, date_from, date_to, client)
-    finally:
-        if owns_client:
-            client.close()
-
-    # output2 키 부재(비정상 응답)와 빈 배열(거래정지 등 정상)을 구분한다.
-    # 키 자체가 없거나 list가 아니면 fail-fast(technical_coding_guidelines §8.3·§9.1).
+    (technical_coding_guidelines §8.3·§9.1) 실제 빈 데이터와 잘못된 응답을 구분한다.
+    """
     if "output2" not in data:
         raise KisFieldError("KIS 응답에 output2 키가 없습니다 (비정상 응답)")
     output2 = data["output2"]
     if not isinstance(output2, list):
         raise KisFieldError(f"output2가 list가 아닙니다: {type(output2).__name__}")
-    return parse_kis_ohlcv_output(output2)
+    return output2
+
+
+def _fetch_ohlcv_range(
+    ticker: str, period: str, start: date, end: date, client: httpx.Client,
+) -> list[OHLCV]:
+    """[start, end]를 청크로 나눠 KIS를 여러 번 호출·병합한다(kis_mapping §8.1).
+
+    end에서 과거 방향으로 KIS_FETCH_CHUNK_DAYS[period]씩 이동하며, 정지 조건(목표 도달·빈 청크·
+    최고(最古) date 정체·KIS_MAX_CHUNKS) 중 하나면 멈춘다. 결과는 date dedup → 범위 필터 →
+    과거→최신 정렬. 청크 실패·EGW00201은 _call_chart의 기존 retry/backoff를 그대로 쓴다.
+    """
+    settings = load_kis_settings()
+    token = get_access_token(client=client)
+    chunk_days = KIS_FETCH_CHUNK_DAYS[period]
+
+    by_date: dict[str, OHLCV] = {}
+    cursor_end = end
+    oldest_seen: str | None = None
+    for _ in range(KIS_MAX_CHUNKS):
+        chunk_start = max(start, cursor_end - timedelta(days=chunk_days))
+        data = _call_chart(settings, token, ticker, period, _ymd(chunk_start), _ymd(cursor_end), client)
+        bars = parse_kis_ohlcv_output(_extract_output2(data))  # 빈 배열이면 []
+
+        if not bars:  # 정지 ②: 빈 청크
+            break
+        for bar in bars:
+            by_date[bar.date] = bar
+
+        chunk_oldest = min(bar.date for bar in bars)
+        if oldest_seen is not None and chunk_oldest >= oldest_seen:  # 정지 ③: 더 과거로 안 감
+            break
+        oldest_seen = chunk_oldest
+        if chunk_start <= start:  # 정지 ①: 목표 start까지 확보
+            break
+        cursor_end = chunk_start  # 다음 청크는 여기서 끝(경계 1일 겹침 → date dedup으로 흡수)
+
+    start_iso, end_iso = start.isoformat(), end.isoformat()
+    merged = [bar for bar in by_date.values() if start_iso <= bar.date <= end_iso]
+    merged.sort(key=lambda bar: bar.date)  # 과거→최신
+    return merged
+
+
+def fetch_ohlcv_range(
+    ticker: str, period: str, start_date: str, end_date: str,
+    *, client: httpx.Client | None = None,
+) -> list[OHLCV]:
+    """명시 구간 [start_date, end_date]의 내부 표준 OHLCV(과거→최신)를 반환한다.
+
+    start_date·end_date는 'YYYYMMDD' 또는 'YYYY-MM-DD' 허용. 구간 분할·병합은 내부에서 처리.
+    """
+    validate_ticker(ticker)
+    validate_period(period)
+    start, end = _normalize_to_date(start_date), _normalize_to_date(end_date)
+
+    owns_client = client is None
+    client = client or httpx.Client(timeout=KIS_TIMEOUT_SECONDS)
+    try:
+        return _fetch_ohlcv_range(ticker, period, start, end, client)
+    finally:
+        if owns_client:
+            client.close()
+
+
+def fetch_ohlcv(ticker: str, period: str, *, client: httpx.Client | None = None) -> list[OHLCV]:
+    """한 종목·한 타임프레임(D/W/M)의 내부 표준 OHLCV(과거→최신)를 반환한다.
+
+    KIS 단일 호출 100건 제한을 넘기기 위해 period별 KIS_FETCH_LOOKBACK_DAYS 만큼
+    구간 분할 조회한다(kis_mapping §8.1). 소비자(chart_builder·regime)는 시그니처 변경 없이 충분한 기간을 받는다.
+    """
+    validate_ticker(ticker)
+    validate_period(period)
+    end = datetime.now().date()
+    start = end - timedelta(days=KIS_FETCH_LOOKBACK_DAYS[period])
+    return fetch_ohlcv_range(ticker, period, _ymd(start), _ymd(end), client=client)
 
 
 def fetch_multi_timeframe_ohlcv(ticker: str) -> dict[str, list[OHLCV]]:

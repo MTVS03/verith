@@ -73,6 +73,25 @@
 
 *`confidence_level`은 JSON에는 있으나 DB 저장 대상 아님(재계산 파생값). synthesis는 `contracts.TechnicalSignal`을 직접 조립하지 않고 중간 dataclass를 낸다(detail·detail_source는 LLM 단계).*
 
+### 3.2 KIS 구간 분할 조회 검증 (PAGE-*)
+
+**성격:** 정상 동작 확인. **대상:** `services/kis_client.py`의 `fetch_ohlcv`·`fetch_ohlcv_range` pagination. **mock만** — 실 KIS 호출 없음. 기준: `kis_mapping §8.1`, `config.md §8.1`.
+
+| ID | 입력/상황 | 기대 결과 |
+| --- | --- | --- |
+| PAGE-01 | `fetch_ohlcv(ticker, "D")` | `KIS_FETCH_LOOKBACK_DAYS["D"]` 기간을 range 조회 |
+| PAGE-02 | 여러 청크 필요한 범위 | `_call_chart`가 2회 이상 호출 |
+| PAGE-03 | 청크 진행 방향 | `end_date`에서 과거 방향으로 date_to가 감소 |
+| PAGE-04 | 경계 중복 date | 최종 결과에서 date dedup |
+| PAGE-05 | 병합 결과 | 과거→최신 오름차순 |
+| PAGE-06 | 범위 밖 date | `start ≤ date ≤ end`만 유지 |
+| PAGE-07 | 빈 청크 | 즉시 중단 |
+| PAGE-08 | 가장 오래된 date 정체 | 중단(무한 루프 방지) |
+| PAGE-09 | 넓은 범위·작은 청크 | `KIS_MAX_CHUNKS`에서 중단 |
+| PAGE-10 | D/W/M | 각 period가 pagination config 사용 |
+
+*allowlist·period 검증, output2 키 부재/비-list fail-fast, `_to_iso_date` 달력 검증, 리샘플 금지 등 기존 정책은 pagination 후에도 유지된다.*
+
 ---
 
 ## 4. 검증 ② regime 규칙
