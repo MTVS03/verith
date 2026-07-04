@@ -10,17 +10,21 @@ KIS 원본 필드명(`stck_bsop_date` 등)은 `services/kis_client.py` 변환 �
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OHLCV(BaseModel):
-    """한 봉(일/주/월)의 내부 표준 OHLCV. 계약에 없는 필드 유입 차단(extra=forbid)."""
+    """한 봉(일/주/월)의 내부 표준 OHLCV. 계약에 없는 필드 유입 차단(extra=forbid).
+
+    가격·거래량·거래대금은 음수가 될 수 없으므로 ge=0으로 제약한다(chart_data 계약에서
+    candles로 그대로 재사용되며, 시세 값의 음수는 비정상 응답이다).
+    """
     model_config = ConfigDict(extra="forbid")
 
     date: str  # ISO 형식 "YYYY-MM-DD" (KIS 원본 "YYYYMMDD"를 kis_client에서 정규화)
-    open: int | float
-    high: int | float
-    low: int | float
-    close: int | float
-    volume: int
-    trading_value: int  # KIS `acml_tr_pbmn`(누적 거래대금). 유동성 판정 근거값.
+    open: int | float = Field(ge=0)
+    high: int | float = Field(ge=0)
+    low: int | float = Field(ge=0)
+    close: int | float = Field(ge=0)
+    volume: int = Field(ge=0)
+    trading_value: int = Field(ge=0)  # KIS `acml_tr_pbmn`(누적 거래대금). 유동성 판정 근거값.
