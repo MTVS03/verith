@@ -47,11 +47,13 @@ KIS_PERIOD_WEEKLY = "W"        # KIS FID_PERIOD_DIV_CODE 주봉
 KIS_PERIOD_MONTHLY = "M"       # KIS FID_PERIOD_DIV_CODE 월봉
 MIN_WEEKLY_BARS = 12           # 주봉 추세 판정 최소 봉 수 (미만이면 unavailable)
 MIN_MONTHLY_BARS = 6           # 월봉 추세 판정 최소 봉 수
-TREND_SLOPE_LOOKBACK = 4       # 주/월봉 추세 기울기 판정 기간
+TREND_SLOPE_LOOKBACK = 4       # 주/월봉 추세 기울기 판정 기간 (몇 봉 전과 비교)
+TREND_SIDEWAYS_THRESHOLD_PCT = 0.01  # 상위 추세 sideways 판정 밴드 (변화율 ±1% 이내)
 ```
 
 *연결: `regime/multiframe.py`, `services/kis_client.py`, `regime_rules.md` 멀티프레임*
 *주봉·월봉은 KIS `inquire-daily-itemchartprice`를 `FID_PERIOD_DIV_CODE=W/M`으로 직접 호출해 받는다. 일봉에서 리샘플로 파생하지 않는다 — 세 타임프레임 모두 KIS 원본 시세.*
+*주/월봉 추세는 절대 가격차가 아니라 **변화율**로 본다: `slope_pct = (최신 종가 − TREND_SLOPE_LOOKBACK봉 전 종가) / 그 종가`. `slope_pct > +TREND_SIDEWAYS_THRESHOLD_PCT`면 up, `< −TREND_SIDEWAYS_THRESHOLD_PCT`면 down, 그 사이면 sideways. 이 밴드가 없으면(SLOPE_MIN=0 기준) 실데이터에서 sideways가 거의 나오지 않아 도입한다. 일봉 regime의 MA 기울기 판정은 `SLOPE_MIN=0.0`(§2)을 그대로 쓰며 이 값과 무관하다.*
 
 ## 4. 신호 종합 (synthesis)
 

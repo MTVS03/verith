@@ -146,3 +146,28 @@ VOLUME_AVG_WINDOW = 20          # 거래량/거래대금 평균 기간
 
 # support/resistance 탐색 기간 (config.md §2). regime 임계값은 제외하고 이 값만 가져온다.
 SUPPORT_LOOKBACK_DAYS = 20      # 주요 지지/저항 탐색 기간
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. 일봉 regime 판정 상수 (config.md §2). regime/rules.py가 사용한다.
+# ─────────────────────────────────────────────────────────────────────────────
+RSI_OVERBOUGHT = 70                   # 과열 판정 RSI 상한 (>= 포함)
+RSI_OVERSOLD = 35                     # 과매도 반등 판정 RSI 하한 (<= 포함)
+MIN_DAILY_BARS = 60                   # 국면 판정 최소 일봉 수 (미만이면 unavailable)
+
+NEAR_BAND_THRESHOLD = 0.98            # 볼밴 상단 근처: 현재가 >= 상단 × 이 값
+NEAR_SUPPORT_THRESHOLD_PCT = 0.02     # 지지 근처: 최근 저점과 차이 2% 이내
+NEAR_RESISTANCE_THRESHOLD_PCT = 0.02  # 저항 근처: 최근 고점과 차이 2% 이내 (사용은 risk 단계)
+REBOUND_WICK_RATIO = 1.5             # 반등 캔들: 아랫꼬리 > 몸통 × 이 값
+SLOPE_LOOKBACK_DAYS = 5              # MA 기울기 판정 기간 (우상향/전환)
+SLOPE_MIN = 0.0                     # 우상향 최소 기울기 (절대 가격차 기준)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. 멀티프레임 regime 보정 상수 (config.md §3). regime/multiframe.py가 사용한다.
+#    KIS_PERIOD_* 는 위 §2(2번 섹션)에 이미 정의됨.
+# ─────────────────────────────────────────────────────────────────────────────
+MIN_WEEKLY_BARS = 12                 # 주봉 추세 판정 최소 봉 수 (미만이면 unavailable)
+MIN_MONTHLY_BARS = 6                 # 월봉 추세 판정 최소 봉 수
+TREND_SLOPE_LOOKBACK = 4             # 주/월봉 추세 기울기 판정 기간 (몇 봉 전과 비교)
+TREND_SIDEWAYS_THRESHOLD_PCT = 0.01  # 상위 추세 sideways 판정 밴드 (변화율 ±1% 이내)
