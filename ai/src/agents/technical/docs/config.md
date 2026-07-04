@@ -228,6 +228,14 @@ REGEN_MAX_COUNT = 1             # 검증 ③ 실패 시 재생성 최대 횟수
 CHART_PERIODS = ["3m", "1y", "5y"]   # 기간 토글 (1d는 Beta, chart_annotation_spec §3.1)
 # 3m: 일봉 / 1y: 일봉·주봉 / 5y: 주봉·월봉
 
+# 기간별 candle slice 창 (기본 candle source의 마지막 candle date 기준 최근 N일).
+# 데이터 부족 시 확보된 봉까지만 사용하고 예외를 내지 않는다. D→W/M 리샘플은 하지 않는다.
+CHART_PERIOD_DAYS = {
+    "3m": 90,
+    "1y": 365,
+    "5y": 1825,
+}
+
 # 차트 annotation 계산 상수 (chart_annotation_spec.md)
 VOLUME_SPIKE_MULTIPLIER = 2.0          # 거래량 급증: 20봉 평균 × 배수
 TRADING_VALUE_SPIKE_MULTIPLIER = 2.0   # 거래대금 급증 배수
@@ -238,6 +246,14 @@ CUP_LOOKBACK_DAYS = 120                # 컵앤핸들 탐색 기간
 CUP_MIN_DEPTH_PCT = 0.10               # 컵 최소 깊이
 CUP_MAX_DEPTH_PCT = 0.40               # 컵 최대 깊이
 HANDLE_MAX_PULLBACK_PCT = 0.15         # 핸들 최대 되돌림
+
+# annotation 중복 제거 창 — 달력일이 아니라 candle(봉) index 거리 기준(주말·휴장 왜곡 방지).
+# chart_annotation_spec §8.4의 "거래일/4주"를 봉 개수로 표현. 5y는 주봉이라 "4주"=4봉.
+ANNOTATION_DEDUP_BARS = {
+    "3m": 5,    # 3m(일봉): 5봉
+    "1y": 10,   # 1y(일봉): 10봉
+    "5y": 4,    # 5y(주봉): 4봉(≈4주)
+}
 ```
 
 *연결: `charts/chart_builder.py`, `enums.md` period, `chart_annotation_spec.md`*
