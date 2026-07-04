@@ -87,10 +87,14 @@
 | PAGE-06 | 범위 밖 date | `start ≤ date ≤ end`만 유지 |
 | PAGE-07 | 빈 청크 | 즉시 중단 |
 | PAGE-08 | 가장 오래된 date 정체 | 중단(무한 루프 방지) |
-| PAGE-09 | 넓은 범위·작은 청크 | `KIS_MAX_CHUNKS`에서 중단 |
+| PAGE-09 | 넓은 범위·작은 청크로 MAX_CHUNKS 소진 + start 미달 | **예외(`KisRangeIncompleteError`)** — partial 반환 금지 |
 | PAGE-10 | D/W/M | 각 period가 pagination config 사용 |
+| PAGE-11 | MAX_CHUNKS 전에 start 도달 | 정상 반환 |
+| PAGE-12 | 예외 메시지 | requested 범위·oldest_fetched 포함 |
+| PAGE-13 | `start_date > end_date` | 토큰/네트워크 호출 전 fail-fast |
+| PAGE-14 | 날짜 입력 형식 | `YYYYMMDD`·`YYYY-MM-DD`만 허용, `2026--07-04`·`20-2607-04`·`2026/07/04`·존재하지 않는 날짜 거부 |
 
-*allowlist·period 검증, output2 키 부재/비-list fail-fast, `_to_iso_date` 달력 검증, 리샘플 금지 등 기존 정책은 pagination 후에도 유지된다.*
+*allowlist·period 검증, output2 키 부재/비-list fail-fast, `_to_iso_date` 달력 검증, 리샘플 금지 등 기존 정책은 pagination 후에도 유지된다. `fetch_ohlcv_range`는 요청 범위를 완전히 확보하지 못하면 partial 결과를 정상 반환하지 않는다.*
 
 ---
 

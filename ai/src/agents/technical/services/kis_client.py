@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import date, datetime, timedelta
 
@@ -85,6 +86,15 @@ class KisFieldError(KisError):
 
 class KisApiError(KisError):
     """KIS API 오류(rt_cd≠0·HTTP 오류·재시도 초과)."""
+
+
+class KisRangeIncompleteError(KisError):
+    """구간 분할 조회가 KIS_MAX_CHUNKS 안에 요청 start_date까지 확보하지 못함(partial 반환 금지)."""
+
+
+# 허용 날짜 입력 형식 (kis_mapping §8.1). 이 둘 외에는 거부.
+_YMD_RE = re.compile(r"^\d{8}$")
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,9 +240,19 @@ def get_access_token(*, client: httpx.Client | None = None) -> str:
 # 기간별시세 호출
 # ─────────────────────────────────────────────────────────────────────────────
 def _normalize_to_date(value: str) -> date:
-    """'YYYYMMDD' 또는 'YYYY-MM-DD' 입력 → date. 실제 달력 유효성은 _to_iso_date로 검증."""
-    text = str(value).strip().replace("-", "")
-    return date.fromisoformat(_to_iso_date(text))
+    """'YYYYMMDD' 또는 'YYYY-MM-DD' **두 형식만** 허용 → date.
+
+    형식을 정규식으로 먼저 검증한 뒤(그 외 '2026--07-04'·'2026/07/04' 등 거부),
+    _to_iso_date로 실제 달력 유효성까지 확인한다.
+    """
+    text = str(value).strip()
+    if _YMD_RE.match(text):
+        ymd = text
+    elif _ISO_DATE_RE.match(text):
+        ymd = text.replace("-", "")
+    else:
+        raise KisFieldError(f"날짜 형식 오류 ({value!r}), 'YYYYMMDD' 또는 'YYYY-MM-DD'만 허용")
+    return date.fromisoformat(_to_iso_date(ymd))
 
 
 def _ymd(d: date) -> str:
@@ -335,18 +355,26 @@ def _fetch_ohlcv_range(
         data = _call_chart(settings, token, ticker, period, _ymd(chunk_start), _ymd(cursor_end), client)
         bars = parse_kis_ohlcv_output(_extract_output2(data))  # 빈 배열이면 []
 
-        if not bars:  # 정지 ②: 빈 청크
+        if not bars:  # 자연 종료 ②: 빈 청크(더 과거 데이터 없음)
             break
         for bar in bars:
             by_date[bar.date] = bar
 
         chunk_oldest = min(bar.date for bar in bars)
-        if oldest_seen is not None and chunk_oldest >= oldest_seen:  # 정지 ③: 더 과거로 안 감
+        if chunk_start <= start:  # 자연 종료 ①: 목표 start까지 확보
+            break
+        if oldest_seen is not None and chunk_oldest >= oldest_seen:  # 자연 종료 ③: 더 과거로 안 감(정체)
             break
         oldest_seen = chunk_oldest
-        if chunk_start <= start:  # 정지 ①: 목표 start까지 확보
-            break
         cursor_end = chunk_start  # 다음 청크는 여기서 끝(경계 1일 겹침 → date dedup으로 흡수)
+    else:
+        # KIS_MAX_CHUNKS를 모두 쓰고도 요청 start까지 못 감 → 잘린 partial을 조용히 반환하지 않는다.
+        raise KisRangeIncompleteError(
+            f"요청 범위를 KIS_MAX_CHUNKS({KIS_MAX_CHUNKS}) 안에 확보하지 못했습니다: "
+            f"ticker={ticker} period={period} "
+            f"requested_start={start.isoformat()} requested_end={end.isoformat()} "
+            f"oldest_fetched={oldest_seen}"
+        )
 
     start_iso, end_iso = start.isoformat(), end.isoformat()
     merged = [bar for bar in by_date.values() if start_iso <= bar.date <= end_iso]
@@ -360,11 +388,17 @@ def fetch_ohlcv_range(
 ) -> list[OHLCV]:
     """명시 구간 [start_date, end_date]의 내부 표준 OHLCV(과거→최신)를 반환한다.
 
-    start_date·end_date는 'YYYYMMDD' 또는 'YYYY-MM-DD' 허용. 구간 분할·병합은 내부에서 처리.
+    start_date·end_date는 'YYYYMMDD' 또는 'YYYY-MM-DD'만 허용. 구간 분할·병합은 내부에서 처리.
+
+    fail-fast(KIS 호출 전): 잘못된 날짜 형식, `start_date > end_date`(역전 범위)는 토큰 발급·
+    네트워크 호출 전에 거부한다. 요청 범위를 `KIS_MAX_CHUNKS` 안에 확보하지 못하면
+    partial을 반환하지 않고 `KisRangeIncompleteError`를 던진다.
     """
     validate_ticker(ticker)
     validate_period(period)
     start, end = _normalize_to_date(start_date), _normalize_to_date(end_date)
+    if start > end:  # 역전 범위 → 토큰/네트워크 전에 거부
+        raise ValueError(f"start_date가 end_date보다 뒤입니다: start={start_date!r} end={end_date!r}")
 
     owns_client = client is None
     client = client or httpx.Client(timeout=KIS_TIMEOUT_SECONDS)

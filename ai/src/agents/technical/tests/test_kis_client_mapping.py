@@ -337,15 +337,53 @@ def test_stops_when_oldest_not_progressing(monkeypatch):
     assert len(rec) == 2                        # 2청크째 같은 date → 중단
 
 
-# PAGE-09: KIS_MAX_CHUNKS 상한에서 중단
-def test_stops_at_max_chunks(monkeypatch):
+# PAGE-09 / PAGE-12: MAX_CHUNKS 소진 + start 미달 → 예외(partial 반환 금지)
+def test_max_chunks_incomplete_raises(monkeypatch):
     end = date(2026, 7, 4)
     rec = []
     _patch(monkeypatch, _mock_endpoint(recorder=rec))
     # 매우 넓은 범위 + 작은 청크 → 정상 종료 전에 상한 도달
-    kc.fetch_ohlcv_range("373220", "D",
-                         (end - timedelta(days=5000)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
-    assert len(rec) == KIS_MAX_CHUNKS
+    with pytest.raises(kc.KisRangeIncompleteError) as ei:
+        kc.fetch_ohlcv_range("373220", "D",
+                             (end - timedelta(days=5000)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    msg = str(ei.value)
+    assert "373220" in msg and "requested_start" in msg and "oldest_fetched" in msg
+    assert len(rec) == KIS_MAX_CHUNKS      # 상한만큼 호출 후 중단
+
+
+# PAGE-11: MAX_CHUNKS 전에 start 도달 → 정상 반환
+def test_reaches_start_within_max_chunks_returns(monkeypatch):
+    end = date(2026, 7, 4)
+    avail = _dates_every(end, 150, step=10)   # 150일 ÷ chunk 100 → 2청크 < MAX
+    _patch(monkeypatch, _mock_market(avail))
+    result = kc.fetch_ohlcv_range("373220", "D",
+                                  (end - timedelta(days=150)).strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+    assert result and [b.date for b in result] == sorted(b.date for b in result)
+
+
+# PAGE-13: 역전 범위는 토큰/네트워크 전에 fail-fast
+def test_reversed_range_fail_fast_before_network(monkeypatch):
+    called = {"token": 0, "call": 0}
+    monkeypatch.setattr(kc, "load_kis_settings", lambda: kc.KISSettings("k", "s", "https://x"))
+    monkeypatch.setattr(kc, "get_access_token",
+                        lambda **kw: called.__setitem__("token", called["token"] + 1))
+    monkeypatch.setattr(kc, "_call_chart",
+                        lambda *a, **k: called.__setitem__("call", called["call"] + 1))
+    with pytest.raises(ValueError):
+        kc.fetch_ohlcv_range("373220", "D", "20260710", "20260704")
+    assert called["token"] == 0 and called["call"] == 0   # 토큰/호출 없음
+
+
+# PAGE-14: 날짜 입력 형식 엄격화
+def test_normalize_date_accepts_two_formats():
+    assert kc._normalize_to_date("20260704").isoformat() == "2026-07-04"
+    assert kc._normalize_to_date("2026-07-04").isoformat() == "2026-07-04"
+
+
+@pytest.mark.parametrize("bad", ["2026--07-04", "20-2607-04", "2026/07/04", "2026074", "20261301", "20260231"])
+def test_normalize_date_rejects_bad_format(bad):
+    with pytest.raises(KisFieldError):
+        kc._normalize_to_date(bad)
 
 
 # PAGE-11: allowlist/period는 pagination에서도 KIS 호출 전 거부
