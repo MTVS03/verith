@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -82,9 +82,13 @@ UNSUPPORTED_ENV_KEYS = ("KIS_APP_KEY", "KIS_APP_SECRET")
 
 @dataclass(frozen=True)
 class KISSettings:
-    """KIS 시세 조회에 필요한 최소 인증정보. (계좌번호는 포함하지 않는다.)"""
-    api_key: str
-    api_secret: str
+    """KIS 시세 조회에 필요한 최소 인증정보. (계좌번호는 포함하지 않는다.)
+
+    api_key·api_secret은 repr에서 제외한다 — repr(settings)·로그에 비밀값이 노출되지 않도록
+    (technical_coding_guidelines §2.2·§13.2).
+    """
+    api_key: str = field(repr=False)
+    api_secret: str = field(repr=False)
     base_url: str
 
 
@@ -206,3 +210,31 @@ CONFIDENCE_MEDIUM = 0.4            # >= 0.4 → medium, 그 외 low (표시용 �
 # ─────────────────────────────────────────────────────────────────────────────
 MIN_AVG_VOLUME = 100_000            # 최근 20일 평균 거래량 하한 (주)
 MIN_AVG_TRADING_VALUE = 1_000_000_000  # 최근 20일 평균 거래대금 하한 (원, 10억)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. 차트 상수 (config.md §10). charts/chart_builder.py가 사용한다.
+#     cup/handle 상수는 MVP 미구현이지만 정본 포팅 차원에서 함께 둔다.
+# ─────────────────────────────────────────────────────────────────────────────
+CHART_PERIODS = ["3m", "1y", "5y"]     # 기간 토글 (1d는 Beta)
+CHART_PERIOD_DAYS = {                   # 기간별 candle slice 창 (마지막 candle date 기준 최근 N일)
+    "3m": 90,
+    "1y": 365,
+    "5y": 1825,
+}
+VOLUME_SPIKE_MULTIPLIER = 2.0          # 거래량 급증: 20봉 평균 × 배수
+TRADING_VALUE_SPIKE_MULTIPLIER = 2.0   # 거래대금 급증 배수
+BOX_LOOKBACK_DAYS = 40                 # 박스권 탐색 기간
+BOX_RANGE_THRESHOLD_PCT = 0.12         # 박스권 상·하단 범위 허용 폭
+BOX_MIN_TOUCH_COUNT = 2                # 박스권 왕복 최소 횟수
+CUP_LOOKBACK_DAYS = 120                # 컵앤핸들 탐색 기간 (MVP 미구현)
+CUP_MIN_DEPTH_PCT = 0.10               # 컵 최소 깊이 (MVP 미구현)
+CUP_MAX_DEPTH_PCT = 0.40               # 컵 최대 깊이 (MVP 미구현)
+HANDLE_MAX_PULLBACK_PCT = 0.15         # 핸들 최대 되돌림 (MVP 미구현)
+
+# annotation 중복 제거 창 — candle(봉) index 거리 기준 (chart_annotation_spec §8.4).
+ANNOTATION_DEDUP_BARS = {
+    "3m": 5,    # 일봉 5봉
+    "1y": 10,   # 일봉 10봉
+    "5y": 4,    # 주봉 4봉 (≈4주)
+}
