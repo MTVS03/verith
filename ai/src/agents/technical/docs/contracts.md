@@ -223,6 +223,8 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
 `chart_data`의 세부 구조(`candles`·`overlays`·`subcharts`·`annotations`)와 annotation 계산·표시 규칙은 `chart_annotation_spec.md`를 따른다.
 
+`chart_data`는 자유 dict가 아니라 **`schemas/chart.py`의 `ChartData` Pydantic 계약으로 검증**한다(`ChartPayload.chart_data: ChartData`). 모든 하위 모델은 `extra="forbid"`이며(단, `ChartAnnotation.meta`는 계산 근거용 자유 `dict`), candles는 내부 표준 `OHLCV`를 재사용한다. `support_resistance`의 `from` key는 파이썬 예약어라 `Field(alias="from")` + `serialize_by_alias=True`로 처리해 **입력·출력 모두 `"from"`을 유지**한다. `annotation.kind`는 `chart_annotation_spec.md §7`의 **전체 10종을 계약상 허용**한다(chart_builder는 MVP 8종만 생성).
+
 #### → `REPORT_RISK_NOTES` (1:N)
 
 `risk.items[]`의 각 항목을 그대로 한 행으로 저장(짝짓기 불필요).

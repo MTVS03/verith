@@ -37,8 +37,13 @@ def payload_of(payloads, period: ChartPeriod) -> ChartPayload:
     return next(p for p in payloads if p.period == period)
 
 
+def cdata(payload: ChartPayload) -> dict:
+    """chart_data(ChartData) → 최종 JSON dict. 테스트는 최종 계약 JSON을 검증한다."""
+    return payload.chart_data.model_dump(mode="json", by_alias=True)
+
+
 def kinds_of(payload: ChartPayload) -> set[str]:
-    return {a["kind"] for a in payload.chart_data["annotations"]}
+    return {a["kind"] for a in cdata(payload)["annotations"]}
 
 
 def rich_daily(n=80) -> list[OHLCV]:
@@ -62,14 +67,14 @@ def test_source_and_candle_unit_mapping():
     p1y = payload_of(payloads, ChartPeriod.ONE_YEAR)
     p5y = payload_of(payloads, ChartPeriod.FIVE_YEARS)
 
-    assert p3m.chart_data["candle_unit"] == "D"
-    assert p1y.chart_data["candle_unit"] == "D"
-    assert p5y.chart_data["candle_unit"] == "W"
+    assert cdata(p3m)["candle_unit"] == "D"
+    assert cdata(p1y)["candle_unit"] == "D"
+    assert cdata(p5y)["candle_unit"] == "W"
     # 3m·1y는 daily(100), 5y는 weekly(777) — monthly(555)는 어디에도 없음
-    assert all(c["close"] == 100.0 for c in p3m.chart_data["candles"])
-    assert all(c["close"] == 777.0 for c in p5y.chart_data["candles"])
-    assert all(c["close"] != 555.0 for c in p1y.chart_data["candles"])
-    assert p5y.chart_data["candles"], "5y가 weekly source로 채워져야 함"
+    assert all(c["close"] == 100.0 for c in cdata(p3m)["candles"])
+    assert all(c["close"] == 777.0 for c in cdata(p5y)["candles"])
+    assert all(c["close"] != 555.0 for c in cdata(p1y)["candles"])
+    assert cdata(p5y)["candles"], "5y가 weekly source로 채워져야 함"
 
 
 def test_no_resample_function():
@@ -81,7 +86,7 @@ def test_no_resample_function():
 def test_candles_sliced_by_period_days():
     daily = series([100.0 + i for i in range(200)])  # 200일
     p3m = payload_of(build_chart_payloads(daily, [], []), ChartPeriod.THREE_MONTHS)
-    dates = [date.fromisoformat(c["date"]) for c in p3m.chart_data["candles"]]
+    dates = [date.fromisoformat(c["date"]) for c in cdata(p3m)["candles"]]
     assert dates, "candles 존재"
     assert (dates[-1] - dates[0]).days <= 90        # 90일 창
     assert len(dates) < 200                          # 전체보다 적게 slice
@@ -90,43 +95,43 @@ def test_candles_sliced_by_period_days():
 def test_insufficient_data_uses_available_no_exception():
     payloads = build_chart_payloads(series([100.0, 101.0, 102.0]), [], [])
     p3m = payload_of(payloads, ChartPeriod.THREE_MONTHS)
-    assert len(p3m.chart_data["candles"]) == 3       # 확보분만
+    assert len(cdata(p3m)["candles"]) == 3       # 확보분만
 
 
 def test_empty_source_has_empty_candles():
     p5y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.FIVE_YEARS)
-    assert p5y.chart_data["candles"] == []
+    assert cdata(p5y)["candles"] == []
 
 
 # ── chart_data 구조 ───────────────────────────────────────────────────────────
 def test_chart_data_has_required_keys():
     p1y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR)
-    assert set(p1y.chart_data.keys()) == CHART_DATA_KEYS
+    assert set(cdata(p1y).keys()) == CHART_DATA_KEYS
 
 
 def test_candle_row_fields_match_contract():
     p1y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR)
-    assert set(p1y.chart_data["candles"][0].keys()) == CANDLE_FIELDS
+    assert set(cdata(p1y)["candles"][0].keys()) == CANDLE_FIELDS
 
 
 def test_moving_average_overlay_generated():
-    overlays = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR).chart_data["overlays"]
+    overlays = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["overlays"]
     windows = {o["window"] for o in overlays["moving_average"]}
     assert {5, 20, 60} <= windows
 
 
 def test_rsi_subchart_generated():
-    sub = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR).chart_data["subcharts"]
+    sub = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["subcharts"]
     assert sub["rsi"]["period"] == 14 and sub["rsi"]["points"]
 
 
 def test_volume_subchart_generated():
-    sub = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR).chart_data["subcharts"]
+    sub = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["subcharts"]
     assert sub["volume"]["avg_window"] == 20 and sub["volume"]["bars"]
 
 
 def test_support_resistance_overlay_generated():
-    overlays = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR).chart_data["overlays"]
+    overlays = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["overlays"]
     types = {o["type"] for o in overlays["support_resistance"]}
     assert types == {"support", "resistance"}
 
@@ -195,7 +200,7 @@ def test_deferred_kinds_not_generated():
 # ── annotation 공통 정책 ──────────────────────────────────────────────────────
 def _all_annotations(daily):
     p1y = payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR)
-    return p1y.chart_data["annotations"]
+    return cdata(p1y)["annotations"]
 
 
 def test_annotation_source_always_code():
@@ -221,7 +226,7 @@ def test_chart_data_excludes_regime_synthesis():
     p1y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR)
     banned = {"regime", "synthesis", "risk", "technical_signals", "confidence",
               "final_regime", "alignment_flag", "consensus", "signal_score"}
-    assert not (banned & set(p1y.chart_data.keys()))
+    assert not (banned & set(cdata(p1y).keys()))
 
 
 def test_no_external_dependency_imports():
@@ -246,7 +251,7 @@ def test_support_touch_requires_min_touch_count():
 def test_sr_overlay_kept_even_when_touch_annotation_gated():
     single = series([110.0] * 19 + [100.0], highs=[200.0] * 20, lows=[110.0] * 19 + [100.0])
     p1y = payload_of(build_chart_payloads(single, [], []), ChartPeriod.ONE_YEAR)
-    types = {o["type"] for o in p1y.chart_data["overlays"]["support_resistance"]}
+    types = {o["type"] for o in cdata(p1y)["overlays"]["support_resistance"]}
     assert types == {"support", "resistance"}  # overlay는 유지
 
 

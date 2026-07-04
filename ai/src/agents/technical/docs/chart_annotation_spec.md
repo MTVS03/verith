@@ -92,6 +92,8 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 `contracts.md`의 `charts[].chart_data`는 다음 구조를 따른다. `period`는 `charts[]` 레벨에, `candle_unit`과 실제 데이터(candles·overlays·subcharts·annotations)는 `chart_data` 안에 둔다(이중 중첩 없음).
 
+이 구조는 `schemas/chart.py`의 `ChartData` Pydantic 모델로 계약 검증한다(자유 dict 아님). key 이름은 이 문서를 정본으로 하며 바꾸지 않는다 — 특히 `support_resistance`의 `from`은 alias로 유지한다. 하위 모델은 `extra="forbid"`(단 `annotation.meta`는 자유 `dict`)이고, candles는 내부 표준 `OHLCV`를 재사용한다.
+
 ```json
 {
   "period": "1y",
