@@ -6,25 +6,61 @@ KIS 원본 필드명(`stck_bsop_date` 등)은 `services/kis_client.py` 변환 �
 
 정본: `docs/kis_mapping.md §7`(필드 매핑)·§11(실측). `date`는 ISO(`YYYY-MM-DD`)로 정규화한다.
 이번 단계 범위: 순수 데이터 모델만. pandas DataFrame·지표 계산용 파생 컬럼은 만들지 않는다.
+
+계약 강화: 가격·거래량은 음수·inf·nan 불허(비정상 시세는 fail-fast), date는 ISO만, high는 low 이상.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import math
+import re
+from datetime import date as _date
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_iso_date(value: str) -> str:
+    """ISO 'YYYY-MM-DD' 형식 + 실제 달력 날짜만 허용 (schema 내부 validator, service 의존 없음)."""
+    if not isinstance(value, str) or not _ISO_DATE_RE.match(value):
+        raise ValueError(f"date must be ISO 'YYYY-MM-DD': {value!r}")
+    try:
+        _date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"invalid calendar date: {value!r}") from exc
+    return value
+
+
+def _validate_finite_non_negative(value: int | float) -> int | float:
+    """inf/nan 불허 + 음수 불허. int/float 표현은 그대로 보존(강제 캐스팅 없음)."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("must be a finite number (no inf/nan)")
+    if value < 0:
+        raise ValueError("must be >= 0")
+    return value
+
+
+# 재사용 타입: ISO 날짜 / 음수·inf·nan 없는 수(정수·실수 표현 보존).
+IsoDate = Annotated[str, AfterValidator(_validate_iso_date)]
+NonNegativeNumber = Annotated[int | float, AfterValidator(_validate_finite_non_negative)]
 
 
 class OHLCV(BaseModel):
-    """한 봉(일/주/월)의 내부 표준 OHLCV. 계약에 없는 필드 유입 차단(extra=forbid).
-
-    가격·거래량·거래대금은 음수가 될 수 없으므로 ge=0으로 제약한다(chart_data 계약에서
-    candles로 그대로 재사용되며, 시세 값의 음수는 비정상 응답이다).
-    """
+    """한 봉(일/주/월)의 내부 표준 OHLCV. 계약에 없는 필드 유입 차단(extra=forbid)."""
     model_config = ConfigDict(extra="forbid")
 
-    date: str  # ISO 형식 "YYYY-MM-DD" (KIS 원본 "YYYYMMDD"를 kis_client에서 정규화)
-    open: int | float = Field(ge=0)
-    high: int | float = Field(ge=0)
-    low: int | float = Field(ge=0)
-    close: int | float = Field(ge=0)
+    date: IsoDate  # ISO "YYYY-MM-DD" (KIS 원본 "YYYYMMDD"를 kis_client에서 정규화)
+    open: NonNegativeNumber
+    high: NonNegativeNumber
+    low: NonNegativeNumber
+    close: NonNegativeNumber
     volume: int = Field(ge=0)
     trading_value: int = Field(ge=0)  # KIS `acml_tr_pbmn`(누적 거래대금). 유동성 판정 근거값.
+
+    @model_validator(mode="after")
+    def _high_ge_low(self) -> OHLCV:
+        if self.high < self.low:
+            raise ValueError(f"high({self.high}) must be >= low({self.low})")
+        return self
