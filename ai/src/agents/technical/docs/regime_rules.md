@@ -31,6 +31,13 @@
 
 일봉 1차 국면을 주/월봉 추세로 보정하되, **라벨은 바꾸지 않고** `alignment_flag`와 `regime_context`만 채운다.
 
+**주/월봉 추세(`weekly_trend`·`monthly_trend`) 계산:** 절대 가격차가 아니라 **변화율**로 판정한다.
+
+- `slope_pct = (최신 종가 − TREND_SLOPE_LOOKBACK봉 전 종가) / (그 종가)`
+- `slope_pct > +TREND_SIDEWAYS_THRESHOLD_PCT` → `up` / `< −TREND_SIDEWAYS_THRESHOLD_PCT` → `down` / 그 사이(±밴드 이내) → `sideways`
+- 봉 수가 `MIN_WEEKLY_BARS`(주봉)·`MIN_MONTHLY_BARS`(월봉) 미만이거나 기준 종가가 0이면 → `unavailable`
+- `TREND_SIDEWAYS_THRESHOLD_PCT` 밴드가 없으면 실데이터에서 sideways가 거의 나오지 않으므로 도입한다(`config.md §3`). 일봉 MA 기울기(`SLOPE_MIN`)와는 별개 축이다.
+
 **보정 기준 (월봉 우선):**
 
 - `alignment_flag`는 **월봉 추세를 우선 기준**으로 판정한다.

@@ -95,6 +95,8 @@
 
 MTF-01·05·06이 중립 국면 케이스다 — 상위 추세가 무엇이든 `neutral`이며, 상위 추세 사실은 `regime_context`에만 서술된다(조합 라벨을 만들지 않는다). MTF-07·08은 월봉 우선·주봉 대체 규칙(`regime_rules.md` 보정 기준) 검증이다.
 
+**추세(up/down/sideways) 판정 검증:** 위 MTF 표는 `weekly_trend`·`monthly_trend`를 이미 정해진 값으로 주고 alignment를 검증한다. 추세 값 자체의 산출은 별도로 검증한다 — 변화율 `slope_pct`가 `+TREND_SIDEWAYS_THRESHOLD_PCT` 초과면 `up`, `−TREND_SIDEWAYS_THRESHOLD_PCT` 미만이면 `down`, 밴드(±1%) 이내면 `sideways`, 봉 수 부족·기준 종가 0이면 `unavailable`(`config.md §3`, `regime_rules.md` 2단계).
+
 ### 4.3 판단 불가
 
 | ID | 입력 조건 | 기대 결과 |
