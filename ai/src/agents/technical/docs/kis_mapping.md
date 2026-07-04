@@ -191,7 +191,7 @@ allowlist 밖 종목은 KIS 호출 자체를 하지 않고 `OUT_OF_SCOPE_TICKER`
 ### 11.1 인증·엔드포인트 실측
 - 토큰: `POST {base}/oauth2/tokenP` `{grant_type=client_credentials, appkey, appsecret}` → `access_token`, `expires_in=86400`(24h). 스크립트는 파일 캐시로 재사용(만료 5분 전 갱신).
 - 시세: `GET {base}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`, 헤더 `tr_id=FHKST03010100`, `custtype=P`. **계좌번호 불필요**(확인됨).
-- **`.env` 키 이름 주의:** 실제 `.env`는 `KIS_API_KEY`/`KIS_API_SECRET`(공식명 `KIS_APP_KEY`/`KIS_APP_SECRET`과 다름). `services/kis_client.py`는 둘 중 하나로 통일 필요 — 스크립트는 양쪽을 모두 허용하도록 임시 처리.
+- **`.env` 키 이름 확정:** 이 프로젝트의 공식 KIS 키는 **`KIS_API_KEY` / `KIS_API_SECRET` / `KIS_BASE_URL`** 3개다(기존 샘플 스크립트와 통일). `config.py`(`load_kis_settings()`)는 이 3개만 로딩하며, 누락 시 fail-fast한다. `KIS_APP_KEY`/`KIS_APP_SECRET`은 공식 키가 아니며(존재 시 경고), 시세 조회에 불필요한 `KIS_ACCOUNT_NO`는 로딩하지 않는다.
 
 ### 11.2 실제 `output1` 구조 (종목 요약 — **단일 객체**, 배열 아님)
 `373220` D 응답 기준. 존재 필드:
