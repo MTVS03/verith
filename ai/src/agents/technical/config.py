@@ -8,9 +8,10 @@
   - KIS period 상수 (D/W/M)     ......  config.md §3
   - KIS 재시도/타임아웃 상수     ......  config.md §8
   - .env 기반 KIS 인증정보 로딩  ......  kis_mapping.md §11.1
+  - 지표 계산 상수              ......  config.md §1 + §2(SUPPORT_LOOKBACK_DAYS)
 
 이 파일이 담지 않는 것 (다음 단계):
-  - kis_client 실호출/구간분할, Redis 캐시·TTL, 지표·regime·synthesis·risk·chart 상수,
+  - kis_client 구간분할, Redis 캐시·TTL, regime 임계값(RSI_OVERBOUGHT 등)·synthesis·risk·chart 상수,
     OUT_OF_SCOPE_TICKER 예외/응답 포맷.
 """
 
@@ -131,3 +132,17 @@ def load_kis_settings() -> KISSettings:
         api_secret=values["KIS_API_SECRET"],
         base_url=values["KIS_BASE_URL"].rstrip("/"),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. 지표 계산 상수 (config.md §1). indicators/ 모듈이 사용한다.
+#    regime 판정 임계값(RSI_OVERBOUGHT/OVERSOLD·NEAR_*·SLOPE_* 등)은 여기 없다 — 7단계 regime에서 추가.
+# ─────────────────────────────────────────────────────────────────────────────
+MA_WINDOWS = [5, 20, 60]        # 이동평균 기간 (단기/중기/장기)
+RSI_PERIOD = 14                 # RSI 계산 기간 (와일더 표준)
+BOLLINGER_PERIOD = 20           # 볼린저밴드 기간 (중심선 SMA 기간)
+BOLLINGER_STD = 2.0             # 볼린저밴드 표준편차 배수
+VOLUME_AVG_WINDOW = 20          # 거래량/거래대금 평균 기간
+
+# support/resistance 탐색 기간 (config.md §2). regime 임계값은 제외하고 이 값만 가져온다.
+SUPPORT_LOOKBACK_DAYS = 20      # 주요 지지/저항 탐색 기간
