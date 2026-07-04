@@ -83,6 +83,12 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
 2. 각 `indicator`는 입력에 있던 **코드값과 정확히 일치**해야 합니다. `ma`·`movingAvg`·`macd`·`trend`처럼 없는 값을 만들면 안 됩니다.
 3. 순서는 무관하나 `indicator`로 짝짓습니다.
 4. 각 `detail`은 그 지표의 확정 `signal`과 **일치**해야 합니다. `signal=positive`인 지표를 부정 뉘앙스로 쓰면 왜곡입니다.
+5. 각 `detail` 문장에는 그 지표의 확정 `signal` 방향을 나타내는 표현을 담습니다 — `positive`면 "긍정", `neutral`이면 "중립", `negative`면 "부정"이 문장에 드러나야 합니다(반대 방향·강한 단정 표현 금지).
+
+# confidence·risk 반영 규칙
+
+- 확정 `confidence`/`confidence_level`을 **반대 방향으로 단정하지 않습니다.** `confidence_level=low`인데 "신뢰도가 높습니다"로 쓰면 왜곡입니다.
+- `risk_items[]`가 비어있지 않으면, 그중 **최소 하나의 위험 요인을 반드시 문장에 언급**합니다(거래량·저항·지지·과열·역행·유동성 등 해당 맥락).
 
 # 절대 반환하면 안 되는 필드
 

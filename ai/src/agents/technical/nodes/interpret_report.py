@@ -44,6 +44,10 @@ INTERPRET_PROMPT = "interpret_report.md"
 REGENERATE_PROMPT = "regenerate_report.md"
 _PAYLOAD_PLACEHOLDER = "{payload_json}"
 
+# LLM 출력 스키마(contracts §2·prompts §4). 이 밖의 key는 파싱 단계에서 거부한다(extra 유입 차단).
+_ALLOWED_TOP_KEYS = frozenset({"interpretation_text", "details"})
+_ALLOWED_DETAIL_KEYS = frozenset({"indicator", "detail"})
+
 
 class LlmClient(Protocol):
     """LLM 호출 경계. 실제 구현(네트워크)은 이 단계 범위 밖 — 테스트는 fake로 주입한다."""
@@ -120,7 +124,7 @@ def generate(client: LlmClient, *, template: str, payload: dict) -> dict:
 
 
 def parse_llm_output(raw: str) -> dict:
-    """LLM 원문 → dict. 코드펜스(```json)를 벗기고 json.loads. 실패는 명시적 예외."""
+    """LLM 원문 → dict. 코드펜스(```json)를 벗기고 json.loads. 허용 key 외는 거부(extra 차단)."""
     text = _strip_code_fence(raw)
     try:
         parsed = json.loads(text)
@@ -128,6 +132,21 @@ def parse_llm_output(raw: str) -> dict:
         raise LlmOutputParseError(f"LLM 응답을 JSON으로 파싱하지 못했습니다: {exc}") from exc
     if not isinstance(parsed, dict):
         raise LlmOutputParseError(f"LLM 응답 최상위는 object여야 합니다: {type(parsed).__name__}")
+
+    extra_top = set(parsed) - _ALLOWED_TOP_KEYS
+    if extra_top:
+        raise LlmOutputParseError(f"허용되지 않은 최상위 key: {sorted(extra_top)}")
+
+    details = parsed.get("details")
+    if details is not None:
+        if not isinstance(details, list):
+            raise LlmOutputParseError("details는 배열이어야 합니다")
+        for entry in details:
+            if not isinstance(entry, dict):
+                raise LlmOutputParseError("details 항목은 object여야 합니다")
+            extra_detail = set(entry) - _ALLOWED_DETAIL_KEYS
+            if extra_detail:
+                raise LlmOutputParseError(f"details 항목에 허용되지 않은 key: {sorted(extra_detail)}")
     return parsed
 
 
@@ -150,13 +169,17 @@ def verify(
     regime: RegimeResult,
     signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult],
+    risks: Sequence[RiskItem] = (),
 ) -> trajectory_eval.EvalResult:
+    """검증 ③ 호출. 라벨·신호에 더해 confidence_level·risk flag까지 확정값을 넘긴다."""
     return trajectory_eval.evaluate(
         llm_output,
         final_regime=regime.final_regime,
         consensus=signal.consensus,
         alignment_flag=regime.alignment_flag,
         signals=[(s.indicator, s.signal) for s in signals],
+        confidence_level=signal.confidence_level,
+        risk_flags=[r.flag for r in risks],
     )
 
 
