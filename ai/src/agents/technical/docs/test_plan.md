@@ -172,6 +172,7 @@ MVP의 검증 ③은 **LLM-as-judge가 아니라 결정론적 키워드/라벨 �
 | `test_plan.md` (이 문서) | 판정 **기준 명세** |
 | `observability/trajectory_eval.py` | 판정 **로직 구현** |
 | `observability/keyword_rules.py` | **키워드 사전** |
+| `nodes/interpret_report.py` | 노드 10 어댑터 — LLM 출력을 받아 위 `trajectory_eval`을 **호출**하고 `detail`/`interpretation.text`를 병합. 판정 로직 자체는 갖지 않는다(재생성 루프는 `supervisor/technical_supervisor.py`) |
 
 키워드 사전은 `config.py`가 아니라 `observability/keyword_rules.py`에서 관리한다. config는 수치·기간·가중치를 담당하고, 키워드 사전은 검증 ③의 문장 판정 규칙이므로 검증 코드 옆에 둔다. 다만 향후 템플릿 폴백 문장 생성에서도 같은 사전을 공유하게 되면, 공용 표현 계약 모듈로 위치를 재검토한다.
 

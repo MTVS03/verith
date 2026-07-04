@@ -8,6 +8,8 @@
 
 > **LLM은 이 에이전트에서 3곳에만 쓰인다:** 노드 1(질문 정규화)·2(분석 포커스 정리)·10(국면 해석). 나머지 7개 노드는 결정론 코드다(`pipeline.md`). 이 문서는 그 3곳 + 재생성 변형을 다룬다.
 
+> **프롬프트 텍스트 자원은 `prompts/*.md`에 둔다.** Prompt 1→`normalize_question.md`, Prompt 2→`focus_analysis.md`, Prompt 10→`interpret_report.md`, Prompt 10-R→`regenerate_report.md`(재생성은 별도 파일로 분리). 이 파일들을 실제로 불러 LLM에 넘기고 응답을 병합하는 **노드 어댑터는 `nodes/*.py`**(노드 10 = `nodes/interpret_report.py`)이며, 노드 10 출력 문장의 **검증 ③은 `observability/trajectory_eval.py`**(+`keyword_rules.py`)가 수행한다. **검증 실패 시 재생성 1회→template fallback으로 이어지는 루프 orchestration은 `supervisor/technical_supervisor.py`가 소유**한다(노드는 생성·검증·병합·fallback 문장 제공까지).
+
 ---
 
 ## 1. 공통 프롬프트 원칙
@@ -182,9 +184,9 @@ signal · value · metrics · weight · risk flag
 
 ## 5. Prompt 10-R — 라벨 왜곡 재생성
 
-**노드:** 10(재생성 루프) · **역할:** 검증 ③ 실패 시 확정 라벨을 강제 주입해 문장만 다시 생성한다.
+**노드:** 10(재생성 루프) · **파일:** `prompts/regenerate_report.md`(Prompt 10과 별도 자원) · **역할:** 검증 ③ 실패 시 확정 라벨을 강제 주입해 문장만 다시 생성한다.
 
-> **책임 경계:** **10-R은 재생성만 한다. 통과/실패 판정은 LLM이 하지 않는다 — 검증 ③ 코드가 한다.** LLM에게 "이번엔 맞게 썼는지 스스로 판단해봐"라고 시키지 않는다. 프롬프트(문장 생성)와 검증(코드 판정)의 책임을 섞지 않는다.
+> **책임 경계:** **10-R은 재생성 프롬프트(문장 생성)만 정의한다. 통과/실패 판정은 LLM이 하지 않는다 — 검증 ③ 코드(`observability/trajectory_eval.py`)가 한다.** 그리고 "1차 실패 → 10-R로 재생성 → 재검증 → 최종 fallback"으로 이어지는 **루프 실행 자체는 `supervisor/technical_supervisor.py`가 소유**한다(`nodes/interpret_report.py`는 1회 생성·검증·병합·fallback 문장 제공까지). LLM에게 "이번엔 맞게 썼는지 스스로 판단해봐"라고 시키지 않는다. 프롬프트(문장 생성)와 검증(코드 판정)의 책임을 섞지 않는다.
 
 **흐름:**
 ```
