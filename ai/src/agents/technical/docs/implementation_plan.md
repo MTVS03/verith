@@ -63,20 +63,34 @@ src/ai/
         │   └── risk.py               # risk_flags, risk note
         ├── charts/
         │   └── chart_builder.py      # charts[] 생성
-        ├── prompts/
-        │   ├── normalize_question.py
-        │   ├── focus_analysis.py
-        │   └── interpret_report.py   # 종합 해석 + detail (+ 재생성)
+        ├── prompts/                  # LLM 프롬프트 텍스트 자원(.md). 숫자·라벨을 만들지 않음
+        │   ├── normalize_question.md
+        │   ├── focus_analysis.md
+        │   ├── interpret_report.md      # Prompt 10 (종합 해석 + 지표별 detail, 단일 호출)
+        │   └── regenerate_report.md     # Prompt 10-R (검증 ③ 실패 시 확정 라벨 강제 주입 재생성)
         ├── observability/
         │   ├── trace_logger.py       # trace event 기록
-        │   ├── trajectory_eval.py    # 검증 ③ (LLM 라벨 왜곡)
-        │   └── keyword_rules.py      # 검증 ③ 키워드 사전
+        │   ├── trajectory_eval.py    # 검증 ③ (LLM 라벨 왜곡) 판정 로직
+        │   └── keyword_rules.py      # 검증 ③ 키워드 사전(대표어·충돌어·금지어)
+        ├── nodes/                    # LangGraph 노드 = 얇은 어댑터(state→모듈 호출→state)
+        │   ├── normalize_question.py    # 1. 질문 안전 정규화 (LLM)
+        │   ├── focus_analysis.py        # 2. 분석 포커스 정리 (LLM)
+        │   ├── data_collect.py          # 3. 데이터수집 (코드)
+        │   ├── indicator_calculate.py   # 4. 지표계산 (코드)
+        │   ├── regime_classify.py       # 5. 국면분류 (코드)
+        │   ├── signal_aggregate.py      # 6. 신호종합 (코드)
+        │   ├── confidence_calculate.py  # 7. 신뢰도계산 (코드)
+        │   ├── risk_detect.py           # 8. 리스크관찰점 (코드)
+        │   ├── chart_generate.py        # 9. 차트생성 (코드)
+        │   └── interpret_report.py      # 10. 국면해석·리포트 (LLM). prompts/*.md + trajectory_eval 사용
         ├── supervisor/
-        │   └── technical_supervisor.py # 10노드 실행 순서 조율, trace_id 생성, 예외 분기
+        │   └── technical_supervisor.py # 10노드 실행 순서 조율, trace_id 생성, 예외 분기, 재생성 루프
         └── tests/                    # test_plan.md 기준 단위테스트
 ```
 
-폴더 경로는 구현 시 이 문서의 구조를 기준으로 한다. `observability/`·`regime/`·`synthesis/` 하위는 설계 문서(test_plan·trace_schema·regime_rules)에서 이미 명시한 경로와 일치한다.
+폴더 경로는 구현 시 이 문서의 구조를 기준으로 한다. `observability/`·`regime/`·`synthesis/`·`nodes/` 하위는 설계 문서(test_plan·trace_schema·regime_rules·architecture)에서 이미 명시한 경로와 일치한다.
+
+**프롬프트·노드·검증의 3분할(노드 10 기준):** ① `prompts/interpret_report.md`·`regenerate_report.md`는 LLM에 넘길 **텍스트 자원**이고(숫자·라벨 생성 금지, `technical_coding_guidelines §6.1`·`prompts.md §4.1`), ② `nodes/interpret_report.py`는 payload 구성·LLM 응답 파싱·`observability/trajectory_eval.py` 검증 호출·`detail`/`interpretation.text` 병합·template fallback 문장 생성을 맡는 **얇은 노드**이며, ③ **1차 생성→검증 실패→재생성 1회→재검증→최종 fallback 전체 orchestration(재생성 루프)은 `supervisor/technical_supervisor.py`가 소유**한다. `architecture.md §3`이 서술한 "Node는 얇은 어댑터, 로직은 옆 모듈에 위임" 원칙과 일치한다.
 
 **진입점 2단 분리:** `agent.py`는 router가 부르는 얇은 wrapper(입력 검증 → supervisor 호출 → 출력 반환)이고, 실제 조율 로직(10노드 실행·trace_id 생성·KIS 장애 분기·data_limited/stale_cache/regime_unavailable 처리·검증 실패 시 재생성/폴백)은 `supervisor/technical_supervisor.py`가 맡는다. agent.py에 노드 로직이 들어가기 시작하면 supervisor와 역할이 겹치므로, agent.py는 얇게 유지한다. 이 분리 덕분에 `technical_supervisor.run(request)`를 mock 입력으로 직접 호출해 HTTP·router 없이 end-to-end 파이프라인을 테스트할 수 있다.
 
@@ -102,11 +116,12 @@ src/ai/
 | `synthesis/confidence.py` | confidence 계산(confidence_level 파생) | `config.md`, `contracts.md` |
 | `synthesis/risk.py` | risk_flags, risk note 생성 | `enums.md`, `contracts.md` |
 | `charts/chart_builder.py` | charts[].period, chart_data(overlays·subcharts·annotations) 생성 | `contracts.md`, `frontend_mapping.md`, `chart_annotation_spec.md` |
-| `prompts/*.py` | 질문 정규화·포커스 정리·리포트 문장(+재생성) | `prompts.md` |
+| `prompts/*.md` | 질문 정규화·포커스 정리·리포트 문장·재생성 프롬프트 **텍스트 자원**(interpret_report.md·regenerate_report.md 분리) | `prompts.md` |
 | `observability/trace_logger.py` | trace event 기록(JSONL) | `trace_schema.md` |
 | `observability/trajectory_eval.py` | 검증 ③ LLM 라벨 왜곡 판정 | `test_plan.md`, `trace_schema.md` |
 | `observability/keyword_rules.py` | 검증 ③ 키워드 사전(금지어·라벨 충돌) | `test_plan.md`, `prompts.md` |
-| `supervisor/technical_supervisor.py` | 10노드 실행 순서 조율, trace_id 생성, 예외 상태 분기 | `architecture.md`, `trace_schema.md`, `contracts.md` |
+| `nodes/*.py` | LangGraph 노드 어댑터(state 받아 모듈·프롬프트 호출 → state에 결과 얹음). 계산 로직은 옆 모듈, 순서 조율은 supervisor. `nodes/interpret_report.py`가 **10번 노드**(prompts/*.md·trajectory_eval 사용, 재생성 루프는 supervisor) | `architecture.md`, `prompts.md`, `contracts.md` |
+| `supervisor/technical_supervisor.py` | 10노드 실행 순서 조율, trace_id 생성, 예외 상태 분기, 검증 ③ 재생성 루프(REGEN_MAX_COUNT=1)→template fallback | `architecture.md`, `trace_schema.md`, `contracts.md` |
 | `agent.py` | 외부 진입점(얇은 wrapper): 입력 검증 → supervisor 호출 → 출력 반환 | `contracts.md` |
 | *(상위)* `src/ai/api/internal.py` | `/internal/technical/analyze` HTTP 라우터 (AI 서버 공통, technical 밖) | `api_spec.md`, `contracts.md` |
 
@@ -128,13 +143,13 @@ src/ai/
 8. `synthesis/` signal_score → confidence → risk
 9. `charts/chart_builder.py`
 10. `observability/trace_logger.py`
-11. `prompts/*.py` node 연결 (LLM)
-12. `observability/trajectory_eval.py` + `keyword_rules.py` (검증 ③)
-13. `supervisor/technical_supervisor.py` — 노드 1~10 실행 순서 조율, trace_id 생성, 예외 분기
+11. `prompts/*.md`(interpret_report.md·regenerate_report.md 등 텍스트 자원) + `nodes/*.py`(LLM 노드 어댑터) 연결
+12. `observability/trajectory_eval.py` + `keyword_rules.py` (검증 ③). 노드 10(`nodes/interpret_report.py`)의 문장 검증이 이걸 호출한다
+13. `supervisor/technical_supervisor.py` — 노드 1~10 실행 순서 조율, trace_id 생성, 예외 분기, **검증 ③ 재생성 루프(1회)→template fallback**
 14. `agent.py` (얇은 wrapper) + 상위 `src/ai/api/internal.py` 라우터 연결 — router→agent→supervisor 흐름 완성
 15. `test_plan.md` 기준 단위테스트 작성 (검증 ①②③ 케이스). `technical_supervisor.run()`을 mock 입력으로 직접 호출해 HTTP 없이 end-to-end 검증
 
-코드 확정 로직(5~9)을 LLM(11)보다 먼저 세운다 — LLM은 이미 확정된 값을 문장으로 풀 뿐이므로, 확정 로직이 있어야 LLM 노드를 붙일 수 있다. 개별 노드·모듈이 다 선 뒤(1~12) supervisor(13)가 그것들을 순서대로 엮고, api(14)는 supervisor를 호출만 한다.
+코드 확정 로직(5~9)을 LLM(11)보다 먼저 세운다 — LLM은 이미 확정된 값을 문장으로 풀 뿐이므로, 확정 로직이 있어야 LLM 노드를 붙일 수 있다. 개별 노드·모듈이 다 선 뒤(1~12) supervisor(13)가 그것들을 순서대로 엮고(재생성 루프 포함), api(14)는 supervisor를 호출만 한다. 노드 10 자체(`nodes/interpret_report.py`)는 순수 함수(생성·검증·병합·fallback 문장)까지만 책임지고, 재생성 루프 실행은 13에서 붙인다.
 
 ---
 
