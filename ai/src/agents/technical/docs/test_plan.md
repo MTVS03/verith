@@ -52,6 +52,27 @@
 | CALC-04 | KIS 일봉(D)·주봉(W)·월봉(M) output2 응답 | 세 타임프레임 각각 내부 표준 OHLCV로 정확히 변환 (date/open/high/low/close/volume/trading_value 매핑) |
 | CALC-05 | 거래량 20개 | 20일 평균 거래량이 기준 계산과 일치 |
 
+### 3.1 synthesis 계산 검증 (SYN-*)
+
+**성격:** 정상 동작 확인. **대상:** `synthesis/`(signal_score·confidence·risk). **LLM 미개입** — 전부 코드 확정값. 기준은 `config.md §4.1·§4.2·§5.1·§6.1`.
+
+| ID | 입력 | 기대 결과 |
+| --- | --- | --- |
+| SYN-01 | 각 지표 원천값 | `config.md §4.1` 규칙대로 positive/neutral/negative 확정 (RSI 극단은 neutral) |
+| SYN-02 | 지표 signal 집합 | `signal_score = Σ(w·s)/Σ(active w)`, 범위 −1.0~1.0 |
+| SYN-03 | 일부 지표 제외 | 남은 active weight로 재정규화 |
+| SYN-04 | 전 지표 제외 | `signal_score=0.0`, `consensus=neutral` |
+| SYN-05 | 경계 score | `SIGNAL_STRONG`/`SIGNAL_WEAK` 포함(≥/≤) 라벨링 |
+| SYN-06 | 전 지표 neutral | `agreement=0.0` |
+| SYN-07 | volume_ratio 다양 | `volume_confirm = clamp(ratio,0,1)` |
+| SYN-08 | alignment/regime 조합 | `trend_clarity`가 aligned=1.0·counter=0.3·neutral+방향=0.6·sideways/unavailable=0.0 |
+| SYN-09 | pos·neg 동시 강함 | `conflict_absence` 낮아짐, confidence 범위 0.0~1.0 |
+| SYN-10 | confidence 경계 | `CONFIDENCE_HIGH`/`MEDIUM` 구간으로 confidence_level high/medium/low |
+| SYN-11 | 각 risk 조건 충족 | 해당 `RiskFlag` 부여, note 비어있지 않음, near_*만 ref_price 존재 |
+| SYN-12 | 전 산출물 | 코드값(enum)·note에 매수/매도 표현 없음 |
+
+*`confidence_level`은 JSON에는 있으나 DB 저장 대상 아님(재계산 파생값). synthesis는 `contracts.TechnicalSignal`을 직접 조립하지 않고 중간 dataclass를 낸다(detail·detail_source는 LLM 단계).*
+
 ---
 
 ## 4. 검증 ② regime 규칙

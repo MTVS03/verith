@@ -77,6 +77,39 @@ SIGNAL_WEAK = 0.3              # 0.3 <= |score| < 0.5 → 약한 (긍정/부정)
 *가중치는 지표 제외(데이터 부족) 시 남은 지표로 재정규화한다.*
 *가중치는 MVP v1 기준값으로 확정. 이전 목업의 값(예: RSI 0.25)은 폐기하고 이 문서 기준으로 통일한다.*
 
+### 4.1 지표별 signal 산출 규칙 (positive / neutral / negative)
+
+각 지표는 원천 계산값(§1 indicators)을 아래 규칙으로 `Signal`(positive/neutral/negative)로 확정한다. **코드가 확정하며 LLM은 개입하지 않는다.** 매수/매도 표현을 쓰지 않는다.
+
+| indicator | positive | negative | neutral |
+| --- | --- | --- | --- |
+| `moving_average` | `close > 20MA` AND `5MA > 20MA` | `close < 20MA` AND `5MA < 20MA` | 그 외 |
+| `rsi` | `50 < RSI < RSI_OVERBOUGHT` | `RSI_OVERSOLD < RSI < 50` | `RSI ≥ RSI_OVERBOUGHT` 또는 `RSI ≤ RSI_OVERSOLD` 또는 `RSI == 50` |
+| `volume` | 최신봉 상승 AND `volume_ratio ≥ 1` | 최신봉 하락 AND `volume_ratio ≥ 1` | `volume_ratio < 1` 또는 계산 불가 |
+| `support_resistance` | 지지 근처(±`NEAR_SUPPORT_THRESHOLD_PCT`) | 저항 근처(±`NEAR_RESISTANCE_THRESHOLD_PCT`) | 그 외 |
+| `pattern` | `is_bullish` | `is_bearish` | 도지 또는 판단 불가 |
+
+- **RSI 극단은 방향 신호로 쓰지 않는다** — `RSI ≥ RSI_OVERBOUGHT`는 risk `overheated_momentum`/regime `overheated`, `RSI ≤ RSI_OVERSOLD`는 regime `oversold_rebound_watch`에서 다룬다.
+- **volume은 독립 방향성이 아니라** 가격 방향을 거래량이 확인하는 방식이다(상승/하락봉 판정 × 거래량비).
+- **지표 제외(excluded) vs neutral:** 핵심 입력이 아예 계산 불가일 때만 그 지표를 **제외**하고 남은 weight로 재정규화한다. 제외 조건 — `moving_average`: 20MA(또는 5MA) 없음 / `rsi`: RSI 없음 / `support_resistance`: support·resistance 둘 다 없음. `volume`·`pattern`은 제외하지 않고 계산 불가 시 neutral로 둔다(위 표).
+
+### 4.2 signal_score · consensus 계산
+
+지표별 signal을 `positive=+1 / neutral=0 / negative=−1`로 부호화하고 가중합한다.
+
+```
+signal_score = Σ(weight_i × signal_i) / Σ(active_weight_i)     # 범위 −1.0 ~ 1.0
+```
+
+- 계산 가능한(active) 지표만 합산하고, 제외된 지표가 있으면 **남은 active weight로 재정규화**한다.
+- **모든 지표가 제외되면** `signal_score = 0.0`, `consensus = neutral`.
+- consensus는 경계값 **포함**으로 라벨링한다(§2 enums·glossary와 동일):
+  - `score ≥ SIGNAL_STRONG` → `strong_positive`
+  - `score ≥ SIGNAL_WEAK` → `weak_positive`
+  - `score ≤ −SIGNAL_STRONG` → `strong_negative`
+  - `score ≤ −SIGNAL_WEAK` → `weak_negative`
+  - 그 외 → `neutral`
+
 ## 5. 신뢰도 (confidence)
 
 ```python
@@ -97,6 +130,22 @@ CONFIDENCE_MEDIUM = 0.4         # 0.4 ~ 0.7 → 보통, < 0.4 → 낮음
 *연결: `synthesis/confidence.py`, `enums.md` confidence_level*
 *`conflict_absence`는 신호 충돌이 적을수록 높아지는 값이다(내부적으로 `1 - conflict_score`). 신호 충돌이 클수록 confidence는 낮아진다. 네 요소가 모두 "높을수록 좋음" 방향이라 가중합으로 바로 계산된다.*
 
+### 5.1 confidence 4요소 계산식
+
+각 요소를 0.0~1.0으로 계산해 `CONFIDENCE_WEIGHTS`로 가중합한다. 모든 요소는 "높을수록 confidence↑" 방향이다. **코드가 확정하며 LLM은 confidence를 만들지 않는다.**
+
+- **agreement** = `|Σ(weight_i × signal_i)| / Σ(weight_i × |signal_i|)` — 모두 같은 방향이면 1.0, 상쇄될수록 낮아짐. **모든 지표가 neutral이면 0.0**(분모 0 → 0으로 정의).
+- **volume_confirm** = `clamp(volume_ratio, 0.0, 1.0)` — `volume_ratio ≥ 1` → 1.0, 계산 불가 → 0.0.
+- **trend_clarity** — 국면·상위 추세 정합성:
+  - `final_regime`이 `sideways`·`unavailable` → 0.0
+  - `alignment_flag == aligned` → 1.0
+  - `alignment_flag == counter_trend` → 0.3
+  - `alignment_flag == neutral` AND `final_regime`이 방향성 국면(`bullish_reversal_watch`·`uptrend_intact`·`downtrend`) → 0.6
+  - 그 외(중립 성격 국면 `overheated`·`oversold_rebound_watch` + neutral) → 0.0
+- **conflict_absence** = `clamp(1 − 2 × min(pos_weight, neg_weight), 0.0, 1.0)` — positive·negative가 동시에 강하면 낮아지고, 한쪽만 있거나 전부 neutral이면 1.0. (`pos_weight`·`neg_weight` = 각 방향 지표들의 원본 weight 합.)
+
+`confidence_level`은 표시용 파생값이며 **DB에 저장하지 않는다**(저장값은 confidence 숫자): `≥ CONFIDENCE_HIGH` → high / `≥ CONFIDENCE_MEDIUM` → medium / 그 외 → low.
+
 ## 6. 리스크 (risk)
 
 ```python
@@ -107,6 +156,23 @@ MIN_AVG_TRADING_VALUE = 1_000_000_000  # 최근 20일 평균 거래대금 하한
 
 *연결: `synthesis/risk.py`, `enums.md` risk_flags (low_liquidity)*
 *MVP에서는 거래량 기준과 거래대금 기준을 함께 둔다. **둘 중 하나라도 기준 미만이면 `low_liquidity`를 부여한다**(보수적 기준 — 저가주는 거래량이 많아도 거래대금이 낮을 수 있음). 실제 임계값은 시장 구간·종목군에 따라 백테스트로 조정한다.*
+
+### 6.1 risk flag 산출 조건
+
+`risk.items[]`는 `{flag, note, ref_price}`(contracts §2)를 코드가 확정한다. `note`는 **코드 템플릿**(LLM 아님, glossary risk_notes)이고 짧은 사실 서술 톤이며 매수/매도 표현을 쓰지 않는다.
+
+| flag | 조건 | ref_price |
+| --- | --- | --- |
+| `volume_not_confirmed` | 방향성 있는(positive/negative) 지표 신호가 있는데 `volume_ratio < 1` 또는 계산 불가 | `None` |
+| `near_resistance` | 최신 close가 resistance 기준 ±`NEAR_RESISTANCE_THRESHOLD_PCT` 이내 | resistance |
+| `near_support` | 최신 close가 support 기준 ±`NEAR_SUPPORT_THRESHOLD_PCT` 이내 | support |
+| `mixed_signals` | positive 지표와 negative 지표가 **동시에** 존재 | `None` |
+| `overheated_momentum` | `RSI ≥ RSI_OVERBOUGHT` 또는 `final_regime == overheated` | `None` |
+| `counter_higher_trend` | `alignment_flag == counter_trend` | `None` |
+| `low_liquidity` | 평균 거래량 < `MIN_AVG_VOLUME` 또는 평균 거래대금 < `MIN_AVG_TRADING_VALUE` | `None` |
+
+- `near_support`는 위험이 아니라 관찰 지점이므로 note를 중립적으로 쓴다("매수 기회" 표현 금지, enums §7). `near_resistance`도 과장 경고 없이 중립 서술.
+- `ref_price`는 `near_support`·`near_resistance`에만 각각 support·resistance 값을 넣고, 나머지는 `None`.
 
 ## 7. 데이터 캐시 (Redis TTL)
 
