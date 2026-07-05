@@ -90,6 +90,26 @@ LLM_RETRY_BACKOFF: float = 1.0             # 재시도 간 대기(초)
 EXTRACT_MAX_TOOL_CALLS: int = 2            # 기사 1건 처리 중 fetch_article 최대 호출(무한루프 방지)
 EXTRACT_CONTENT_MAX_CHARS: int = 8000      # 프롬프트에 넣을 본문 최대 길이(초과 시 잘림) — 튜닝 대상
 
+# ---------------------------------------------------------------------------
+# 감성분석(KR-FinBert-SC) 설정 — TASK 04. 감성은 LLM이 아니라 이 전용 모델이 판정한다(CLAUDE.md §2-4/§4).
+# 값은 실데이터·모델카드 확인 대상(주석 표기). 하드코딩 금지의 귀착점(CLAUDE.md §7).
+# ---------------------------------------------------------------------------
+FINBERT_MODEL: str = "snunlp/KR-FinBert-SC"   # 한국어 금융 감성(서울대 NLP랩). 일반 감성 모델·목업으로 대체 금지
+FINBERT_DEVICE: str = "cpu"                    # 가능 시 "cuda"
+FINBERT_BATCH_SIZE: int = 16                   # 배치 추론 크기(400건/시간 처리량 확보) — 튜닝 대상
+FINBERT_MAX_INPUT_CHARS: int = 2000           # 입력 상한(BERT 512토큰 고려). 초과분은 잘라 입력 — 튜닝 대상
+# 외부(원격) 추론 서버를 쓰는 경우의 안전장치. 로컬 in-process 로드만 쓰면 무의미하나 계약은 정의해 둔다(§7).
+FINBERT_TIMEOUT: float = 30.0                  # (원격) 타임아웃(초)
+FINBERT_MAX_RETRIES: int = 2                   # (원격) 재시도 횟수(총 시도 = 1 + FINBERT_MAX_RETRIES)
+FINBERT_RETRY_BACKOFF: float = 1.0             # (원격) 재시도 간 대기(초)
+# 모델 출력 라벨명 → Sentiment 값(긍정/중립/부정) 매핑. 실제 라벨명은 모델 카드 확인 후 확정(예시값).
+# 라벨 문자열은 모델에 종속되므로 여기 한 곳에 격리한다 — 모델 교체 시 이 매핑만 고친다(파이프라인 곳곳에서 다루지 않음).
+FINBERT_LABEL_MAP: dict[str, str] = {
+    "positive": "긍정",
+    "neutral": "중립",
+    "negative": "부정",
+}
+
 # 추출 지시 + 출력 스키마. 감성·영향도를 요청하지 않는다(§2-4). 본문/제목은 신뢰 불가 외부 입력이므로
 # 구획(delimiter)으로 감싸 '데이터'로만 취급하고, 구획 내부의 어떤 지시·명령·URL 요청도 따르지 않는다(§3.1-6).
 EXTRACT_SYSTEM_PROMPT: str = """당신은 한국어 경제 뉴스에서 구조화된 정보를 추출하는 도구다.
