@@ -19,6 +19,10 @@ VOLUME_AVG_WINDOW = 20          # 거래량 평균 기간
 *연결: `indicators/`, `regime_rules.md` 지표 계산*
 *RSI 14, 볼린저 20/2는 기술적 분석에서 널리 쓰이는 표준값. MVP 초기값으로 사용하고 백테스트로 조정.*
 
+> **⚠️ 기술부채 — `MA_WINDOWS`는 단순 튜닝 값이 아니라 구조적 가정이다.** `5 / 20 / 60`은 **단기·중기·장기** 이동평균을 의미하며, `regime/rules.py`(골든크로스=5/20, 정배열=5<20<60)·`synthesis/signal_score.py`·`charts/chart_builder.py`·`nodes/indicator_calculate.py`가 모두 **정확히 이 3개 window와 그 역할을 전제로 `mas[5]`/`mas[20]`/`mas[60]`을 직접 접근**한다. 따라서 `MA_WINDOWS`를 다른 조합(예: `[10,30,90]`)으로 바꾸면 config만으로 튜닝되지 않고 `KeyError` 또는 의미 붕괴가 발생한다 — 이는 "구조는 코드, 수치는 config" 원칙에서 `MA_WINDOWS`의 *개수·역할*이 **수치가 아니라 구조**에 속함을 뜻한다.
+>
+> **범위 밖(node adapter 브랜치).** MA window 의미 상수 리팩터는 `feat/technical-node-adapters`에서 수행하지 않는다. 노드 하나만 `MA_WINDOWS[0]/[1]/[2]`로 바꾸면 regime/synthesis/chart와 어긋나 반쪽 수정이 된다. 별도 브랜치(참고: `refactor/technical-ma-window-config`)에서 `MA_SHORT_WINDOW`·`MA_MID_WINDOW`·`MA_LONG_WINDOW` 같은 **의미 상수** 도입을 검토하고, `indicators`·`regime`·`synthesis`·`charts`·`nodes`·`tests`를 함께 정리한다.
+
 ## 2. regime 판정 (regime rules)
 
 ```python
