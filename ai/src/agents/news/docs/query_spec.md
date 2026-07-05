@@ -99,6 +99,7 @@
 ### ③ 원문 요약 조회 (PostgreSQL)
 - ②의 Event에 연결된 news_id → PostgreSQL에서 기사 요약·감성·출처·published_at 조회.
 - 감성 count는 저장 안 함 → 이때 실시간 집계(이벤트별 긍/중/부 분포).
+- **근거 조회 = 대표 기사 우선, 추가는 on-demand**: ②의 `EventWithArticles.articles`(대표 소수)는 `ArticleRef`로 news_id·summary를 이미 담으므로 **일반 리포트는 이 대표 소수만으로 근거를 단다(재조회 불필요)**. 대표 소수를 넘는 깊은 근거가 필요할 때만 `get_articles_by_event(event_id, limit)`로 이벤트별 기사를 on-demand 조회한다(SCHEMA_SPEC §7.2). "대표 기사 조회"와 "근거 조회"를 분리해 이벤트 DTO를 가볍게 유지한다.
 
 ### ④ 답변 생성 (LLM=Qwen3)
 - ③의 요약을 근거로 답변 작성.

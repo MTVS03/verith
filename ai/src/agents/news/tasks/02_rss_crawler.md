@@ -46,6 +46,12 @@
 2. **타임아웃·재시도·유저에이전트**: RSS 요청·본문 요청 각각의 `timeout`(초), `max_retries`, `backoff`(초), `USER_AGENT` 문자열을 둔다. 외부 호출은 반드시 타임아웃·재시도를 갖는다 (CLAUDE.md §7). 언론사 서버가 느리거나 순간 실패할 때 파이프라인 전체가 멈추지 않도록 한다.
 3. **MIN_CONTENT_LEN**: 본문으로 인정할 최소 글자 수(예: 200). 이보다 짧으면 "본문 없음(속보)"으로 간주한다. 광고·빈 페이지·짧은 속보를 본문으로 오인해 요약·감성 품질을 떨어뜨리지 않기 위함이다. 임계값은 실데이터 튜닝 대상이므로 주석으로 표기.
 4. **CRAWL_MAX_ARTICLES**(선택): 한 배치에서 처리할 최대 기사 수. 초기 폭주 방지용. 미설정 시 무제한.
+5. **크롤러 안전장치(SSRF·자원 고갈 방어)** — §3.5의 계약을 config로 닫는다(보안 상수도 하드코딩 금지):
+   - `CRAWL_ALLOWED_SCHEMES: set[str]` = `{"http", "https"}`. 그 외 scheme(`file:`·`ftp:`·`gopher:` 등)은 요청 자체를 거부한다.
+   - `CRAWL_BLOCK_PRIVATE_IPS: bool` = `True`. 요청 대상 호스트가 사설/루프백/링크로컬/메타데이터 대역(`127.0.0.0/8`·`10/8`·`172.16/12`·`192.168/16`·`169.254/16`·`::1` 등)으로 해소되면 거부한다. **리다이렉트를 따라간 최종 목적지에도 같은 검사를 적용**한다(외부→내부 우회 차단).
+   - `CRAWL_MAX_RESPONSE_BYTES: int`(예: 5_000_000) — 응답 본문 다운로드 상한(바이트). `Content-Length` 또는 스트리밍 누적 바이트가 이를 넘으면 중단하고 `failed`. 수백 MB 응답이 메모리·저장을 뚫지 못하게 한다.
+   - `CRAWL_ALLOWED_CONTENT_TYPES: set[str]`(예: `{"text/html", "application/xhtml+xml"}`) — 본문 크롤 응답의 허용 `Content-Type`. 그 외(이미지·바이너리·octet-stream)는 거부한다.
+   - `ARTICLE_CONTENT_MAX_CHARS: int`(예: 50_000) — **`Article.content`로 저장할 순수 텍스트 최대 길이**. `EXTRACT_CONTENT_MAX_CHARS`(TASK 03, 프롬프트 입력 상한)와 **별개**다 — 저장 길이 자체를 무제한으로 두지 않는다. 값은 튜닝 대상(주석).
 
 ### 3.2 `utils/rss_parser.py` — RSS 파싱 (순수 함수)
 1. RSS/Atom XML 문자열(또는 bytes)을 받아 **원시 기사 항목 리스트**(`title, link, published, description` 등)로 파싱한다. 네트워크 호출은 하지 않는다(입력→출력 순수 함수). 테스트에서 저장된 XML 픽스처로 검증하기 위함.
@@ -72,9 +78,15 @@
    | 본문 정상 확보(길이 ≥ `MIN_CONTENT_LEN`) | 순수 텍스트 | `"success"` | `True` |
    | 속보/본문 없음(길이 < `MIN_CONTENT_LEN`) | `None` | `"no_content"` | `False` |
    | 요청 실패(타임아웃·4xx/5xx·파싱 불가) | `None` | `"failed"` | `False` |
-3. HTML은 `utils/html_parser.py`로 정제해 순수 텍스트로 만든다. 원시 HTML을 반환하지 않는다.
+3. HTML은 `utils/html_parser.py`로 정제해 순수 텍스트로 만든다. 원시 HTML을 반환하지 않는다. 정제된 텍스트는 `ARTICLE_CONTENT_MAX_CHARS`로 잘라 반환한다(저장 길이 상한, §3.1-5).
 4. 외부 호출이므로 `config`의 타임아웃·재시도·USER_AGENT를 적용한다. 예외는 삼키지 말고 로깅한 뒤 `crawl_status="failed"`로 반환한다(호출측이 분기할 수 있도록). CLAUDE.md §7.
 5. **함수는 순수 조회에 가깝게**: 입력 URL → 출력(본문/상태). 부수효과(저장 등) 없음. 재사용성과 테스트 용이성을 위함.
+6. **⚠️ SSRF·자원 고갈 방어(보안 계약 — 반드시 지킴)**: 크롤러는 **넘겨받은 URL을 신뢰하지 않는다.** 요청 전·리다이렉트 추적 중 매 홉마다 아래를 검사하고, 하나라도 위반하면 요청하지 않고 `failed`로 반환(사유 로깅)한다.
+   - **scheme 검사**: `CRAWL_ALLOWED_SCHEMES`(`http`/`https`)만 허용. `file:`·`ftp:` 등 거부.
+   - **사설 IP 차단**: `CRAWL_BLOCK_PRIVATE_IPS=True`면 호스트를 해소해 사설/루프백/링크로컬/메타데이터 대역이면 거부. **리다이렉트 최종 목적지(final_url)에도 동일 검사** — 외부 URL이 `http://127.0.0.1:8000/...`이나 `http://backend:8000/...`로 302되는 우회를 막는다. (backend 삭제/쓰기 엔드포인트가 무인증이어도 크롤러가 그 URL에 절대 닿지 않게 하는 최후 방어선.)
+   - **응답 크기 상한**: `CRAWL_MAX_RESPONSE_BYTES` 초과 시 다운로드 중단·`failed`.
+   - **Content-Type 검사**: `CRAWL_ALLOWED_CONTENT_TYPES` 외면 거부(바이너리·이미지 등).
+   - 이 검사는 **크롤러 계층에 둔다**(Tool·노드가 아니라). 어떤 경로로 호출되든 방어가 적용되도록 하기 위함이다. Tool 인자 화이트리스트(처리 중 기사 URL만 허용)는 TASK 03 §3.2가 담당하는 **상위** 방어이고, 여기 크롤러 검사는 그와 독립적으로 항상 도는 **하위** 방어다(다층 방어).
 
 ### 3.6 `nodes/crawl.py` — 수집 노드 (얇게, 본문 크롤링 안 함)
 1. `services/rss.py`를 호출해 중복 제거된 `Article` 메타데이터 리스트를 얻어 파이프라인 state에 실어 넘긴다. 노드는 순서만 담당하는 얇은 껍데기다(CLAUDE.md §2-2).
@@ -108,6 +120,13 @@ RETRY_BACKOFF: float = 1.0         # 재시도 간 대기(초)
 USER_AGENT: str = "verith-news-agent/1.0"
 MIN_CONTENT_LEN: int = 200         # 본문 인정 최소 글자수(미만이면 no_content) — 튜닝 대상
 CRAWL_MAX_ARTICLES: int | None = None   # 배치당 최대 처리 기사 수(None=무제한)
+
+# 크롤러 안전장치(SSRF·자원 고갈 방어) — §3.5-6. 보안 상수도 config에.
+CRAWL_ALLOWED_SCHEMES: set[str] = {"http", "https"}          # 그 외 scheme 요청 거부
+CRAWL_BLOCK_PRIVATE_IPS: bool = True                          # 사설/루프백/링크로컬/메타데이터 대역 차단(리다이렉트 최종지 포함)
+CRAWL_MAX_RESPONSE_BYTES: int = 5_000_000                     # 응답 본문 다운로드 상한(초과 시 중단·failed)
+CRAWL_ALLOWED_CONTENT_TYPES: set[str] = {"text/html", "application/xhtml+xml"}  # 본문 응답 허용 타입
+ARTICLE_CONTENT_MAX_CHARS: int = 50_000    # Article.content 저장 텍스트 상한 — 튜닝 대상. EXTRACT_CONTENT_MAX_CHARS(프롬프트 입력 상한)와 별개
 ```
 
 ```python
@@ -245,6 +264,7 @@ def fetch_article(url: str) -> dict:
 - [ ] `services/rss.collect_articles`가 전체 피드를 수집·파싱하고, `normalize_url`로 중복을 제거해 `Article` 메타데이터 리스트를 반환함. 한 피드 실패가 전체를 죽이지 않음.
 - [ ] `collect_articles`가 반환하는 `Article`은 `content=None`, `crawl_status="pending"`, `content_available=False`이고 `title/url/publisher/published_at`만 채워짐. **본문을 크롤링하지 않음.**
 - [ ] `services/crawler.fetch_content(url)`가 `CrawlResult`를 반환하며 상태 매핑(success/no_content/failed)이 §3.5 표대로 동작함. 본문은 순수 텍스트, 원시 HTML 아님.
+- [ ] **SSRF·자원 방어(§3.5-6)가 크롤러 계층에 구현됨**: 비허용 scheme·사설/루프백 IP(**리다이렉트 최종지 포함**)·응답 크기 초과·비허용 Content-Type을 요청 전/홉마다 검사해 거부(`failed`, 사유 로깅). `Article.content`는 `ARTICLE_CONTENT_MAX_CHARS`로 잘려 저장됨.
 - [ ] `nodes/crawl.py`가 `services/rss.py`만 호출하고 **`services/crawler.py`를 import 하지 않음**(본문 크롤링을 하지 않음). 상한(`CRAWL_MAX_ARTICLES`) 적용됨.
 - [ ] 본문 없는 기사 규칙(§4.1)이 문서·구현에 반영됨: `no_content` 시 `summary="<제목> (본문 없음)"`, `source_type="title_only"`, 추정 생성 없음.
 - [ ] `crawl_status`/`content_available`가 항상 정합됨(`success` ↔ `content_available=True`).
@@ -258,7 +278,8 @@ def fetch_article(url: str) -> dict:
   - `normalize_url`: `utm_*`·fragment 제거, 동일 기사의 변형 URL이 같은 키로 접히는지(중복 제거 검증).
   - `collect_articles`: 한 피드가 예외를 던져도 나머지 피드 결과가 반환되는지(실패 격리). 반환 Article의 `crawl_status=="pending"`, `content is None`.
   - `fetch_content`: (1) 충분히 긴 본문 → `success`/`content_available=True`, (2) 짧은 본문 → `no_content`, (3) 타임아웃/HTTP 오류 mock → `failed`. 각 경우 `content`와 상태의 정합.
-- **경계 케이스**: RSS 0건, 날짜 파싱 실패(→None), 중복 URL 다수, 본문 길이 = `MIN_CONTENT_LEN` 경계.
+  - **SSRF·자원 방어(§3.5-6)**: (1) `file:`/`ftp:` 등 비허용 scheme → 요청 없이 `failed`, (2) 사설/루프백 호스트(`http://127.0.0.1/…`·`http://10.0.0.5/…`) → 거부, (3) **외부 URL이 사설 IP로 302 리다이렉트** → 최종지 검사에서 거부(mock redirect), (4) `Content-Length`/스트림이 `CRAWL_MAX_RESPONSE_BYTES` 초과 → 중단·`failed`, (5) 비허용 `Content-Type`(예: `image/png`) → 거부, (6) 긴 본문이 `ARTICLE_CONTENT_MAX_CHARS`로 잘려 반환되는지.
+- **경계 케이스**: RSS 0건, 날짜 파싱 실패(→None), 중복 URL 다수, 본문 길이 = `MIN_CONTENT_LEN` 경계, 응답 크기 = `CRAWL_MAX_RESPONSE_BYTES` 경계.
 - **evals 연계**: 없음(수집·크롤링은 tests 레벨 검증). 추출·감성 품질은 이후 evals 축에서 다룬다.
 - 후속 TASK(03 extract의 `fetch_article` Tool)가 `crawler.fetch_content` 계약을 재사용하므로, 반환 타입·상태 매핑을 바꾸면 여기부터 수정한다.
 

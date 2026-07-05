@@ -75,6 +75,7 @@
 ### 3.4 `schemas/response.py`
 1. backend 조회 응답을 감싸는 래퍼. sequence.md §2(리포트 흐름)에서 query_client가 받는 형태.
 2. 종목 조회 결과 = 이벤트(importance순) + 각 이벤트의 근거 기사(`ArticleRef` 재사용) + **전체 `overall_gauge`**(backend가 채우는 전체 감성 집계, `sentiment=None` 제외). ReportModel 조립에 필요한 원자료를 담는다. **overall_gauge는 backend 집계값**이며 ai가 기사 감성을 다시 세지 않는다(절대규칙 4, SCHEMA_SPEC §7.3).
+   - **대표 기사 vs 근거 조회 분리**: `EventWithArticles.articles`는 화면용 **대표 소수**이고, `ArticleRef`가 news_id를 이미 포함하므로 일반 리포트는 이 대표 소수만으로 근거를 단다(재조회 불필요). 대표 소수를 넘는 추가 근거가 필요할 때만 **on-demand로 `get_articles_by_event(event_id, limit)`**(TASK 08·SCHEMA_SPEC §7.2)로 조회한다. 이벤트별 전체 news_id를 DTO에 상시 싣지 않아 조회 DTO가 가볍다(책임 분리).
 3. **"없는 종목" vs "뉴스 0건" 구분**: 둘 다 `events=[]`가 되므로, `subject_found: bool` 플래그로 구분한다. 리포트에서 "데이터 제한" 문구를 상황에 맞게 쓰기 위함(당장 backend가 구분값을 못 주면 기본 True로 두고 TASK 08에서 확정).
 4. 저장/삭제 요청·응답의 성공 여부·개수 등 backend 공통 응답 형태도 여기서 정의(세부 엔드포인트 계약은 TASK 08에서 확정하되, 모델 골격은 여기 둔다).
 
@@ -247,8 +248,10 @@ from schemas.report import ArticleRef, SentimentGauge
 
 class EventWithArticles(BaseModel):
     event: Event
-    article_count: int = 0   # 관련 기사 총 건수(실시간 집계). articles는 그 일부 샘플일 수 있음
-    articles: list[ArticleRef] = Field(default_factory=list)  # 요약+링크 묶음(순서 어긋남 방지)
+    article_count: int = 0   # 관련 기사 총 건수(실시간 집계). articles는 그 일부(대표 소수)
+    # 화면 노출용 대표 소수(요약+링크 묶음, 순서 어긋남 방지). news_id를 이미 포함하므로
+    # 일반 리포트는 이 대표 소수만으로 근거를 단다(재조회 불필요). 더 깊은 근거는 get_articles_by_event로 on-demand(TASK 09 §3.5).
+    articles: list[ArticleRef] = Field(default_factory=list)
     gauge: SentimentGauge = Field(default_factory=SentimentGauge)  # 조회 시 실시간 집계 결과
 
 class SubjectQueryResponse(BaseModel):
@@ -294,6 +297,7 @@ class CleanupResponse(BaseModel):
 - [ ] `ExtractResult.source_type`이 **`SourceType` Enum 3종**(article/rss_summary/title_only)임.
 - [ ] 근거 기사는 `ArticleRef`(**news_id**+summary+url) 객체로 묶음. 요약/URL 병렬 리스트를 쓰지 않음. `ReportEvent`/`EventWithArticles`에 `article_count`(총 건수)가 `articles`(대표 소수)와 별도로 있음.
 - [ ] `ReportModel`에 데이터 제한 표기 수단(`data_limited`)이, `SubjectQueryResponse`에 `subject_found`·**`overall_gauge`(backend 집계, ai 재집계 금지)**가 있음.
+- [ ] `EventWithArticles.articles`(대표 소수, `ArticleRef`=news_id 포함)만으로 일반 리포트 근거가 닫힘. 추가 근거는 DTO에 싣지 않고 on-demand `get_articles_by_event`로 조회(TASK 08·09 §3.5).
 - [ ] `python -c "import schemas"` (또는 동등) import 오류 없이 통과.
 - [ ] `from schemas import Article, ExtractResult, Event, ReportModel, SubjectQueryResponse` 가 동작.
 

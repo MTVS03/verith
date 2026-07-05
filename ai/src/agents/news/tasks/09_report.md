@@ -6,7 +6,7 @@
   - TASK 01(schemas: `Event`, `ReportModel`·`ReportEvent`·`SentimentGauge`·`ArticleRef`(report.py), `SubjectQueryResponse`·`EventWithArticles`(response.py)). 리포트 입력·조회 응답 모델. `schemas/query.py`(질문 파싱·답변)는 **질의측 전용 스키마이므로 이 문서(TASK 09)가 신규로 소유**한다. TASK 01은 배치측 스키마만 담당하며 질의 스키마를 알 필요가 없다(관심사 분리 — 배치/질의 흐름이 독립적).
   - TASK 03(`services/llm.py`의 Qwen3 클라이언트. **① 질문이해·④ 답변생성이 이 클라이언트를 재사용**한다 — TASK 03 §0.1). 감성 판정·점수는 여기서 하지 않는다(절대규칙 4).
   - TASK 07(`schemas/graph.py`의 `NodeLabel`/`RelType`·정체성 규칙 §0.2. ② 그래프 순회가 이 라벨·관계 타입으로 설계된다 — TASK 07 §0.1).
-  - TASK 08(`services/backend/query_client.py`: `get_events_by_subject`(single-hop·importance순)·`get_shared_events`(multi-hop)·`get_articles_by_news_ids`(원문 요약). **②③의 backend HTTP 조회를 여기서 소비**한다. 감성 게이지는 backend가 실시간 집계해 `SentimentGauge`로 준다).
+  - TASK 08(`services/backend/query_client.py`: `get_events_by_subject`(single-hop·importance순·이벤트별 대표 기사 소수 포함)·`get_shared_events`(multi-hop)·`get_articles_by_event(event_id, limit)`(대표 소수 밖 근거 on-demand). **②③의 backend HTTP 조회를 여기서 소비**한다. 감성 게이지는 backend가 실시간 집계해 `SentimentGauge`로 준다).
 - **산출물(파일)**:
   - `config.py`(발췌 추가) — 질의·리포트 옵션(기본 조회 기간·TOP N·이벤트별 대표 기사 수·정렬(랭킹) 기준·프리셋 질문 문구·④ 답변 생성 프롬프트/토큰). 하드코딩 금지의 귀착점. **랭킹 점수는 미확정 → 잠정 importance순**(query_spec §6, CLAUDE.md §8).
   - `schemas/query.py`(**신규** — TASK 09 소유) — ① 질문 파싱 결과(`QueryIntent` Enum·`QueryUnderstanding`) + ④ 답변 구조(`Answer`: answer 텍스트 + evidence news_id[]) + (선택) 흐름 번들(`QueryResult`). 질의측 전용 스키마로 이 문서가 소유한다(TASK 01과 독립).
@@ -45,7 +45,9 @@
 |---|---|---|---|
 | 근거 이슈 칩 | 이벤트(canonical_title) | ② 그래프순회 결과 | `뉴스 흐름 요약`이 언급한 이벤트를 칩으로. 칩→이벤트 링크 |
 | 이벤트 | `canonical_id` | ② `EventWithArticles.event` | TOP N에 노출. importance순(§6 잠정) |
-| 근거 기사 | `news_id`(→`ArticleRef` news_id+summary+url) | ② `EventWithArticles.articles`(대표 소수) / ③ `query_client.get_articles_by_news_ids`(추가 재조회) | ④ 답변의 각 주장에 news_id 부착. `ArticleRef.news_id`가 사슬의 원천(TASK 01·08). 화면엔 대표 소수(`ReportEvent.articles`) |
+| 근거 기사 | `news_id`(→`ArticleRef` news_id+summary+url) | ② `EventWithArticles.articles`(대표 소수, news_id 포함) / (추가) `query_client.get_articles_by_event(event_id, limit)` on-demand | ④ 답변의 각 주장에 news_id 부착. `ArticleRef.news_id`가 사슬의 원천(TASK 01·08). 일반 리포트는 대표 소수만으로 근거를 닫고, 더 깊은 근거만 on-demand 조회 |
+
+> **③ 근거 조회 = 대표 기사 우선, 추가는 on-demand(계약 확정)**: ②의 `EventWithArticles.articles`(대표 소수)는 `ArticleRef`로 **news_id·summary를 이미 담으므로 일반 리포트는 재조회 없이** 근거를 단다(원래 "③에서 무엇으로 조회하나" 공백은 대표 소수 안에서 닫힌다). 대표 소수를 넘는 깊은 근거가 필요할 때만 `query_client.get_articles_by_event(event_id, limit)`(TASK 08·SCHEMA_SPEC §7.2)로 이벤트별 기사를 on-demand 조회한다. **event_id→news_id 목록을 조회 DTO에 상시 싣지 않는다**(대표 기사 조회와 근거 조회를 분리 → 이벤트 DTO 경량·Top-N 조정은 `limit` 인자로). bare news_id가 아니라 `ArticleRef`를 돌려주므로(news_id+summary 동시 확보) id→기사 왕복이 생기지 않는다.
 
 - **모든 주장에 근거 news_id 부착**(query_spec §4·pipeline_spec §11). `Answer.evidence_news_ids`로 담고, 근거 없는 문장은 만들지 않는다(환각 금지, 절대규칙 5).
 - **근거가 없으면 "데이터 제한"** 을 해당 섹션에 표기한다(`ReportModel.data_limited`/`note`, `SubjectQueryResponse.subject_found`). "없는 종목"과 "뉴스 0건"을 `subject_found`로 구분해 문구를 다르게 쓴다(TASK 01 §3.4).
@@ -121,7 +123,7 @@
 
 ### 3.5 `services/answer_generator.py` — ④ 답변 생성 (Qwen3, 근거 news_id)
 1. **`generate_answer(understanding, response) -> Answer`**: ③의 요약·감성(`ArticleRef`·`SentimentGauge`)을 근거로 Qwen3가 `뉴스 흐름 요약` 본문을 작성한다. **intent로 초점·분량 조절**(관계·이유=서사 상세, 요약·현황=짧게 — query_spec §2-①).
-2. **근거 부착**: 모든 주장에 근거 news_id를 달아 `Answer.evidence_news_ids`·`cited_event_ids`를 채운다(§0.2). ③ 원문 요약은 `query_client.get_articles_by_news_ids`로 확보(TASK 08). 근거로 실제 조회된 news_id만 넣는다(환각 금지).
+2. **근거 부착**: 모든 주장에 근거 news_id를 달아 `Answer.evidence_news_ids`·`cited_event_ids`를 채운다(§0.2). 근거 기사는 **우선 `EventWithArticles.articles`(대표 소수, news_id·summary 포함)에서** 얻고, 대표 소수로 부족할 때만 **`query_client.get_articles_by_event(event_id, limit)`로 on-demand 추가 조회**(§0.2·SCHEMA_SPEC §7.2). 근거로 실제 조회된 news_id만 넣는다(환각 금지).
 3. **데이터 제한**: 관련 데이터가 없으면 지어내지 말고 `Answer.data_limited=True` + 섹션 문구를 "데이터 제한"으로(절대규칙 5). `subject_found`로 "없는 종목"/"뉴스 0건" 구분해 문구를 다르게.
 4. **감성 금지**: LLM은 텍스트만. 감성 라벨·분포를 판정·생성하지 않는다(게이지는 backend 집계값 표시, 절대규칙 4).
 5. LLM 호출은 `services/llm.py`만(TASK 03 재사용, 타임아웃·재시도). 출력은 `Answer`로 파싱·검증(CLAUDE.md §2-3).
@@ -242,7 +244,7 @@ from schemas.response import SubjectQueryResponse
 
 def generate_answer(understanding: QueryUnderstanding,
                     response: SubjectQueryResponse) -> Answer:
-    """③ 요약(query_client.get_articles_by_news_ids)을 근거로 뉴스 흐름 요약 본문 작성.
+    """③ 근거(response.articles 대표 소수 + 필요 시 query_client.get_articles_by_event)를 근거로 뉴스 흐름 요약 본문 작성.
     intent로 초점·분량 조절. 모든 주장에 근거 news_id(§0.2). 데이터 없으면 data_limited=True.
     감성 판정 안 함(게이지는 backend 집계값). 출력은 Answer로 파싱·검증."""
     ...
@@ -292,7 +294,7 @@ def report_node(state: dict) -> dict:
 |---|---|---|---|---|
 | ① 질문이해 | `understand_query`/`from_subject` | 사전(COMPANY_ALIASES) + Qwen3(`llm.py`) | `QueryUnderstanding` | Dictionary First→LLM 보완→그래프 검증→저신뢰 제거(§3.3). Pydantic 강제. 종목은 프리셋(요약) |
 | ② 그래프순회 | `graph_query.fetch_events` | backend(`query_client`) | `SubjectQueryResponse` | 1개=single-hop, 2개=multi-hop. Cypher 없음(절대규칙 1) |
-| ③ 원문요약 | `query_client.get_articles_by_news_ids` | backend(TASK 08) | `ArticleRef`·`SentimentGauge` | 감성 게이지는 backend 실시간 집계(§5) |
+| ③ 근거 기사 | `EventWithArticles.articles`(대표) + `query_client.get_articles_by_event`(추가) | backend(TASK 08) | `ArticleRef`·`SentimentGauge` | 대표 소수로 닫고 부족 시 on-demand. 감성 게이지는 backend 실시간 집계(§5) |
 | ④ 답변생성 | `answer_generator.generate_answer` | Qwen3(`llm.py`) | `Answer` | 근거 news_id 부착(§0.2). 텍스트만(절대규칙 4) |
 | 렌더 | `report_renderer.build/render` | 목업 템플릿 | `ReportModel`·HTML | importance순 TOP N. 감성 재계산 없음 |
 
@@ -323,6 +325,7 @@ def report_node(state: dict) -> dict:
 - [ ] `query_understanding.understand_query`가 **Dictionary First → LLM Fallback → 그래프 검증 → 저신뢰 제거** 순으로 회사명을 해석함(§3.3): ① `COMPANY_ALIASES` 사전 매칭 → ② 잔여 토큰만 Qwen3 보완(+period·intent) → ③ `query_client`로 Company 존재 검증 → ④ 저신뢰·미매칭은 `dropped_tokens`로 버림. 결과를 **`QueryUnderstanding`으로 검증**. 종목 선택은 `from_subject` 프리셋. 파싱 실패 시 예외 없이 "데이터 제한" degrade. 감성 판정 없음. canonical == 그래프 Company 노드명.
 - [ ] `graph_query.fetch_events`가 회사 1개=`get_events_by_subject`(single-hop)·2개=`get_shared_events`(multi-hop)로 분기하고 `within_days`를 넘김. `BackendError` 시 빈/`subject_found=False`로 degrade. **Cypher·직접 DB 접근 없음**(절대규칙 1).
 - [ ] `answer_generator.generate_answer`가 ③ 요약을 근거로 `뉴스 흐름 요약` 본문을 만들고 **모든 주장에 근거 news_id(`evidence_news_ids`)·`cited_event_ids`를 부착**(§0.2). 데이터 없으면 `data_limited=True`. **LLM은 텍스트만**(감성 판정·집계 없음, 절대규칙 4). 출력은 `Answer`로 검증.
+- [ ] **근거 조회 경로가 계약으로 닫힘**: 일반 리포트는 대표 소수(`articles`, news_id 포함)만으로 근거를 닫고, 부족할 때만 `query_client.get_articles_by_event(event_id, limit)`로 on-demand 조회(§0.2·§3.5·SCHEMA_SPEC §7.2). 조회 DTO에 전체 news_id 목록을 상시 싣지 않음(대표/근거 조회 분리).
 - [ ] `report_renderer.build_report_model`이 `SubjectQueryResponse`→`ReportModel`을 조립: `top_events`는 **importance순 TOP `REPORT_TOP_N`**, 이벤트별 대표 기사 `REPORT_MAX_ARTICLES_PER_EVENT`건(`article_count`(총 건수)와 구분), `overall_gauge`는 **backend 집계값**(감성 재계산 없음), `subject_found`·0건·`answer.data_limited`→`data_limited`/`note`.
 - [ ] `report_renderer.render_html`이 목업(`templates/report.html`) 구조에 데이터를 주입해 **HTML 문자열**을 만든다: `answer.text`=`뉴스 흐름 요약` 본문, 근거 이슈 칩=`cited_event_ids`, TOP 이슈=importance순, 감성 게이지=`overall_gauge`. **없는 수집메타·반응도는 지어내지 않고 생략/데이터 제한**, "추정으로 채우지 않습니다" 배지↔`data_limited` 연동.
 - [ ] `templates/report.html`이 정적 목업에서 **데이터 주입 템플릿**으로 바뀜(레이아웃·톤 유지, 재작성 아님). 이스케이프로 깨짐·XSS 방지.

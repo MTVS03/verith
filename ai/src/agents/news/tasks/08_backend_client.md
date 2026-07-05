@@ -1,7 +1,7 @@
 # TASK 08 — backend HTTP 클라이언트 (services/backend/*.py · nodes/save.py)
 
 ## 0. 개요
-- **목적**: 배치 흐름의 마지막 단계(**저장**)와, 앞선 TASK들이 **인터페이스로만** 정의해 둔 **조회(Provider)** 를 실제 backend(:8000) HTTP 호출로 구현한다. 이 에이전트에서 **PostgreSQL·Neo4j에 닿는 유일한 경로**다(절대규칙 1: DB 드라이버·SQL·Cypher를 이 에이전트에 직접 쓰지 않고, 전부 backend HTTP로). 구체적으로 (1) 배치 산출물(분석된 `Article` 원본 + TASK 07의 `GraphBatch`)을 backend로 보내 PostgreSQL 저장 + Neo4j MERGE, (2) 병합(TASK 05)·중요도(TASK 06)가 주입받는 `RecentEventProvider`·`EventArticleStatsProvider`의 **실제 backend 구현**, (3) 질의(리포트) 흐름의 조회(`query_client`: 종목별 이벤트 importance순·multi-hop·news_id→요약/감성), (4) 7일 롤링 삭제 **트리거**를 담당한다.
+- **목적**: 배치 흐름의 마지막 단계(**저장**)와, 앞선 TASK들이 **인터페이스로만** 정의해 둔 **조회(Provider)** 를 실제 backend(:8000) HTTP 호출로 구현한다. 이 에이전트에서 **PostgreSQL·Neo4j에 닿는 유일한 경로**다(절대규칙 1: DB 드라이버·SQL·Cypher를 이 에이전트에 직접 쓰지 않고, 전부 backend HTTP로). 구체적으로 (1) 배치 산출물(분석된 `Article` 원본 + TASK 07의 `GraphBatch`)을 backend로 보내 PostgreSQL 저장 + Neo4j MERGE, (2) 병합(TASK 05)·중요도(TASK 06)가 주입받는 `RecentEventProvider`·`EventArticleStatsProvider`의 **실제 backend 구현**, (3) 질의(리포트) 흐름의 조회(`query_client`: 종목별 이벤트 importance순·multi-hop·이벤트별 기사 요약/감성 on-demand), (4) 7일 롤링 삭제 **트리거**를 담당한다.
 - **선행 작업**:
   - TASK 01(schemas: `Article`, `Event`, `CandidateEvent`(TASK 05 추가), `EventArticleStats`(TASK 06 추가), `SubjectQueryResponse`·`EventWithArticles`·`SaveResponse`·`CleanupResponse`(response.py), `ArticleRef`·`SentimentGauge`).
   - TASK 05(`RecentEventProvider` Protocol + `CandidateEvent` 계약. **여기서 backend 구현**을 채운다. centroid 계산·유지는 backend 책임).
@@ -14,7 +14,7 @@
   - `services/backend/client.py` — 공용 HTTP 계층(`BackendClient`): `_request()` 하나에 타임아웃·재시도·에러 처리 격리. httpx/requests 같은 HTTP 라이브러리는 **오직 이 파일**에만.
   - `services/backend/save_client.py` — 배치 저장(`save_batch(articles, graph_batch) -> SaveResponse`) + 7일 롤링 삭제 트리거(`request_cleanup() -> CleanupResponse`).
   - `services/backend/providers.py` — `BackendRecentEventProvider`(TASK 05 `RecentEventProvider` 구현), `BackendEventArticleStatsProvider`(TASK 06 `EventArticleStatsProvider` 구현). 배치 흐름이 주입받는 조회.
-  - `services/backend/query_client.py` — 질의(리포트) 흐름 조회: 종목별 이벤트(importance순)·두 회사 공유 이벤트(multi-hop)·news_id→요약/감성. (query_spec §4의 ②③ backend HTTP)
+  - `services/backend/query_client.py` — 질의(리포트) 흐름 조회: 종목별 이벤트(importance순)·두 회사 공유 이벤트(multi-hop)·이벤트별 기사(요약/감성) on-demand. (query_spec §4의 ②③ backend HTTP)
   - `nodes/save.py` — 얇은 저장 노드: `state["articles"]`·`state["graph_batch"]`를 `save_client.save_batch`로 넘기고 결과를 반영.
 - **범위 밖(주의)**:
   - **DB 모델 정의·마이그레이션·실제 SQL/Cypher·CASCADE 삭제 로직은 backend 소유**(`backend/db/models/news`, SCHEMA_SPEC.md §5). 이 에이전트는 **HTTP 요청만** 한다. 7일 168h 경과 판정·고아 노드(Keyword/Person/Country) 정리·Company 유지는 backend가 수행하고, 여기서는 **트리거만** 한다.
@@ -63,7 +63,7 @@
 ### 3.1 `config.py` — backend 접속 설정 (하드코딩 금지)
 1. **접속**: `BACKEND_BASE_URL: str`(예: `"http://localhost:8000"`). 배포 환경에 따라 바뀌므로 config·환경변수에서 읽는다(코드 하드코딩 금지).
 2. **외부 호출 안전장치**: `BACKEND_TIMEOUT`(초), `BACKEND_MAX_RETRIES`, `BACKEND_RETRY_BACKOFF`(초). 모든 backend 호출에 적용(CLAUDE.md §7). 저장·조회·삭제 공통.
-3. **엔드포인트 경로(잠정)**: `BACKEND_SAVE_PATH`·`BACKEND_CLEANUP_PATH`·`BACKEND_QUERY_SUBJECT_PATH`·`BACKEND_QUERY_SHARED_PATH`·`BACKEND_ARTICLES_PATH`·`BACKEND_RECENT_EVENTS_PATH`·`BACKEND_EVENT_STATS_PATH` 등. **⚠️ 실제 경로·요청/응답 스키마는 `verith/docs/api_contract.md`에서 확정(미확정, CLAUDE.md §8)** — 여기서는 잠정값 + 주석으로 "api_contract.md에서 확정" 표기. 경로 문자열을 코드 여기저기 흩지 않고 config에 모은다.
+3. **엔드포인트 경로(잠정)**: `BACKEND_SAVE_PATH`·`BACKEND_CLEANUP_PATH`·`BACKEND_QUERY_SUBJECT_PATH`·`BACKEND_QUERY_SHARED_PATH`·`BACKEND_EVENT_ARTICLES_PATH`·`BACKEND_RECENT_EVENTS_PATH`·`BACKEND_EVENT_STATS_PATH` 등. **⚠️ 실제 경로·요청/응답 스키마는 `verith/docs/api_contract.md`에서 확정(미확정, CLAUDE.md §8)** — 여기서는 잠정값 + 주석으로 "api_contract.md에서 확정" 표기. 경로 문자열을 코드 여기저기 흩지 않고 config에 모은다.
 4. (선택) `BACKEND_SAVE_BATCH_SIZE` — 저장 payload가 지나치게 클 때 분할 전송 상한(초기 폭주 방지). 미설정 시 한 번에.
 
 ### 3.2 `services/backend/client.py` — 공용 HTTP 계층
@@ -72,7 +72,7 @@
 1. **`BackendClient`**: `BACKEND_BASE_URL` 기준 세션/커넥션을 들고, `_request(method, path, json=None, params=None)` 하나로 모든 호출을 처리한다. **타임아웃·재시도(지수 backoff)·상태코드 검사·JSON 파싱**을 여기 격리한다(CLAUDE.md §7).
 2. **에러 처리**: HTTP 오류(타임아웃·연결 실패·4xx/5xx)는 삼키지 말고 로깅하고, 호출측이 분기할 수 있도록 **정의된 예외(예: `BackendError`)로 변환**해 올린다(원시 라이브러리 예외를 그대로 흘리지 않음 — 상위 계층이 라이브러리에 결합되지 않게).
 3. **부수효과 격리**: 이 파일은 순수 HTTP만. 도메인 로직(스키마 조립·판정)을 넣지 않는다.
-4. (선택) 인증 헤더·공통 헤더(User-Agent 등)를 여기서 일괄 부착.
+4. **인증 헤더·공통 헤더(User-Agent 등)를 여기서 일괄 부착.** 인증 방식은 잠정 "내부망 전용" 전제로 미확정이나(SCHEMA_SPEC §7.1, CLAUDE.md 미확정), 쓰기·삭제 엔드포인트가 있으므로 **인증 헤더 주입 지점(예: `BACKEND_AUTH_TOKEN` config)을 `_request`에 미리 마련**해 둔다(토큰 도입 시 이 한 곳만 채우면 되게). 토큰 값은 하드코딩 금지 → config/환경변수. 확정 전에는 비워 두고 내부망 전제로 운용.
 
 ### 3.3 `services/backend/save_client.py` — 배치 저장 + 삭제 트리거
 > **★ 원자성 계약**: `save_batch()`는 **하나의 배치(batch)를 원자적(atomic) 단위로 backend에 전달하는 계약**이다. `articles`와 `graph_batch`는 **반드시 동일한 배치에서 생성된 결과**여야 하며(같은 실행의 `state["articles"]`·`state["graph_batch"]`), backend는 이를 **하나의 저장 작업**으로 처리한다. 이 계약이 있어야 url→news_id 해소(§2)와 그래프-원본 정합이 보장된다. 서로 다른 배치의 산출물을 섞어 넘기지 않는다(정합 붕괴·부분 저장 방지).
@@ -103,7 +103,7 @@
 
 1. **`get_events_by_subject(companies, within_days) -> SubjectQueryResponse`**: single-hop(`(Company)-[:PARTICIPATES_IN]->(Event)`) 이벤트를 **importance 내림차순**으로 조회. 각 이벤트에 근거 기사(`ArticleRef`=**news_id**+summary+url) 소수 + **실시간 집계된 `SentimentGauge`** + `article_count`(총 건수)를 담아 `EventWithArticles` 리스트로. **`ArticleRef.news_id`가 있어야** ④ 답변생성이 근거 news_id 사슬(TASK 09 §0.2)을 만들 수 있다. **"없는 종목" vs "뉴스 0건"** 구분 위해 `subject_found` 채움(TASK 01 §3.4). 감성 분포는 backend가 집계(감성 None 제외).
 2. **`get_shared_events(company_a, company_b, within_days) -> SubjectQueryResponse`**(또는 동등): multi-hop — 두 회사가 함께 `PARTICIPATES_IN`한 **공유 이벤트**(관계 질문 핵심, query_spec §2). importance순.
-3. **`get_articles_by_news_ids(news_ids) -> list[ArticleRef]`**: ③ 원문 요약 조회 — news_id → 요약·감성·출처·published_at(PostgreSQL, query_spec §3). 근거(evidence) 추적용. HAS_NEWS로 이어진 news_id를 backend가 해소해 둔 것을 소비. **반환 `ArticleRef`에 입력 `news_id`를 그대로 담아**(news_id+summary+url) 요약↔news_id 매핑이 끊기지 않게 한다. (②의 `EventWithArticles.articles`가 이미 `ArticleRef`(news_id 포함)를 주므로, 이 함수는 대표 소수 밖의 추가 근거를 news_id로 재조회할 때 쓴다.)
+3. **`get_articles_by_event(event_id, limit) -> list[ArticleRef]`**: ③ 추가 근거 조회 — 한 이벤트(`event_id`=canonical_id)에 `HAS_NEWS`로 이어진 기사를 요약·감성·출처·published_at과 함께 `ArticleRef`(**news_id**+summary+url) 리스트로 조회(query_spec §3). **`limit`으로 개수를 제어**(Top-N 조정은 DTO 재배포 없이 이 인자로 — 정렬은 published_at desc 등, backend가 규칙 명시). ②의 `EventWithArticles.articles`(대표 소수, news_id 포함)로 일반 리포트 근거는 이미 닫히므로, 이 함수는 **대표 소수를 넘는 깊은 근거가 필요할 때만 on-demand로** 쓴다(§0.2 리뷰 지적을 이 분리로 닫음). **"대표 기사 조회"(get_events_by_subject)와 "근거 조회"(이 함수)를 분리**해 이벤트 DTO에 전체 news_id를 상시 싣지 않는다. bare news_id가 아니라 `ArticleRef`를 돌려주므로 id→기사 왕복이 없다.
 4. 관련도(랭킹) 점수는 **미확정 → 잠정 importance순**(pipeline_spec §11, query_spec §6). 정렬 기준을 코드에 박지 말고 backend/후속 튜닝에 맞춰 둔다. HTTP는 `BackendClient`로만.
 
 ### 3.6 `nodes/save.py` — 저장 노드 (얇게)
@@ -131,7 +131,7 @@ BACKEND_RECENT_EVENTS_PATH: str = "/news/events/recent"     # 병합 후보(TASK
 BACKEND_EVENT_STATS_PATH: str = "/news/events/stats"        # 중요도 통계(TASK 06)
 BACKEND_QUERY_SUBJECT_PATH: str = "/news/query/subject"     # 종목 single-hop
 BACKEND_QUERY_SHARED_PATH: str = "/news/query/shared"       # 공유 이벤트 multi-hop
-BACKEND_ARTICLES_PATH: str = "/news/articles"              # news_id→요약/감성
+BACKEND_EVENT_ARTICLES_PATH: str = "/news/events/{event_id}/articles"   # 이벤트별 기사(요약/감성) on-demand, ?limit=N
 ```
 
 ```python
@@ -210,8 +210,10 @@ def get_shared_events(company_a: str, company_b: str, within_days: int) -> Subje
     """multi-hop — 두 회사가 함께 PARTICIPATES_IN한 공유 이벤트(관계 질문). importance순."""
     ...
 
-def get_articles_by_news_ids(news_ids: list[int]) -> list[ArticleRef]:
-    """news_id → 요약·감성·출처·published_at(PostgreSQL). 근거(evidence) 추적용."""
+def get_articles_by_event(event_id: str, limit: int) -> list[ArticleRef]:
+    """이벤트(canonical_id)에 HAS_NEWS로 이어진 기사 → ArticleRef(news_id+summary+url).
+    limit으로 개수 제어(Top-N은 인자로 조정). 대표 소수(EventWithArticles.articles) 밖
+    깊은 근거가 필요할 때만 on-demand. 대표 기사 조회와 근거 조회를 분리(§3.5-3)."""
     ...
 ```
 
@@ -238,7 +240,7 @@ def save_node(state: dict) -> dict:
 | 중요도 통계 조회 | `BackendEventArticleStatsProvider.get_event_article_stats` | 읽기 | 이벤트 누적 원자료(publishers·감성 합/개수) |
 | 종목 이벤트(single-hop) | `query_client.get_events_by_subject` | 읽기 | importance순 + 감성 실시간 집계 |
 | 공유 이벤트(multi-hop) | `query_client.get_shared_events` | 읽기 | 두 회사 공유 Event 순회 |
-| 원문 요약 | `query_client.get_articles_by_news_ids` | 읽기 | news_id→요약/감성/출처 |
+| 이벤트별 기사(근거) | `query_client.get_articles_by_event(event_id, limit)` | 읽기 | event_id→기사(요약/감성/출처), on-demand·대표 소수 밖 |
 
 ### 4.2 실패 처리 규칙 (degrade vs 정확 보고)
 | 호출 | backend 실패 시 | 이유 |
@@ -269,7 +271,7 @@ def save_node(state: dict) -> dict:
 - [ ] `save_client.request_cleanup()`이 7일 롤링 삭제를 **트리거만** 하고 `CleanupResponse`를 반환함(168h·CASCADE·Company 유지는 backend).
 - [ ] `BackendRecentEventProvider`가 TASK 05 `RecentEventProvider`를 구현(동일회사·최근N일 → `CandidateEvent`, centroid는 backend 값 읽기만), **HTTP 실패 시 `[]` degrade**.
 - [ ] `BackendEventArticleStatsProvider`가 TASK 06 `EventArticleStatsProvider`를 구현(누적 원자료 `EventArticleStats`, publishers는 원자료), **HTTP 실패/미존재 시 `None` degrade**.
-- [ ] `query_client`가 종목 이벤트(importance순·single-hop)·공유 이벤트(multi-hop)·news_id→요약을 조회하고, **감성 분포는 backend 실시간 집계 결과(`SentimentGauge`)를 받기만** 함. `subject_found`로 없는종목/0건 구분.
+- [ ] `query_client`가 종목 이벤트(importance순·single-hop)·공유 이벤트(multi-hop)·`get_articles_by_event(event_id, limit)`(이벤트별 기사 on-demand)를 조회하고, **감성 분포는 backend 실시간 집계 결과(`SentimentGauge`)를 받기만** 함. `subject_found`로 없는종목/0건 구분.
 - [ ] `nodes/save.py`가 `save_client`만 호출하고 backend를 직접(HTTP) 부르지 않음. 대상 0건이면 예외 없이 통과. 저장 실패해도 스케줄러 루프를 죽이지 않음.
 - [ ] **degrade는 조회에만, 쓰기(저장·삭제)는 정확히 실패 보고**(§4.2 표대로).
 - [ ] 이 폴더 밖 어디에도 DB/HTTP-to-backend 호출이 없음(노드·타 서비스는 `services/backend/`만 사용).
@@ -282,7 +284,7 @@ def save_node(state: dict) -> dict:
   - **`request_cleanup`**: 성공 → `CleanupResponse(deleted_articles, deleted_events)`, 실패 → `ok=False`. 에이전트가 삭제 판정을 하지 않음(트리거만) 확인.
   - **`BackendRecentEventProvider`**: 정상 응답 → `CandidateEvent` 매핑(centroid 포함, 계산 안 함), **HTTP 실패 → `[]`**(degrade, 예외 전파 안 함). TASK 05 fake 자리에 이 구현을 끼워도 `decide_merge`가 동작하는지(계약 호환).
   - **`BackendEventArticleStatsProvider`**: 정상 → `EventArticleStats`(publishers 원자료·감성 합/개수), 미존재/실패 → `None`(degrade). TASK 06 `compute_importance`와 계약 호환.
-  - **`query_client`**: `get_events_by_subject`가 importance순·`SentimentGauge`(집계는 backend가 준 값)·`subject_found`를 담아 `SubjectQueryResponse`로 매핑하는지. `get_shared_events`가 multi-hop 파라미터를 싣는지. `get_articles_by_news_ids`가 `ArticleRef` 리스트로 매핑하는지. **에이전트가 감성 분포를 스스로 집계하지 않음** 확인.
+  - **`query_client`**: `get_events_by_subject`가 importance순·`SentimentGauge`(집계는 backend가 준 값)·`subject_found`를 담아 `SubjectQueryResponse`로 매핑하는지. `get_shared_events`가 multi-hop 파라미터를 싣는지. `get_articles_by_event(event_id, limit)`가 `limit`을 싣고 `ArticleRef` 리스트로 매핑하는지. **에이전트가 감성 분포를 스스로 집계하지 않음** 확인.
   - **`save_node`**: `save_client.save_batch`만 호출(backend 직접 호출 없음), `ok=False`도 로깅 후 통과(루프 안 죽음), 0건 통과.
   - **DB 미접근**: 테스트/구현 어디에도 SQL·Cypher·DB 드라이버 import가 없음(절대규칙 1). HTTP는 `client.py`에만.
 - **경계 케이스**: 저장 payload 0건, `graph_batch` 비었음, backend 연결 실패(전 오퍼레이션), `within_days` 경계, news_id 리스트 빈 값, 대용량 payload 분할(`BACKEND_SAVE_BATCH_SIZE`) 시 순서·완전성.

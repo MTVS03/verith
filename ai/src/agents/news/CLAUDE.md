@@ -140,4 +140,5 @@ RSS_CANDIDATES = [
 - **질의 관련도(랭킹) 점수 정의: 미확정.** 잠정은 importance순 정렬로 대체(추후 튜닝).
 - **회사 별칭 사전(`COMPANY_ALIASES`) 초기 구성: 미확정.** KOSPI/주요 종목 + 흔한 약어로 시드하고, 질의 로그의 미매칭 토큰으로 지속 보강. canonical은 그래프 Company 노드명과 일치시킨다.
 - backend API 계약(엔드포인트·요청/응답): **초안은 `backend/db/models/news/SCHEMA_SPEC.md §7`**, 정식 `verith/docs/api_contract.md`로 승격 예정
+- **ai→backend 인증·접근 통제: 잠정 "내부망 전용" 전제.** 쓰기·삭제 엔드포인트(`/news/batch/save`·`/news/cleanup`)가 무인증이면 삭제·저장을 아무나 유발할 수 있어, 외부 노출 시 내부 토큰 필수로 승격한다. 인증 방식 확정은 api_contract 승격 시(SCHEMA_SPEC §7.1).
 - **DB 모델 정의 위치: `verith\backend\db\models\news`** (backend 소유). news는 절대규칙 1대로 HTTP로만 접근. 명세는 docs/erd.dbml.
