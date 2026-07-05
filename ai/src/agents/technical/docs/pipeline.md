@@ -42,11 +42,13 @@ regime 라벨도 confidence 점수도 전부 코드가 확정하고, 마지막 L
 
 **신규 노드 3개(굵은 테두리):** 5.국면분류, 7.신뢰도계산, 8.리스크관찰점. 이번 기획에서 에이전트 역할을 강화하며 추가됐다. 예전엔 "지표 5개 + 점수"만 냈지만, 이제 국면 라벨·신뢰도·리스크 관찰점까지 만든다.
 
-**노드 4·5가 멀티 타임프레임으로 갱신됨(노란 테두리):** 노드 4는 일봉 5개 지표에 더해 주봉·월봉 추세를 계산하고, 노드 5는 일봉 국면을 상위 타임프레임 추세로 보정한다. 상세는 그림 3에서 다룬다.
+**노드 4·5가 멀티 타임프레임으로 갱신됨(노란 테두리):** 노드 4는 일봉 기반 지표를 계산하고(구현상 confidence·risk가 소비하는 IndicatorBundle 스칼라 묶음), 노드 5가 일봉 국면 판정에 더해 **주봉·월봉 추세를 계산하고 상위 타임프레임으로 보정**한다(주/월 추세 계산은 노드 5 책임 — `regime/multiframe.py`, `trace_schema.md §9`). 상세는 그림 3에서 다룬다.
 
 **의존성 순서:** 국면분류(5)는 원지표에서 바로 나오므로 종합(6) 앞에, 신뢰도(7)는 `signal_score`를 입력받으므로 종합 뒤에 둔다. 차트(9)는 리포트 직전에 두어 그 시점 데이터를 최종 스냅샷으로 굳힌다.
 
 **가장 중요한 원칙:** 10번 LLM은 regime·score·confidence·risk를 만들지 않는다. 코드가 확정한 라벨·수치를 문장으로 풀기만 한다. regime과 confidence가 코드에 있다는 것이 veriθ 신뢰성 설계의 핵심이다.
+
+> **노드 어댑터 구현 규약(3~9번):** 각 노드는 `services`·`indicators`·`regime`·`synthesis`·`charts` 모듈을 호출하는 **얇은 wrapper**이며 계산 로직을 재구현하지 않는다. 모듈의 **로컬 dataclass/리스트를 그대로 반환**하고 최종 `contracts.*` 조립은 하지 않는다(계약 조립·전역 state는 supervisor 단계). `indicator_calculate`는 confidence·risk가 소비하는 최신 지표 스칼라 묶음(IndicatorBundle)을 만들고, `regime`·`signal_aggregate`·`chart_generate`는 OHLCV에서 지표를 각자 내부 재계산한다(self-contained). 상세: `implementation_plan.md §3`.
 
 ---
 

@@ -92,6 +92,15 @@ src/ai/
 
 **프롬프트·노드·검증의 3분할(노드 10 기준):** ① `prompts/interpret_report.md`·`regenerate_report.md`는 LLM에 넘길 **텍스트 자원**이고(숫자·라벨 생성 금지, `technical_coding_guidelines §6.1`·`prompts.md §4.1`), ② `nodes/interpret_report.py`는 payload 구성·LLM 응답 파싱·`observability/trajectory_eval.py` 검증 호출·`detail`/`interpretation.text` 병합·template fallback 문장 생성을 맡는 **얇은 노드**이며, ③ **1차 생성→검증 실패→재생성 1회→재검증→최종 fallback 전체 orchestration(재생성 루프)은 `supervisor/technical_supervisor.py`가 소유**한다. `architecture.md §3`이 서술한 "Node는 얇은 어댑터, 로직은 옆 모듈에 위임" 원칙과 일치한다.
 
+**3~9번 코드 노드 어댑터 규약:** `nodes/data_collect.py`·`indicator_calculate.py`·`regime_classify.py`·`signal_aggregate.py`·`confidence_calculate.py`·`risk_detect.py`·`chart_generate.py`는 기존 계산 모듈(`services/kis_client`·`indicators/*`·`regime/*`·`synthesis/*`·`charts/chart_builder`)을 호출하는 **얇은 wrapper**다. 규약:
+- 계산 로직을 노드 안에 다시 만들지 않는다. 모듈 함수만 호출한다.
+- 노드는 모듈의 **로컬 dataclass/리스트를 그대로 반환**하고, **최종 `contracts.*`(RegimeResult·SignalSummary·TechnicalSignal·TechnicalAgentOutput)를 조립하지 않는다.** 계약 조립과 전역 state 확정은 **supervisor 단계** 몫이다(`regime/multiframe.py` 주석과 일치).
+- `regime`·`signal_score`·`chart_builder`는 현재 OHLCV 기반 **self-contained** 모듈이라 각자 내부에서 지표를 재계산한다. `indicator_calculate`(노드 4)는 그 공유 캐시가 아니라 **일봉 기반으로 confidence·risk 노드가 소비하는 최신 지표 스칼라 묶음(IndicatorBundle)**만 만든다. 지표 중복 계산은 이 self-contained 설계에 따른 것이며 결함이 아니다.
+- **주봉·월봉 추세 계산은 노드 5(`regime_classify`) 책임이다.** 노드 5가 `daily_regime`과 `weekly_trend`·`monthly_trend`를 함께 만들고 `final_regime`·`alignment_flag`·`regime_context`로 보정한다(`regime/multiframe.py`, `trace_schema.md §9`). 노드 4는 주/월 추세를 만들지 않는다(과거 `pipeline.md`·`sequence.md`의 "노드 4가 주/월 추세 계산" 서술은 이 기준으로 정정됨).
+- **순수성 경계:** 노드 4~9는 주어진 입력에 대해 **순수 함수형 어댑터**다. 반면 노드 3 `data_collect`는 **fetcher를 주입받는 I/O 어댑터**로, 기본 fetcher가 실제 KIS 호출이므로 순수 함수가 아니다(테스트는 fake fetcher로 외부 호출을 차단한다).
+- 전역 state 스키마(`TechnicalState` 등)는 이 단계에서 만들지 않는다 — state dict 매핑은 supervisor에서 확정한다.
+- **MA window 의미 상수 리팩터는 범위 밖이다.** `MA_WINDOWS`(5/20/60)는 단기·중기·장기 역할을 가진 **구조적 가정**이라 `nodes/indicator_calculate.py`만 위치 인덱스로 바꾸면 regime/synthesis/chart와 어긋난다. 이 기술부채는 `config.md §1`에 명시했으며, 별도 브랜치(`refactor/technical-ma-window-config`)에서 `MA_SHORT/MID/LONG_WINDOW` 의미 상수로 일괄 정리한다.
+
 **진입점 2단 분리:** `agent.py`는 router가 부르는 얇은 wrapper(입력 검증 → supervisor 호출 → 출력 반환)이고, 실제 조율 로직(10노드 실행·trace_id 생성·KIS 장애 분기·data_limited/stale_cache/regime_unavailable 처리·검증 실패 시 재생성/폴백)은 `supervisor/technical_supervisor.py`가 맡는다. agent.py에 노드 로직이 들어가기 시작하면 supervisor와 역할이 겹치므로, agent.py는 얇게 유지한다. 이 분리 덕분에 `technical_supervisor.run(request)`를 mock 입력으로 직접 호출해 HTTP·router 없이 end-to-end 파이프라인을 테스트할 수 있다.
 
 **HTTP 라우터 위치:** Backend→AI HTTP 엔드포인트(`/internal/technical/analyze`)는 `technical/` 안이 아니라 AI 서버 상위 `src/ai/api/internal.py`에 둔다(전 에이전트 공통 라우팅·인증·에러 핸들링을 한 곳에서 관리). 엔드포인트 경로·계약은 `api_spec.md` 그대로이며, 위치만 상위로 승격된 것이다.
