@@ -96,7 +96,7 @@
           font-weight:800; font-variant-numeric:tabular-nums; }
   .pverdict { margin-top:12px; font-size:13px; color:#4E5968; line-height:1.6; }
 
-  /* 심화 블록 (기관 세부 + 보유율) */
+  /* 심화 블록 (기관 세부 + 한도소진율) */
   .deepgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
   @media (max-width: 720px) { .deepgrid { grid-template-columns:1fr; } }
   .deept { font-size:12.5px; font-weight:700; color:#8B95A1; margin-bottom:10px; }
@@ -310,10 +310,10 @@
       </div>
     </section>
 
-    {# ── 심화: 기관 세부(게이트2 규칙6 검증분) + 외국인 보유율(게이트2 규칙7 검증분) ── #}
+    {# ── 심화: 기관 세부(게이트2 규칙6 검증분) + 외국인 한도소진율(게이트2 규칙7 검증분) ── #}
     <section class="card" id="deep">
-      <h2>심화 · 기관 세부와 외국인 보유율</h2>
-      <div class="cap">기관 세부 순매수(최근 5거래일 누적·단위 백만원) · 외국인 보유율 추이</div>
+      <h2>심화 · 기관 세부와 외국인 한도소진율</h2>
+      <div class="cap">기관 세부 순매수(최근 5거래일 누적·단위 백만원) · 외국인 한도소진율 추이</div>
       <div class="deepgrid">
         <div>
           <div class="deept">기관 세부 순매수{% if inst_detail %} · {{ inst_detail.leader }}{% endif %}</div>
@@ -330,7 +330,7 @@
           {% endif %}
         </div>
         <div>
-          <div class="deept">외국인 보유율 추이</div>
+          <div class="deept">외국인 한도소진율 추이</div>
           {% if ownership %}
           <div class="ownhead">
             <span class="ownbig">{{ ownership.latest }}</span>
@@ -338,16 +338,16 @@
           </div>
           <div class="ownchart">
             {% for b in ownership.bars %}
-            <div class="ownday" title="{{ b.iso }} · 외국인 보유율 {{ b.num }}%">
+            <div class="ownday" title="{{ b.iso }} · 외국인 한도소진율 {{ b.num }}%">
               <span class="ownnum">{{ b.num }}</span>
               <div class="ownbar" style="height:{{ b.h }}px"></div>
             </div>
             {% endfor %}
           </div>
           <div class="ownlabs">{% for b in ownership.bars %}<span>{{ b.label }}</span>{% endfor %}</div>
-          <div class="ownnote">{{ recent_days }}거래일 · 상장주식 대비 · 단위 %</div>
+          <div class="ownnote">{{ recent_days }}거래일 · 외국인 한도 대비 소진율(%) · 한도 100% 종목은 보유율과 동일</div>
           {% else %}
-          <div class="placeholder">데이터 준비 중 — 외국인 보유율이 아직 없습니다.</div>
+          <div class="placeholder">데이터 준비 중 — 외국인 한도소진율이 아직 없습니다.</div>
           {% endif %}
         </div>
       </div>

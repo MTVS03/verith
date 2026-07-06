@@ -172,9 +172,9 @@ def _persistence_view(signals: dict) -> dict | None:
 
 
 def _ownership_view(signals: dict) -> dict | None:
-    """보유율 팩트 → 표시용 뷰. 값 변형 없음 — 표시 스케일·포맷만.
+    """한도소진율 팩트 → 표시용 뷰. 값 변형 없음 — 표시 스케일·포맷만.
 
-    막대 높이는 min-max 상대 스케일 — 보유율은 하루 0.0x%p로 움직여 절대
+    막대 높이는 min-max 상대 스케일 — 소진율은 하루 0.0x%p로 움직여 절대
     스케일로는 전부 같은 높이가 된다(목업 동일). 바닥 26px를 둬 최솟값도
     막대가 보인다. delta 는 창의 처음↔끝 차이 — 이미 검증된 두 값의 재표현
     (_gauge 가 두 ratio 를 더하는 것과 같은 범주). 없으면 None → placeholder.

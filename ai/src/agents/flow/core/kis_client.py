@@ -272,7 +272,7 @@ def fetch_foreign_ownership(
     base_date: date | str,
     ticker: str = config.TARGET_TICKER,
 ) -> pd.Series:
-    """base_date까지의 일별 외국인 보유율(%)을 오름차순 Series로 반환한다.
+    """base_date까지의 일별 외국인 한도소진율(%)을 오름차순 Series로 반환한다.
 
     실물로 확인된 변환 3가지(scratch_kis_ehrt.py로 검증):
       (1) 필드: hts_frgn_ehrt — %, 소수 2자리 (삼성전자 46%대 실측 확인)
@@ -280,9 +280,10 @@ def fetch_foreign_ownership(
       (3) 절단: 이 API는 오늘(장중 미확정) 행을 포함한다(매매동향 API와 다름!)
           → base_date 이후 행을 잘라내 리포트 기준일과 정합시킨다.
 
-    의미 주의: KIS 필드는 정확히는 '소진율'(외국인 한도 대비 소진 비율).
-    한도 100% 종목(삼성전자 보통주)은 보유율과 동일하다. 한도 제한 종목
-    (통신·항공 등)으로 일반화할 때 재검토 필요.
+    의미(실물 확인 — SKT 소진율 77.28% vs 실보유 ~38%): hts_frgn_ehrt 는
+    외국인 '한도 대비' 소진 비율이다. 한도 100% 종목(삼성전자 등 대부분)은
+    보유율과 같지만 한도 제한 종목(통신·항공)은 전혀 다르다 — 그래서 이름도
+    소진율로 부른다(라벨 정직성). 보유율 환산은 한도 데이터가 확실해지면 별도 결정.
     """
     app_key, app_secret, base_url = _load_credentials()
     date_str = base_date.strftime("%Y%m%d") if isinstance(base_date, date) else str(base_date)
@@ -322,5 +323,5 @@ def fetch_foreign_ownership(
     # (3) base_date 이후 절단 — 장중(미확정) 행이 리포트에 섞이는 것을 구조로 차단.
     series = series.loc[: pd.to_datetime(date_str, format="%Y%m%d")]
     if series.empty:
-        raise KisError(f"base_date({date_str}) 이전 보유율 데이터가 없습니다.")
+        raise KisError(f"base_date({date_str}) 이전 소진율 데이터가 없습니다.")
     return series

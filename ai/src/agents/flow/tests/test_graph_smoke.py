@@ -45,7 +45,7 @@ def _fake_fetch(base_date, ticker):
 
 
 def _fake_fetch_ownership(base_date, ticker):
-    """KIS 보유율 경계 대체 — None(주장 없음 경로, 네트워크 회피).
+    """KIS 소진율 경계 대체 — None(주장 없음 경로, 네트워크 회피).
     규칙7 본검사(7a~7c)는 test_verify 의 전용 테스트 담당 — 스모크는 배선만."""
     return None
 

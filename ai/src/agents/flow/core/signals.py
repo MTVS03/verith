@@ -30,7 +30,9 @@ COL_INDI: str = "개인"
 COL_FORE: str = "외국인"
 COL_INST: str = "기관"
 COL_VALUE: str = "거래대금"
-COL_OWNERSHIP: str = "외국인보유율"  # 일별 보유율(%) Series 이름 (M2 심화 블록)
+COL_OWNERSHIP: str = "외국인한도소진율"  # 일별 한도소진율(%) Series 이름 (M2 심화 블록)
+# 식별자 'ownership'의 유래: KIS hts_frgn_ehrt(한도소진율). 한도 100% 종목은
+# 보유율과 같지만 한도 제한 종목(통신·항공)은 다르다 — 한국어 라벨은 소진율로 통일.
 
 # 순매수 주체 3인. 반복 계산에서 이 리스트를 돌린다.
 SUBJECTS: tuple[str, ...] = (COL_INDI, COL_FORE, COL_INST)
@@ -179,7 +181,7 @@ def extract_daily(df: pd.DataFrame) -> list[dict]:
 
 
 def extract_ownership(ownership: pd.Series | None) -> list[dict] | None:
-    """최근 RECENT_DAYS일의 외국인 보유율(%) 팩트 목록 (오름차순, 최근이 마지막).
+    """최근 RECENT_DAYS일의 외국인 한도소진율(%) 팩트 목록 (오름차순, 최근이 마지막).
 
     extract_daily 와 같은 원리 — 계산이 아니라 "있는 값의 직렬화".
     입력은 kis_client.fetch_foreign_ownership 의 Series(오름차순·%).
@@ -197,7 +199,7 @@ def extract_ownership(ownership: pd.Series | None) -> list[dict] | None:
 
 def compute_signals(
     df: pd.DataFrame,
-    ownership: pd.Series | None = None,   # M2: 보유율은 별도 API라 df 밖에서 온다
+    ownership: pd.Series | None = None,   # M2: 한도소진율은 별도 API라 df 밖에서 온다
 ) -> dict[str, object]:
     """세 계산을 묶어 하나의 신호 dict로 반환한다.
 
@@ -210,5 +212,5 @@ def compute_signals(
         "daily": extract_daily(df),          # M2: 일별 순매수 팩트(차트용)
         "persistence": calc_persistence(df),  # M2: 지속성 5일 vs 20일
         "inst_detail": calc_inst_detail(df),  # M2: 기관 세부 7주체 5일 합 (없으면 None)
-        "ownership": extract_ownership(ownership),  # M2: 보유율 5일 추이 (없으면 None)
+        "ownership": extract_ownership(ownership),  # M2: 한도소진율 5일 추이 (없으면 None)
     }
