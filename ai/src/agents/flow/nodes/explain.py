@@ -29,20 +29,30 @@ def _facts_to_text(signals: dict, meta: dict) -> str:
     """검증된 팩트 dict → 사람이 읽는 팩트 목록 텍스트(결정론적).
 
     LLM에 넣는 건 '이미 확정된 숫자'뿐. 여기서 새 숫자를 만들거나 바꾸지 않는다.
-    강도는 표시용으로만 백분율화(render와 동일 규칙), 내부 팩트는 불변.
+    각 주체의 순매수/순매도 '방향'은 코드가 ratio 부호로 확정해 팩트에 박는다
+    → LLM은 방향을 추론하지 않고 복사만 하면 된다(관계 환각 예방). 강도는
+    표시용으로만 백분율화(render와 동일 규칙), 내부 팩트는 불변.
     """
     consecutive = signals.get("consecutive", {})
     strength = signals.get("strength", {})
     lines = [
         f"종목: {meta.get('stock_name')} ({meta.get('ticker')})",
         f"기준일: {meta.get('base_date')}",
-        f"수급구도(외국인·기관): {signals.get('alignment')}",
+        f"외국인·기관 수급구도: {signals.get('alignment')}",
+        "  ('엇갈림/동반매수/동반매도'는 오직 외국인과 기관 두 주체 사이의 관계다."
+        " 개인은 이 관계에 포함하지 않는다.)",
     ]
     for subject in SUBJECTS:                     # 개인 → 외국인 → 기관 순서 고정
         days = consecutive.get(subject, {}).get("days")
         ratio = strength.get(subject, {}).get("ratio")
-        ratio_pct = f"{ratio * 100:.1f}%" if ratio is not None else "N/A"
-        lines.append(f"- {subject}: 연속 순매수 {days}일, 순매수 강도 {ratio_pct}")
+        if ratio is None:
+            direction, ratio_pct = "방향 미상", "N/A"
+        else:
+            direction = "순매수" if ratio > 0 else "순매도" if ratio < 0 else "중립"
+            ratio_pct = f"{'+' if ratio > 0 else ''}{ratio * 100:.1f}%"
+        lines.append(
+            f"- {subject}: {direction} 방향(순매수 강도 {ratio_pct}), 최근 연속 순매수 {days}일"
+        )
     return "\n".join(lines)
 
 
