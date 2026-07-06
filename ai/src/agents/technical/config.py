@@ -272,6 +272,35 @@ REGEN_MAX_COUNT = 1                     # 검증 ③ 실패 시 재생성 최대
 # 13. 1D intraday(Beta) 활성화 플래그 (chart_annotation_spec §3.1, kis_mapping §12)
 #     True면 supervisor가 intraday_fetcher 미주입 시 기본 KIS 분봉 fetcher(fetch_minute_ohlcv)를
 #     사용한다(C안 default-on gate). Beta·호출량/rate limit 부담 때문에 **기본 False**.
-#     새 KIS env key는 추가하지 않는다(기존 config 스타일대로 plain 상수).
+#     .env/환경변수 `INTRADAY_FETCH_ENABLED`로 override 가능(새 KIS env key 아님).
 # ─────────────────────────────────────────────────────────────────────────────
-INTRADAY_FETCH_ENABLED: bool = False
+_ENV_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
+_ENV_BOOL_FALSE = frozenset({"0", "false", "no", "off", ""})
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    """환경변수(.env 포함) 값을 bool로 파싱한다.
+
+    미설정 → default. true 계열(1/true/yes/on) → True, false 계열(0/false/no/off/빈문자열) → False.
+    인식할 수 없는 값은 **조용히 True로 두지 않고** 경고 후 False로 처리한다(운영 안전·config warn 스타일).
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in _ENV_BOOL_TRUE:
+        return True
+    if value in _ENV_BOOL_FALSE:
+        return False
+    warnings.warn(
+        f"[config] {name}={raw!r} 는 인식할 수 없는 bool 값입니다 — 운영 안전을 위해 False로 처리합니다.",
+        stacklevel=2,
+    )
+    return False
+
+
+# .env(있으면)를 로드해 override를 반영한다(override=False — 실제 환경변수 우선). 기본은 반드시 False.
+_intraday_env_file = _find_env_file()
+if _intraday_env_file is not None:
+    load_dotenv(_intraday_env_file, override=False)
+INTRADAY_FETCH_ENABLED: bool = _env_bool("INTRADAY_FETCH_ENABLED", default=False)

@@ -117,6 +117,16 @@ def _minute_fetcher(candles=None, *, previous_close=101.0):
     return lambda ticker, *, as_of=None, **kw: result
 
 
+@pytest.fixture(autouse=True)
+def _intraday_flag_off(monkeypatch):
+    """모든 supervisor 테스트를 결정론적으로 flag OFF에서 시작한다.
+
+    INTRADAY_FETCH_ENABLED가 .env/환경변수로 켜져 있어도(테스트 env override) 기본 fetch가
+    실 KIS를 때리지 않도록 강제한다. flag ON을 검증하는 테스트는 각자 True로 override한다.
+    """
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", False)
+
+
 # ── SUP-01·02: 정상 출력 · trace_id ─────────────────────────────────────────
 def test_sup01_normal_output():
     out = _run([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD], trace_id="trace_x")
