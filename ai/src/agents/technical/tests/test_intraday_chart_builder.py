@@ -6,10 +6,8 @@ day_high/low·short_ma·previous_close를 계약대로 채우는지 확인한다
 
 from __future__ import annotations
 
-from src.agents.technical.charts.intraday_chart_builder import (
-    DEFAULT_INTRADAY_SHORT_MA_WINDOW,
-    build_intraday_chart_payload,
-)
+from src.agents.technical.charts.intraday_chart_builder import build_intraday_chart_payload
+from src.agents.technical.config import INTRADAY_SHORT_MA_WINDOW
 from src.agents.technical.schemas.enums import ChartPeriod
 from src.agents.technical.schemas.intraday import IntradayCandle, IntradayChartData
 
@@ -96,5 +94,14 @@ def test_vwap_rsi_not_populated():
     assert payload.chart_data.rsi == []
 
 
-def test_default_window_constant():
-    assert DEFAULT_INTRADAY_SHORT_MA_WINDOW == 5
+def test_default_window_from_config():
+    # 상수 정본은 config.py §14. builder 기본 인자가 config 값을 사용한다(중앙화 회귀).
+    assert INTRADAY_SHORT_MA_WINDOW == 5
+    payload = build_intraday_chart_payload(
+        [IntradayCandle(timestamp=f"2026-07-06T09:{i:02d}:00", open=1.0, high=2.0,
+                        low=0.5, close=float(i), volume=10, interval="1min")
+         for i in range(1, INTRADAY_SHORT_MA_WINDOW + 2)],
+        previous_close=1.0,
+    )
+    # window=5면 6봉에서 short_ma 2점이 나온다(창 길이가 config와 일치함을 간접 확인).
+    assert len(payload.chart_data.short_ma) == 2

@@ -304,3 +304,26 @@ _intraday_env_file = _find_env_file()
 if _intraday_env_file is not None:
     load_dotenv(_intraday_env_file, override=False)
 INTRADAY_FETCH_ENABLED: bool = _env_bool("INTRADAY_FETCH_ENABLED", default=False)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. 1D intraday(Beta) 판단 상수 (config.md §12). intraday builder/synthesis/kis_client가 사용한다.
+#     계산 모듈에 흩어져 있던 상수를 여기로 모은 정본이다. **값은 이동 전과 동일** —
+#     이 값들은 아직 실측 튜닝 전(Beta)이며, 후속 튜닝 대상이다(변경 시 이 표만 고치면 됨).
+#     주의: threshold 단위가 %(등락률)와 비율(레인지)로 섞여 있다 — 아래 주석 단위를 지킬 것.
+# ─────────────────────────────────────────────────────────────────────────────
+# charts/intraday_chart_builder.py · intraday_context_builder.py
+INTRADAY_SHORT_MA_WINDOW: int = 5              # 장중 단기 이동평균 창(분봉 개수)
+INTRADAY_VOLUME_SPIKE_MULTIPLIER: float = 2.0  # 직전 분봉 대비 volume_spike 판정 배수
+# synthesis/intraday_alignment.py — 장중 regime hint/방향 판정 임계값
+INTRADAY_VOLATILITY_RETURN_THRESHOLD: float = 3.0   # |당일 등락률| ≥ 3%(퍼센트) → volatile
+INTRADAY_VOLATILITY_RANGE_THRESHOLD: float = 0.05   # 당일 레인지 폭 ≥ 전일종가 5%(비율) → volatile
+INTRADAY_DIRECTION_RETURN_THRESHOLD: float = 0.5    # |등락률| ≥ 0.5%(퍼센트) → 방향 1표
+INTRADAY_HIGH_RANGE_POSITION_THRESHOLD: float = 0.66  # 레인지 위치 ≥ 0.66(비율) → 상방 1표
+INTRADAY_LOW_RANGE_POSITION_THRESHOLD: float = 0.34   # 레인지 위치 ≤ 0.34(비율) → 하방 1표
+INTRADAY_DIRECTION_MIN_AGREEMENT: int = 2           # 최소 2개 지표 합의해야 방향 확정
+# synthesis/intraday_adjustment.py · schemas/intraday.py — 보정 한도/개수
+INTRADAY_CONFIDENCE_ADJUSTMENT_CAP: float = 0.05  # confidence/signal_score 보정 절대값 상한(±)
+INTRADAY_RISK_NOTE_MAX_COUNT: int = 3             # intraday risk_notes 최대 개수
+# services/kis_client.py — 분봉 역방향 페이징 상한
+INTRADAY_MINUTE_MAX_CALLS: int = 20               # 30건×20 ≈ 600봉(1일 ~391) — 무한 루프 방지 상한
+INTRADAY_MARKET_OPEN_HHMMSS: str = "090000"       # 이 시각 이전으로는 더 역방향 조회하지 않는다

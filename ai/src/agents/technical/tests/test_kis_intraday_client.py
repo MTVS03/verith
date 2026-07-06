@@ -136,7 +136,7 @@ def test_fetch_stops_on_stagnation(monkeypatch):
     calls = _patch(monkeypatch, [same, same, same, same, same])
     result = fetch_minute_ohlcv("373220", input_hour="093000")
     assert len(result.candles) == 1
-    assert len(calls["hours"]) <= kc.MINUTE_MAX_CALLS
+    assert len(calls["hours"]) <= kc.INTRADAY_MINUTE_MAX_CALLS  # 페이징 상한 정본 = config §14
 
 
 def test_fetch_limit_returns_most_recent(monkeypatch):

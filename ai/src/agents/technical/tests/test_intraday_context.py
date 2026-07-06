@@ -8,6 +8,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from src.agents.technical.config import (
+    INTRADAY_CONFIDENCE_ADJUSTMENT_CAP as CAP,
+)
+from src.agents.technical.config import (
+    INTRADAY_RISK_NOTE_MAX_COUNT,
+)
 from src.agents.technical.schemas.contracts import TechnicalAgentOutput
 from src.agents.technical.schemas.enums import (
     AlignmentFlag,
@@ -121,6 +127,44 @@ def test_day_range_position_bounds(pos):
 def test_risk_notes_are_strings():
     ctx = IntradayContext(status="normal", as_of=AS_OF, risk_notes=["장중 급등", "거래량 급증"])
     assert ctx.risk_notes == ["장중 급등", "거래량 급증"]
+
+
+# ── schema bound: confidence/signal_score ±cap, risk_notes ≤ max (config §14 정본) ──
+def test_confidence_adjustment_within_cap_ok():
+    for v in (CAP, -CAP, 0.0):
+        ctx = IntradayContext(status="normal", as_of=AS_OF, confidence_adjustment=v)
+        assert ctx.confidence_adjustment == v
+
+
+@pytest.mark.parametrize("v", [CAP + 0.001, -CAP - 0.001, 99.0, -99.0])
+def test_confidence_adjustment_out_of_cap_rejected(v):
+    with pytest.raises(ValidationError):
+        IntradayContext(status="normal", as_of=AS_OF, confidence_adjustment=v)
+
+
+def test_signal_score_adjustment_within_cap_ok():
+    # B안: v1 구현은 0.0만 생성하지만 계약은 ±cap을 연다(Phase 2 대비).
+    for v in (0.0, CAP, -CAP):
+        ctx = IntradayContext(status="normal", as_of=AS_OF, signal_score_adjustment=v)
+        assert ctx.signal_score_adjustment == v
+
+
+@pytest.mark.parametrize("v", [CAP + 0.001, -CAP - 0.001, 0.7])
+def test_signal_score_adjustment_out_of_cap_rejected(v):
+    with pytest.raises(ValidationError):
+        IntradayContext(status="normal", as_of=AS_OF, signal_score_adjustment=v)
+
+
+def test_risk_notes_max_count_ok():
+    notes = [f"관찰 {i}" for i in range(INTRADAY_RISK_NOTE_MAX_COUNT)]
+    ctx = IntradayContext(status="normal", as_of=AS_OF, risk_notes=notes)
+    assert len(ctx.risk_notes) == INTRADAY_RISK_NOTE_MAX_COUNT
+
+
+def test_risk_notes_over_max_count_rejected():
+    notes = [f"관찰 {i}" for i in range(INTRADAY_RISK_NOTE_MAX_COUNT + 1)]
+    with pytest.raises(ValidationError):
+        IntradayContext(status="normal", as_of=AS_OF, risk_notes=notes)
 
 
 def test_hint_and_alignment_literals():

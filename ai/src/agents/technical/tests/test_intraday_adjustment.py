@@ -10,12 +10,14 @@ from datetime import datetime
 
 import pytest
 
-from src.agents.technical.schemas.intraday import IntradayContext
-from src.agents.technical.synthesis.intraday_adjustment import (
+from src.agents.technical.config import (
     INTRADAY_CONFIDENCE_ADJUSTMENT_CAP as CAP,
 )
+from src.agents.technical.config import (
+    INTRADAY_RISK_NOTE_MAX_COUNT,
+)
+from src.agents.technical.schemas.intraday import IntradayContext
 from src.agents.technical.synthesis.intraday_adjustment import (
-    INTRADAY_MAX_RISK_NOTES,
     apply_intraday_adjustments,
     build_intraday_risk_notes,
     compute_intraday_confidence_adjustment,
@@ -93,7 +95,7 @@ def test_notes_capped_at_max():
         regime_alignment="counter", intraday_regime_hint="volatile_intraday",
         volume_spike=True, day_range_position=0.95,
     ))
-    assert len(notes) <= INTRADAY_MAX_RISK_NOTES
+    assert len(notes) <= INTRADAY_RISK_NOTE_MAX_COUNT
 
 
 def test_notes_use_neutral_wording():

@@ -14,6 +14,14 @@
 
 from __future__ import annotations
 
+from ..config import (
+    INTRADAY_DIRECTION_MIN_AGREEMENT,
+    INTRADAY_DIRECTION_RETURN_THRESHOLD,
+    INTRADAY_HIGH_RANGE_POSITION_THRESHOLD,
+    INTRADAY_LOW_RANGE_POSITION_THRESHOLD,
+    INTRADAY_VOLATILITY_RANGE_THRESHOLD,
+    INTRADAY_VOLATILITY_RETURN_THRESHOLD,
+)
 from ..schemas.enums import Regime
 from ..schemas.intraday import IntradayContext, IntradayRegimeHint, RegimeAlignment
 
@@ -21,14 +29,7 @@ from ..schemas.intraday import IntradayContext, IntradayRegimeHint, RegimeAlignm
 _BULLISH_REGIMES = frozenset({Regime.BULLISH_REVERSAL_WATCH, Regime.UPTREND_INTACT})
 _BEARISH_REGIMES = frozenset({Regime.DOWNTREND})
 # 나머지(OVERHEATED·OVERSOLD_REBOUND_WATCH·SIDEWAYS)=중립, UNAVAILABLE=판정 불가.
-
-# ── 임계값(명명 상수 — 정식 config화는 후속 config.md) ─────────────────────────
-INTRADAY_VOLATILE_RETURN_PCT = 3.0    # |당일 등락률| ≥ 3% → volatile
-INTRADAY_VOLATILE_RANGE_PCT = 0.05    # 당일 레인지 폭 ≥ 전일종가 5% → volatile
-INTRADAY_DIRECTION_RETURN_PCT = 0.5   # |등락률| ≥ 0.5% 를 방향 1표로 인정
-INTRADAY_RANGE_NEAR_HIGH = 0.66       # 레인지 위치 ≥ 0.66 → 상방 1표(고가 근처)
-INTRADAY_RANGE_NEAR_LOW = 0.34        # 레인지 위치 ≤ 0.34 → 하방 1표(저가 근처)
-INTRADAY_DIRECTION_MIN_AGREEMENT = 2  # 최소 2개 지표 합의해야 방향 확정(단일 값 확정 금지)
+# 임계값은 config.py §14(config.md §12) 정본을 사용한다 — 여기 하드코딩하지 않는다.
 
 
 def infer_intraday_regime_hint(context: IntradayContext) -> IntradayRegimeHint:
@@ -42,23 +43,23 @@ def infer_intraday_regime_hint(context: IntradayContext) -> IntradayRegimeHint:
         return "unavailable"
 
     range_pct = _range_pct(context)
-    if abs(ret) >= INTRADAY_VOLATILE_RETURN_PCT or (
-        range_pct is not None and range_pct >= INTRADAY_VOLATILE_RANGE_PCT
+    if abs(ret) >= INTRADAY_VOLATILITY_RETURN_THRESHOLD or (
+        range_pct is not None and range_pct >= INTRADAY_VOLATILITY_RANGE_THRESHOLD
     ):
         return "volatile_intraday"
 
     score = 0
-    if ret >= INTRADAY_DIRECTION_RETURN_PCT:
+    if ret >= INTRADAY_DIRECTION_RETURN_THRESHOLD:
         score += 1
-    elif ret <= -INTRADAY_DIRECTION_RETURN_PCT:
+    elif ret <= -INTRADAY_DIRECTION_RETURN_THRESHOLD:
         score -= 1
     if trend == "up":
         score += 1
     elif trend == "down":
         score -= 1
-    if pos >= INTRADAY_RANGE_NEAR_HIGH:
+    if pos >= INTRADAY_HIGH_RANGE_POSITION_THRESHOLD:
         score += 1
-    elif pos <= INTRADAY_RANGE_NEAR_LOW:
+    elif pos <= INTRADAY_LOW_RANGE_POSITION_THRESHOLD:
         score -= 1
 
     if score >= INTRADAY_DIRECTION_MIN_AGREEMENT:

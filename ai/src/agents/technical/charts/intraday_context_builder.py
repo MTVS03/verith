@@ -17,16 +17,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
+from ..config import INTRADAY_SHORT_MA_WINDOW, INTRADAY_VOLUME_SPIKE_MULTIPLIER
+
 from ..schemas.intraday import (
     IntradayCandle,
     IntradayContext,
     IntradayPoint,
     IntradayStatus,
 )
-from .intraday_chart_builder import DEFAULT_INTRADAY_SHORT_MA_WINDOW
-
-# 분봉 거래량 급증 판정 배수(직전 봉 평균 × 배수). 정식 config화는 후속(config.md).
-DEFAULT_INTRADAY_VOLUME_SPIKE_MULTIPLIER = 2.0
 
 
 def build_intraday_context(
@@ -36,8 +34,8 @@ def build_intraday_context(
     as_of: datetime,
     interval: str = "1min",
     status: IntradayStatus | None = None,
-    short_ma_window: int = DEFAULT_INTRADAY_SHORT_MA_WINDOW,
-    volume_spike_multiplier: float = DEFAULT_INTRADAY_VOLUME_SPIKE_MULTIPLIER,
+    short_ma_window: int = INTRADAY_SHORT_MA_WINDOW,
+    volume_spike_multiplier: float = INTRADAY_VOLUME_SPIKE_MULTIPLIER,
     latest_price: float | None = None,
     cumulative_volume: int | None = None,
     cumulative_trading_value: int | None = None,
