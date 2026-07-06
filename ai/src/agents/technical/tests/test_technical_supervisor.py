@@ -861,3 +861,146 @@ def test_res_redis_down_kis_ok_uses_live():
 def test_res_redis_down_kis_fail_no_stale_propagates():
     with pytest.raises(KisApiError):
         _run_cache(_FakeCache(), fetcher=_kis_fail_fetcher)   # stale 없음 → KIS 실패 전파
+
+
+# ── TRACE: trace_sink 주입 관측 (feat/technical-trace-logger) ──────────────────
+from src.agents.technical.nodes._llm_utils import LlmCallError  # noqa: E402
+from src.agents.technical.observability.trace_logger import InMemoryTraceSink  # noqa: E402
+
+
+def _types(events):
+    return [(e["node"], e["event_type"], e["status"]) for e in events]
+
+
+def _run_trace(responses, *, fetcher=None, cache=None, agent_input=None):
+    sink = InMemoryTraceSink()
+    out = sup.run(
+        agent_input or _input(), llm_client=ScriptedLlm(responses),
+        fetcher=fetcher or (lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}),
+        cache=cache, trace_id="t", trace_sink=sink,
+    )
+    return out, sink.events
+
+
+def test_trace_run_started_and_succeeded():
+    out, events = _run_trace([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    assert events[0]["event_type"] == "trace_start"
+    assert events[-1]["event_type"] == "trace_end" and events[-1]["status"] == "success"
+    assert events[-1]["output_summary"]["status"] == "completed"
+    assert events[-1]["output_summary"]["data_status"] == out.data_status.value
+    # 모든 event가 같은 trace_id, event_id 순번 부여
+    assert {e["trace_id"] for e in events} == {"t"}
+    assert all(e["event_id"] for e in events)
+
+
+def test_trace_query_hash_excludes_plaintext():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD],
+                              agent_input=_input(query="LG엔솔 지금 사도 돼?"))
+    dumped = json.dumps(events, ensure_ascii=False)
+    assert "지금 사도" not in dumped                      # 원문 평문 미기록
+    assert events[0]["input_summary"]["original_query_hash"].startswith("sha256:")
+
+
+def test_trace_major_node_events_present():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    seen = {(n, t) for n, t, _ in _types(events)}
+    for node in ("normalize_question", "focus_analysis", "data_collect", "regime_classify",
+                 "indicator_calculate", "signal_aggregate", "confidence_calculate",
+                 "risk_detect", "chart_generate", "interpret_report"):
+        assert (node, "node_start") in seen and (node, "node_end") in seen
+    # node_end에 duration_ms가 기록됨
+    ends = [e for e in events if e["event_type"] == "node_end" and e["status"] == "success"]
+    assert ends and all(isinstance(e["duration_ms"], int) for e in ends)
+
+
+def test_trace_run_failed_reraises_and_records():
+    sink = InMemoryTraceSink()
+    with pytest.raises(TypeError):
+        sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK]),
+                fetcher=_type_error_fetcher, trace_id="t", trace_sink=sink)
+    end = sink.events[-1]
+    assert end["event_type"] == "trace_end" and end["status"] == "failed"
+    assert end["error"]["error_type"] == "TypeError"       # safe_error 요약
+
+
+def test_trace_cache_hit_summary():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1),
+                              cache=_FakeCache(_DWM_FRESH))
+    dc_end = next(e for e in events if e["node"] == "data_collect" and e["event_type"] == "node_end")
+    assert dc_end["output_summary"]["source"] == "cache"
+    assert dc_end["output_summary"]["cache_hit_by_period"] == {"D": True, "W": True, "M": True}
+
+
+def test_trace_stale_fallback_event():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1),
+                              cache=_FakeCache(_DWM_STALE), fetcher=_kis_fail_fetcher)
+    fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "data_collect"]
+    assert fb and fb[0]["output_summary"]["fallback_type"] == "stale_cache"
+
+
+def test_trace_regime_unavailable_skips_6_7_8():
+    short_daily = _series(40, day_stride=1, start="2023-01-02")
+    _out, events = _run_trace(
+        [NORM_OK, FOCUS_OK],
+        fetcher=lambda t, *, end_date=None: {"D": short_daily, "W": WEEKLY, "M": MONTHLY})
+    skipped = {e["node"] for e in events if e["status"] == "skipped"}
+    assert skipped == {"signal_aggregate", "confidence_calculate", "risk_detect"}
+    # chart_generate는 skip되지 않고 실행됨(unavailable 경로에서도 차트 제공)
+    assert any(e["node"] == "chart_generate" and e["event_type"] == "node_end"
+               and e["status"] == "success" for e in events)
+
+
+def test_trace_interpret_template_fallback_event():
+    # INTERP_BAD를 재생성까지 반복 → regen 소진 → template fallback 이벤트
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    retries = [e for e in events if e["event_type"] == "retry" and e["node"] == "interpret_report"]
+    fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "interpret_report"]
+    assert len(retries) == REGEN_MAX_COUNT               # 재생성 시도마다 retry
+    assert fb and fb[0]["output_summary"]["fallback_type"] == "template_fallback"
+
+
+def test_trace_llm_call_failure_preprocess_fallback():
+    _out, events = _run_trace([LlmCallError("boom"), FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "normalize_question"]
+    assert fb and fb[0]["output_summary"]["fallback_type"] == "template_fallback"
+
+
+def test_trace_validation_event_per_attempt():
+    # INTERP_BAD 반복 → attempt마다 validation 이벤트(검증③ 결과)가 기록됨
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    vals = [e for e in events if e["event_type"] == "validation" and e["node"] == "interpret_report"]
+    assert len(vals) == REGEN_MAX_COUNT + 1               # 1차 + 재생성 각각 검증
+    v0 = vals[0]["output_summary"]
+    assert v0["attempt"] == 0 and v0["validation_result"] == "failed"
+    assert "label_matched" in v0 and "failed_indicators" in v0
+    assert vals[0]["status"] == "failed"
+
+
+def test_trace_validation_pass_on_good_interpretation():
+    good = _good_interp_response(DAILY, WEEKLY, MONTHLY)
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, good])
+    vals = [e for e in events if e["event_type"] == "validation"]
+    assert len(vals) == 1 and vals[0]["status"] == "success"
+    assert vals[0]["output_summary"]["validation_result"] == "passed"
+    # interpret_report node_end에 최종 source·regen·fallback 요약이 실린다
+    end = next(e for e in events if e["node"] == "interpret_report" and e["event_type"] == "node_end")
+    s = end["output_summary"]
+    assert "interpretation_source" in s and "detail_source_count" in s
+    assert s["template_fallback_used"] is False
+
+
+def test_trace_validation_has_no_raw_llm_response():
+    # INTERP_BAD의 raw 응답 문구가 validation/trace 어디에도 남지 않는다
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    dumped = json.dumps(events, ensure_ascii=False)
+    assert "흥미롭습니다" not in dumped                    # raw interpretation_text 미기록
+
+
+def test_trace_sink_failure_does_not_break_run():
+    class BoomSink:
+        def emit(self, event):
+            raise ConnectionError("sink down")
+    out = sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD]),
+                  fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY},
+                  trace_id="t", trace_sink=BoomSink())
+    assert out.data_status == DataStatus.NORMAL          # sink 예외에도 정상 완주

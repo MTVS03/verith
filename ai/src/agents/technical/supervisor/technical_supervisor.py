@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -60,6 +61,7 @@ from ..schemas.enums import (
 from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
 from ..services.cache_service import OhlcvCache, as_of_identity
+from ..observability.trace_logger import TraceLogger, TraceSink, hash_query
 from ..services.kis_client import (
     IntradayFetchResult,
     KisApiError,
@@ -97,6 +99,7 @@ def run(
     llm_client: interp.LlmClient,
     fetcher: OhlcvFetcher = fetch_multi_timeframe_ohlcv,
     trace_id: str | None = None,
+    trace_sink: TraceSink | None = None,
     cache: OhlcvCache | None = None,
     intraday_candles: Sequence[IntradayCandle] | None = None,
     intraday_fetcher: MinuteFetcher | None = None,
@@ -107,15 +110,51 @@ def run(
     주어졌을 때만 `intraday_fetcher(ticker, as_of=as_of)`로 당일 분봉 snapshot을 1회 조회한다(KIS REST).
     둘 다 없거나 fetch 실패·빈 응답이면 intraday를 붙이지 않고 **기존 D/W/M 출력과 동일**하게 동작한다.
     intraday fetch 실패는 D/W/M 흐름과 분리해 흡수하며 전체 실패로 전파하지 않는다.
+
+    `trace_sink`(선택): 주입 시 실행 trace를 emit한다(trace_schema.md). 미주입이면 Noop —
+    기존 동작·출력·성능이 불변이다. trace emit 실패는 흡수하며 계산/판단 로직에 영향을 주지 않는다.
     """
     trace_id = trace_id or uuid.uuid4().hex
+    # 관측 계층(trace_schema.md). sink 미주입이면 Noop — 기존 동작·성능 불변. trace 실패는 흡수(계산 무영향).
+    trace = TraceLogger(trace_sink, trace_id=trace_id)
+    run_started = trace.now_iso()
+    trace.emit("trace_start", started_at=run_started, input_summary={
+        "ticker": agent_input.ticker,
+        "as_of": str(agent_input.as_of),
+        "original_query_hash": hash_query(agent_input.query),  # 원문 평문 미기록(§10)
+    })
+    try:
+        output = _run_pipeline(
+            agent_input, llm_client=llm_client, fetcher=fetcher, trace_id=trace_id, cache=cache,
+            intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher, trace=trace,
+        )
+    except Exception as exc:
+        trace.emit("trace_end", "failed", started_at=run_started, ended_at=trace.now_iso(),
+                   error=exc, output_summary={"status": "failed"})
+        raise
+    trace.emit("trace_end", "success", started_at=run_started, ended_at=trace.now_iso(),
+               output_summary=_trace_end_summary(output))
+    return output
 
+
+def _run_pipeline(
+    agent_input: TechnicalAgentInput,
+    *,
+    llm_client: interp.LlmClient,
+    fetcher: OhlcvFetcher,
+    trace_id: str,
+    cache: OhlcvCache | None,
+    intraday_candles: Sequence[IntradayCandle] | None,
+    intraday_fetcher: MinuteFetcher | None,
+    trace: TraceLogger,
+) -> TechnicalAgentOutput:
+    """노드 1~10 본체. run()이 trace_start/trace_end로 감싸고, 각 노드 이벤트는 여기서 남긴다."""
     # 노드 1·2 (LLM 전처리). 최종 output엔 싣지 않지만, focus는 노드 10 설명 강조 힌트로 쓴다(H1).
-    _normalized, focus = _preprocess(llm_client, agent_input)
+    _normalized, focus = _preprocess(llm_client, agent_input, trace)
 
     # 노드 3 데이터수집(cache-aware). as_of를 KIS 조회 종료일로 스레딩(kis_mapping §8.2). 실패는 전파.
     # cache 주입 시: fresh 캐시 사용 / miss·만료면 KIS 후 write / KIS 실패면 stale 폴백(config.md §7·§8).
-    ohlcv, used_stale = _collect_ohlcv(agent_input.ticker, agent_input.as_of, fetcher, cache)
+    ohlcv, used_stale = _collect_ohlcv(agent_input.ticker, agent_input.as_of, fetcher, cache, trace)
     daily, weekly, monthly = ohlcv["D"], ohlcv["W"], ohlcv["M"]
     source = "KIS (stale)" if used_stale else "KIS"  # stale 폴백 시 시세 출처 라벨(test_plan §7)
 
@@ -128,22 +167,45 @@ def run(
         )
 
     # 노드 5 국면분류. 일봉 부족 시 final_regime=unavailable.
-    regime_result = run_regime_classify(daily, weekly, monthly)
+    with trace.node("regime_classify") as span:
+        regime_result = run_regime_classify(daily, weekly, monthly)
+        span.output_summary = {
+            "daily_regime": regime_result.daily_regime.value,
+            "final_regime": regime_result.final_regime.value,
+            "alignment_flag": regime_result.alignment_flag.value,
+        }
     if regime_result.final_regime == Regime.UNAVAILABLE:
+        _emit_regime_unavailable_skips(trace)  # 노드 6·7·8 skipped 기록(§9.1)
+        with trace.node("chart_generate") as span:
+            charts = run_chart_generate(daily, weekly, monthly)
+            span.output_summary = _chart_summary(charts)
         return _unavailable_output(
             agent_input, trace_id, DataStatus.REGIME_UNAVAILABLE,
-            regime=_to_regime_result(regime_result),
-            charts=run_chart_generate(daily, weekly, monthly), source=source,
+            regime=_to_regime_result(regime_result), charts=charts, source=source,
         )
 
     # 노드 4·6·7·8 (코드 확정 계산).
-    bundle = run_indicator_calculate(daily)
-    signal_result = run_signal_aggregate(daily)
-    confidence = run_confidence_calculate(signal_result, bundle, regime_result)
-    risk_items = run_risk_detect(signal_result, bundle, regime_result)
+    with trace.node("indicator_calculate") as span:
+        bundle = run_indicator_calculate(daily)
+        span.output_summary = {"bar_count": len(daily)}
+    with trace.node("signal_aggregate") as span:
+        signal_result = run_signal_aggregate(daily)
+        span.output_summary = {
+            "signal_score": signal_result.signal_score, "consensus": signal_result.consensus.value,
+        }
+    with trace.node("confidence_calculate") as span:
+        confidence = run_confidence_calculate(signal_result, bundle, regime_result)
+        span.output_summary = {
+            "confidence": confidence.confidence, "confidence_level": confidence.confidence_level.value,
+        }
+    with trace.node("risk_detect") as span:
+        risk_items = run_risk_detect(signal_result, bundle, regime_result)
+        span.output_summary = {"risk_count": len(risk_items)}
 
     # 노드 9 차트.
-    charts = run_chart_generate(daily, weekly, monthly)
+    with trace.node("chart_generate") as span:
+        charts = run_chart_generate(daily, weekly, monthly)
+        span.output_summary = _chart_summary(charts)
 
     # 계약 조립 (interpret 호출 전에 RegimeResult·SignalSummary 완성).
     regime = _to_regime_result(regime_result)
@@ -152,7 +214,7 @@ def run(
     # 노드 10 국면해석 + 재생성 루프 + granular fallback.
     result = _interpret(
         llm_client, regime=regime, signal=signal_summary,
-        signals=signal_result.technical_signals, risks=risk_items, focus=focus,
+        signals=signal_result.technical_signals, risks=risk_items, focus=focus, trace=trace,
     )
 
     technical_signals = _to_technical_signals(signal_result.technical_signals, result.details)
@@ -190,24 +252,74 @@ def run(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# trace 요약 헬퍼 (secret·원문 미포함 — count/enum/hash만)
+# ─────────────────────────────────────────────────────────────────────────────
+def _ohlcv_counts(data: dict[str, Sequence[OHLCV]]) -> dict[str, dict[str, int]]:
+    """OHLCV 배열은 저장 금지 — 기간별 캔들 개수만 요약."""
+    return {"candle_counts": {tf: len(data.get(tf, [])) for tf in _DWM}}
+
+
+def _chart_summary(charts: Sequence[ChartPayload]) -> dict[str, object]:
+    """차트 배열/annotation 원본은 저장 금지 — 기간·annotation 개수만 요약(chart_annotation_spec §18)."""
+    return {
+        "periods": [c.period.value for c in charts],
+        "annotation_counts_by_period": {
+            c.period.value: len(getattr(c.chart_data, "annotations", []) or []) for c in charts
+        },
+    }
+
+
+def _trace_end_summary(output: TechnicalAgentOutput) -> dict[str, object]:
+    """trace_end 요약: 완료 상태·data_status·final_regime·검증 결과(원문/시세 미포함)."""
+    return {
+        "status": "completed",
+        "data_status": output.data_status.value,
+        "final_regime": output.regime.final_regime.value if output.regime else None,
+        "outcome": output.verification.outcome.value if output.verification else None,
+        "regen_count": output.verification.regen_count if output.verification else None,
+    }
+
+
+def _emit_regime_unavailable_skips(trace: TraceLogger) -> None:
+    """regime_unavailable → 노드 6·7·8 skipped 기록(trace_schema.md §9.1)."""
+    reason = {"reason": "regime_unavailable"}
+    input_summary = {"final_regime": "unavailable", "data_status": "regime_unavailable"}
+    for node_code in ("signal_aggregate", "confidence_calculate", "risk_detect"):
+        trace.emit("node_end", "skipped", node=node_code,
+                   input_summary=input_summary, output_summary=reason)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 노드 1·2 전처리 (LLM 호출 예외는 fallback으로 흡수, 산출물은 내부 전용)
 # ─────────────────────────────────────────────────────────────────────────────
-def _preprocess(client: interp.LlmClient, agent_input: TechnicalAgentInput) -> tuple[NormalizeResult, FocusResult]:
+def _preprocess(
+    client: interp.LlmClient, agent_input: TechnicalAgentInput, trace: TraceLogger,
+) -> tuple[NormalizeResult, FocusResult]:
     # LlmCallError(LLM 호출 실패)만 흡수 → fallback. 파일 로딩·타입·프로그래밍 오류는 전파(M2).
-    try:
-        normalized = run_normalize_question(
-            client, ticker=agent_input.ticker, query=agent_input.query, as_of=agent_input.as_of)
-    except LlmCallError:
-        name = BATTERY_TICKERS.get(agent_input.ticker, agent_input.ticker)
-        normalized = NormalizeResult(
-            f"{name}의 최근 시세와 기술적 신호를 중심으로 현재 차트 국면과 리스크 관찰점을 분석합니다.",
-            GenerationSource.TEMPLATE_FALLBACK,
-        )
-    try:
-        focus = run_focus_analysis(
-            client, ticker=agent_input.ticker, normalized_question=normalized.normalized_question)
-    except LlmCallError:
-        focus = FocusResult(list(_DEFAULT_FOCUS), _DEFAULT_FOCUS_SUMMARY, GenerationSource.TEMPLATE_FALLBACK)
+    # 원문 query는 hash만 기록(§10). LLM prompt/response 원문은 절대 남기지 않는다.
+    with trace.node("normalize_question",
+                    input_summary={"original_query_hash": hash_query(agent_input.query)}) as span:
+        try:
+            normalized = run_normalize_question(
+                client, ticker=agent_input.ticker, query=agent_input.query, as_of=agent_input.as_of)
+        except LlmCallError:
+            name = BATTERY_TICKERS.get(agent_input.ticker, agent_input.ticker)
+            normalized = NormalizeResult(
+                f"{name}의 최근 시세와 기술적 신호를 중심으로 현재 차트 국면과 리스크 관찰점을 분석합니다.",
+                GenerationSource.TEMPLATE_FALLBACK,
+            )
+            trace.emit("fallback", node="normalize_question",
+                       output_summary={"fallback_type": "template_fallback", "reason": "llm_call_failed"})
+        span.output_summary = {"source": normalized.source.value}
+    with trace.node("focus_analysis") as span:
+        try:
+            focus = run_focus_analysis(
+                client, ticker=agent_input.ticker, normalized_question=normalized.normalized_question)
+        except LlmCallError:
+            focus = FocusResult(list(_DEFAULT_FOCUS), _DEFAULT_FOCUS_SUMMARY, GenerationSource.TEMPLATE_FALLBACK)
+            trace.emit("fallback", node="focus_analysis",
+                       output_summary={"fallback_type": "template_fallback", "reason": "llm_call_failed"})
+        span.output_summary = {"analysis_focus": list(focus.analysis_focus), "source": focus.source.value}
     return normalized, focus
 
 
@@ -410,25 +522,74 @@ def _interpret(
     client: interp.LlmClient, *,
     regime: RegimeResult, signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult], risks: Sequence[RiskItem], focus: FocusResult,
+    trace: TraceLogger,
 ) -> _Interpretation:
-    payload = interp.build_payload(
-        regime=regime, signal=signal, signals=signals, risks=risks,
-        analysis_focus=focus.analysis_focus, focus_summary=focus.focus_summary,
+    # LLM prompt/response 원문은 trace에 남기지 않는다 — 재생성/폴백은 retry/fallback 이벤트로만 관측(§12).
+    with trace.node("interpret_report") as span:
+        payload = interp.build_payload(
+            regime=regime, signal=signal, signals=signals, risks=risks,
+            analysis_focus=focus.analysis_focus, focus_summary=focus.focus_summary,
+        )
+        # 1차(interpret) + REGEN_MAX_COUNT회 재생성(config.md §9).
+        prompt_seq = [interp.INTERPRET_PROMPT] + [interp.REGENERATE_PROMPT] * REGEN_MAX_COUNT
+        last: _Attempt | None = None
+        result: _Interpretation | None = None
+        for i, name in enumerate(prompt_seq):
+            if i > 0:  # 직전 검증 실패로 재생성 시도 → retry 이벤트(§12)
+                trace.emit("retry", node="interpret_report",
+                           output_summary={"attempt": i, "reason": "verification_failed"})
+            attempt = _attempt(client, name, payload,
+                               regime=regime, signal=signal, signals=signals, risks=risks)
+            if attempt.call_failed:  # 호출 예외 → 재생성 없이 template fallback(정책 §6-9)
+                trace.emit("fallback", node="interpret_report", output_summary={
+                    "fallback_type": "template_fallback", "reason": "llm_call_failed"})
+                result = _full_fallback(regime, signal, signals, risks, regen_count=i)
+                break
+            _emit_validation(trace, attempt, i)  # 검증③ 결과 요약(원문 미포함)
+            last = attempt
+            if attempt.passed:
+                source = GenerationSource.LLM if i == 0 else GenerationSource.LLM_REGENERATED
+                result = _success(attempt, source, signals, regen_count=i)
+                break
+        else:
+            # 재생성까지 소진 → 마지막 출력 기준 granular(부분) fallback (H2/REGEN-04).
+            trace.emit("fallback", node="interpret_report", output_summary={
+                "fallback_type": "template_fallback", "reason": "regen_exhausted"})
+            result = _granular_fallback(last, regime, signal, signals, risks, regen_count=REGEN_MAX_COUNT)
+        span.output_summary = _interpret_summary(result)
+        return result
+
+
+def _emit_validation(trace: TraceLogger, attempt: _Attempt, attempt_idx: int) -> None:
+    """검증③(LLM 라벨 왜곡) 결과를 validation 이벤트로 남긴다 — raw LLM 응답이 아닌 요약만(§9·§12)."""
+    ev = attempt.result
+    if ev is None:  # 파싱 실패 → 검증 자체 불가
+        trace.emit("validation", "failed", node="interpret_report",
+                   output_summary={"attempt": attempt_idx, "validation_result": "parse_failed"})
+        return
+    trace.emit(
+        "validation", "success" if ev.passed else "failed", node="interpret_report",
+        output_summary={
+            "attempt": attempt_idx,
+            "validation_result": "passed" if ev.passed else "failed",
+            "label_matched": not ev.interpretation_failed,
+            "interpretation_failed": ev.interpretation_failed,
+            "details_structure_failed": ev.details_structure_failed,
+            "failed_indicators": sorted(ev.failed_indicators),  # 지표명만(원문 없음)
+        },
     )
-    # 1차(interpret) + REGEN_MAX_COUNT회 재생성(config.md §9).
-    prompt_seq = [interp.INTERPRET_PROMPT] + [interp.REGENERATE_PROMPT] * REGEN_MAX_COUNT
-    last: _Attempt | None = None
-    for i, name in enumerate(prompt_seq):
-        attempt = _attempt(client, name, payload,
-                           regime=regime, signal=signal, signals=signals, risks=risks)
-        if attempt.call_failed:  # 호출 예외 → 재생성 없이 template fallback(정책 §6-9)
-            return _full_fallback(regime, signal, signals, risks, regen_count=i)
-        last = attempt
-        if attempt.passed:
-            source = GenerationSource.LLM if i == 0 else GenerationSource.LLM_REGENERATED
-            return _success(attempt, source, signals, regen_count=i)
-    # 재생성까지 소진 → 마지막 출력 기준 granular(부분) fallback (H2/REGEN-04).
-    return _granular_fallback(last, regime, signal, signals, risks, regen_count=REGEN_MAX_COUNT)
+
+
+def _interpret_summary(result: _Interpretation) -> dict[str, object]:
+    """interpret_report node_end 요약 — 최종 source·detail source 분포·재생성/폴백 여부(원문 없음)."""
+    detail_source_count = Counter(d.detail_source.value for d in result.details)
+    return {
+        "interpretation_source": result.interpretation.source.value,
+        "detail_source_count": dict(detail_source_count),
+        "regen_count": result.verification.regen_count,
+        "template_fallback_used": result.verification.outcome == VerificationOutcome.TEMPLATE_FALLBACK,
+        "outcome": result.verification.outcome.value,
+    }
 
 
 def _success(
@@ -510,6 +671,7 @@ _DWM = ("D", "W", "M")
 
 def _collect_ohlcv(
     ticker: str, as_of: object, fetcher: OhlcvFetcher, cache: OhlcvCache | None,
+    trace: TraceLogger,
 ) -> tuple[dict[str, Sequence[OHLCV]], bool]:
     """cache-aware D/W/M 수집 → (dict, used_stale). config.md §7·§8 폴백 분기.
 
@@ -522,24 +684,40 @@ def _collect_ohlcv(
     **envelope 오류·잘못된 as_of·OHLCV/타입/프로그래밍 오류는 stale로 덮지 않고 전파한다(fail-fast).**
     Redis 장애는 cache_service가 miss/no-op으로 흡수하므로 여기서 전파되지 않는다.
     """
-    if cache is None:
-        return run_data_collect(ticker, as_of=as_of, fetcher=fetcher), False
-    now = datetime.now(timezone.utc)
-    as_of_id = as_of_identity(normalize_end_date(as_of))
+    with trace.node("data_collect", input_summary={"ticker": ticker, "as_of": str(as_of)}) as span:
+        if cache is None:
+            data = run_data_collect(ticker, as_of=as_of, fetcher=fetcher)
+            span.output_summary = {**_ohlcv_counts(data), "source": "kis"}
+            return data, False
+        now = datetime.now(timezone.utc)
+        as_of_id = as_of_identity(normalize_end_date(as_of))
 
-    fresh = _cache_collect_all_fresh(cache, ticker, as_of_id, now)
-    if fresh is not None:
-        return fresh, False
-    try:
-        data = run_data_collect(ticker, as_of=as_of, fetcher=fetcher)
-    except KisApiError:  # 복구 가능한 KIS 통신/조회 실패만 stale 폴백 허용
-        recon = _stale_reconstruct(cache, ticker, as_of_id, now)
-        if recon is not None:
-            return recon  # (dict, used_stale)
-        raise  # D stale/fresh 없음 → 재구성 불가 → 기존 KIS 실패 전파
-    for tf in _DWM:
-        cache.set(ticker, tf, as_of_id, list(data[tf]), now=now)
-    return {tf: list(data[tf]) for tf in _DWM}, False
+        fresh = _cache_collect_all_fresh(cache, ticker, as_of_id, now)
+        if fresh is not None:
+            span.output_summary = {
+                **_ohlcv_counts(fresh), "source": "cache",
+                "cache_hit_by_period": {tf: True for tf in _DWM},
+            }
+            return fresh, False
+        try:
+            data = run_data_collect(ticker, as_of=as_of, fetcher=fetcher)
+        except KisApiError:  # 복구 가능한 KIS 통신/조회 실패만 stale 폴백 허용
+            recon = _stale_reconstruct(cache, ticker, as_of_id, now)
+            if recon is not None:
+                recon_data, used_stale = recon
+                trace.emit("fallback", node="data_collect", output_summary={
+                    "fallback_type": "stale_cache", **_ohlcv_counts(recon_data),
+                })
+                span.output_summary = {
+                    **_ohlcv_counts(recon_data), "source": "cache_stale", "used_stale": used_stale,
+                }
+                return recon  # (dict, used_stale)
+            raise  # D stale/fresh 없음 → 재구성 불가 → 기존 KIS 실패 전파(node_end failed로 기록)
+        for tf in _DWM:
+            cache.set(ticker, tf, as_of_id, list(data[tf]), now=now)
+        result = {tf: list(data[tf]) for tf in _DWM}
+        span.output_summary = {**_ohlcv_counts(result), "source": "kis", "cache_written": True}
+        return result, False
 
 
 def _cache_collect_all_fresh(
