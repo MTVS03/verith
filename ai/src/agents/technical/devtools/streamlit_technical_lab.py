@@ -85,7 +85,13 @@ from src.agents.technical.charts.intraday_context_builder import (  # noqa: E402
 from src.agents.technical.synthesis.intraday_alignment import (  # noqa: E402
     apply_intraday_hint_to_context,
 )
+from src.agents.technical.synthesis.intraday_adjustment import (  # noqa: E402
+    apply_intraday_adjustments,
+)
 from src.agents.technical.services.kis_client import (  # noqa: E402
+    KisApiError,
+    OutOfScopeTickerError,
+    fetch_minute_ohlcv,
     fetch_multi_timeframe_ohlcv,
 )
 
@@ -794,48 +800,127 @@ def _render_intraday_context_metrics(context: IntradayContext) -> None:
         f"day_high={context.day_high} · day_low={context.day_low} · previous_close={context.previous_close} · "
         f"confidence_adj={context.confidence_adjustment} · signal_score_adj={context.signal_score_adjustment}"
     )
+    if context.risk_notes:
+        st.caption("risk_notes: " + " · ".join(context.risk_notes))
+    else:
+        st.caption("risk_notes: (없음)")
 
 
-def _render_intraday_qa_section(as_of_dt: datetime) -> None:
-    """11. 1D Intraday QA — fixture/manual 입력으로 intraday 순수 로직을 표시(KIS 무관)."""
-    st.header("11. 1D Intraday QA (fixture 기반 · KIS 무관)")
-    st.caption(
-        "intraday 순수 로직(build_intraday_chart_payload / build_intraday_context / "
-        "apply_intraday_hint_to_context)을 sample·수동 입력으로 확인합니다. "
-        "KIS 호출·자동 refresh·WebSocket·polling 없음. 공식 output.charts 와 별개(period=\"1d\")."
-    )
-    mode = st.radio("입력 방식", ["Sample", "Manual JSON"], horizontal=True, key="intraday_input_mode")
-    col_pc, col_reg = st.columns(2)
-    with col_pc:
-        previous_close = st.number_input("previous_close", value=100.0, step=1.0, key="intraday_prev_close")
-    with col_reg:
-        regimes = [r.value for r in Regime]
-        final_regime_v = st.selectbox(
-            "final_regime (alignment 확인용 · D/W/M 판단 무관)",
-            options=regimes, index=regimes.index(Regime.UPTREND_INTACT.value), key="intraday_final_regime",
-        )
+def _intraday_fixture_source(source: str) -> tuple[list | None, float | None]:
+    """Sample/Manual 소스 — 버튼으로 candles 로드. (candles, previous_close) 반환."""
+    previous_close = st.number_input("previous_close", value=100.0, step=1.0, key="intraday_prev_close")
     manual_raw = None
-    if mode == "Manual JSON":
+    if source == "Manual JSON":
         manual_raw = st.text_area("IntradayCandle JSON 리스트", value=_SAMPLE_MANUAL_JSON,
                                   height=180, key="intraday_manual_json")
-
     if st.button("1D Intraday 생성/로드", key="intraday_build", type="primary"):
         try:
-            candles = _sample_intraday_candles() if mode == "Sample" else _parse_manual_candles(manual_raw or "")
+            candles = (_sample_intraday_candles() if source == "Sample fixture"
+                       else _parse_manual_candles(manual_raw or ""))
             st.session_state["intraday_candles"] = candles
             st.success(f"IntradayCandle {len(candles)}개 로드 완료.")
         except Exception as exc:  # noqa: BLE001 - QA: 파싱 오류를 화면에 노출
             st.exception(exc)
-
     candles = st.session_state.get("intraday_candles")
     if not candles:
         st.info("[1D Intraday 생성/로드]를 눌러 sample 또는 manual candles 를 로드하세요.")
+        return None, None
+    return candles, previous_close
+
+
+def _intraday_real_kis_source(ticker: str, as_of_dt: datetime) -> tuple[list | None, float | None, dict | None]:
+    """Real KIS 소스 — 버튼 클릭 시에만 fetch_minute_ohlcv 호출. (candles, previous_close, fetch_meta)."""
+    c1, c2 = st.columns(2)
+    with c1:
+        limit = st.selectbox("limit", [30, 120, 390], index=1, key="intraday_limit")
+    with c2:
+        raw_hour = st.text_input("input_hour (HHMMSS, 선택 — 비우면 기본)", value="", key="intraday_input_hour")
+    input_hour = raw_hour.strip() or None
+    current_sig = f"{ticker}@{as_of_dt.isoformat()}@{input_hour}@{limit}"
+    st.caption("real KIS는 [Fetch] 버튼을 눌렀을 때만 호출합니다 — 자동 refresh·WebSocket·polling 없음.")
+
+    if st.button("Fetch real KIS intraday", key="intraday_fetch_real", type="primary"):
+        with st.spinner("real KIS 분봉 조회 중..."):
+            try:
+                result = fetch_minute_ohlcv(ticker, as_of=as_of_dt, input_hour=input_hour, limit=int(limit))
+                st.session_state["intraday_real"] = {
+                    "candles": result.candles, "previous_close": result.previous_close,
+                    "latest_price": result.latest_price, "cumulative_volume": result.cumulative_volume,
+                    "cumulative_trading_value": result.cumulative_trading_value, "sig": current_sig,
+                }
+                if not result.candles:
+                    st.warning("빈 candles 응답입니다(장전/장후/휴장/데이터 없음 가능).")
+                else:
+                    st.success(f"real KIS intraday {len(result.candles)}개 로드.")
+            except OutOfScopeTickerError as exc:
+                st.error(f"allowlist 밖 종목입니다: {exc}")
+            except KisApiError as exc:
+                st.error(f"KIS API 오류: {exc}")
+            except RuntimeError as exc:  # load_kis_settings — KIS env 누락 등
+                st.error(f"KIS 설정/환경 오류(env 누락 가능): {exc}")
+            except Exception as exc:  # noqa: BLE001 - QA: 원인 노출(lab은 죽지 않음)
+                st.exception(exc)
+
+    stored = st.session_state.get("intraday_real")
+    if not stored:
+        st.info("[Fetch real KIS intraday]를 눌러 조회하세요.")
+        return None, None, None
+    if stored["sig"] != current_sig:
+        st.warning("조건(ticker/as_of/input_hour/limit)이 바뀌었습니다. 다시 [Fetch] 하세요(재호출 없음).")
+    candles = stored["candles"]
+    if not candles:
+        st.warning("candles 가 비어 1d 차트를 그릴 수 없습니다(빈 응답).")
+        return None, None, None
+    meta = {k: stored[k] for k in
+            ("previous_close", "latest_price", "cumulative_volume", "cumulative_trading_value")}
+    return candles, stored["previous_close"], meta
+
+
+def _render_intraday_fetch_meta(meta: dict, cd: IntradayChartData) -> None:
+    """Fetch metadata(IntradayFetchResult) 표시 — candle count·first/last timestamp 포함."""
+    ts = [c.timestamp for c in cd.candles]
+    st.subheader("Fetch metadata (IntradayFetchResult)")
+    st.dataframe(
+        pd.DataFrame([{
+            "previous_close": meta["previous_close"], "latest_price": meta["latest_price"],
+            "cumulative_volume": meta["cumulative_volume"],
+            "cumulative_trading_value": meta["cumulative_trading_value"],
+            "candle_count": len(ts),
+            "first_timestamp": ts[0] if ts else None, "last_timestamp": ts[-1] if ts else None,
+        }]),
+        use_container_width=True, hide_index=True,
+    )
+
+
+def _render_intraday_qa_section(ticker: str, as_of_dt: datetime) -> None:
+    """11. 1D Intraday QA — sample/manual/real KIS 소스로 intraday 순수 로직을 표시."""
+    st.header("11. 1D Intraday QA")
+    st.caption(
+        "intraday 순수 로직(build_intraday_chart_payload / build_intraday_context / "
+        "apply_intraday_hint_to_context / apply_intraday_adjustments)을 표시만 합니다(재구현 없음). "
+        "Real KIS는 버튼 클릭 시에만 호출 — 자동 refresh·WebSocket·polling 없음. 공식 output.charts 와 별개(period=\"1d\")."
+    )
+    source = st.radio("데이터 소스", ["Sample fixture", "Manual JSON", "Real KIS intraday"],
+                      horizontal=True, key="intraday_source")
+    regimes = [r.value for r in Regime]
+    final_regime_v = st.selectbox(
+        "final_regime (alignment 확인용 · D/W/M 판단 무관)",
+        options=regimes, index=regimes.index(Regime.UPTREND_INTACT.value), key="intraday_final_regime",
+    )
+
+    fetch_meta = None
+    if source == "Real KIS intraday":
+        candles, previous_close, fetch_meta = _intraday_real_kis_source(ticker, as_of_dt)
+    else:
+        candles, previous_close = _intraday_fixture_source(source)
+    if not candles:
         return
 
-    # 이미 만든 builder/helper 호출(재구현 없음). previous_close·final_regime 은 라이브 QA 컨트롤.
+    # 이미 만든 builder/helper 호출(재구현 없음). final_regime 은 라이브 QA 컨트롤.
     payload = build_intraday_chart_payload(candles, previous_close=previous_close)
     context = build_intraday_context(candles, previous_close=previous_close, as_of=as_of_dt)
     context = apply_intraday_hint_to_context(context, Regime(final_regime_v))
+    context = apply_intraday_adjustments(context)  # confidence_adjustment·risk_notes 채움(context 내부만)
     cd = payload.chart_data
     st.caption(
         f"period={payload.period.value} · candle_unit={cd.candle_unit} · candles={len(cd.candles)} · "
@@ -872,6 +957,9 @@ def _render_intraday_qa_section(as_of_dt: datetime) -> None:
         st.dataframe(pd.DataFrame([c.model_dump() for c in cd.candles]),
                      use_container_width=True, hide_index=True)
 
+    if fetch_meta is not None:  # Real KIS 소스일 때만 fetch 메타데이터 표시
+        _render_intraday_fetch_meta(fetch_meta, cd)
+
 
 def main() -> None:
     st.set_page_config(page_title="Technical Agent Lab", layout="wide")
@@ -894,8 +982,8 @@ def main() -> None:
         chart_selection = _render_chart_section(output)
         _render_raw_json_section(output, chart_selection)
 
-    # §11 1D Intraday QA — agent/KIS 와 무관(fixture 기반)하게 항상 렌더.
-    _render_intraday_qa_section(as_of_dt)
+    # §11 1D Intraday QA — 항상 렌더(agent 무관). Real KIS 소스는 버튼 클릭 시에만 호출.
+    _render_intraday_qa_section(ticker, as_of_dt)
 
 
 if __name__ == "__main__":
