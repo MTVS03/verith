@@ -294,3 +294,6 @@ docker-compose.override.yml
 # KIS 토큰 캐시 (샘플 테스트 스크립트)
 ai/src/agents/technical/scripts/.kis_token.json
 **/.kis_token.json
+
+# news 수동 확인용 데모 앱 (개인 로컬 전용 — 커밋하지 않음)
+ai/src/agents/news/demo_sentiment_app.py
