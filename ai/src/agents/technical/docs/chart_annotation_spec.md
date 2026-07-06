@@ -112,7 +112,7 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 | --- | --- | --- |
 | `3m` | high + medium 중심 | low는 UI 옵션/보조 토글 대상. **importance 코드값 미변경** |
 | `1y` | high + medium 기본 | high+medium이면 실측상 전부 표시됨. **importance 코드값 미변경** |
-| `5y` | **high + selected medium** | high-only는 annotation을 지나치게 숨김(실측 5종 종목: high 3~4 / medium 37~56). backend에서 **장기·구조 패턴 후보만 high 승격**(아래 §4.2)으로 대응 |
+| `5y` | **high + selected medium** | high-only는 annotation을 지나치게 숨김(sample 종목 관측 예: high ≈ 3~5 / medium ≈ 37~56 — 종목·retier 승격 대상 유무에 따라 달라짐). backend에서 **장기·구조 패턴 후보만 high 승격**(아래 §4.2)으로 대응 |
 
 ### 4.2 5y period-aware importance 승격 (구현됨)
 
@@ -332,7 +332,7 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 
 ### 12.1 박스권 후보
 
-최근 N봉 동안 고점·저점 범위가 일정 비율 이내이고 가격이 그 범위 안에서 2회 이상 왕복하면 `box_range_candidate`를 생성한다. MVP 기본값(config.md에 정의): `BOX_LOOKBACK_DAYS = 40`, `BOX_RANGE_THRESHOLD_PCT = 0.12`, `BOX_MIN_TOUCH_COUNT = 2`.
+최근 N봉 동안 고점·저점 범위가 일정 비율 이내이고 가격이 그 범위 안에서 **상단↔하단을 실제로 왕복**하면 `box_range_candidate`를 생성한다. 상/하단 근접 봉 수(각 `BOX_MIN_TOUCH_COUNT` 이상)뿐 아니라 **zone 전환 횟수 ≥ `BOX_MIN_ALTERNATIONS`**(각 봉을 상단/하단 zone으로 분류→연속 압축→전환 수)를 요구해 **완만한 단방향 추세**(전환 1회)를 배제한다. MVP 기본값(config.md): `BOX_LOOKBACK_DAYS = 40`, `BOX_RANGE_THRESHOLD_PCT = 0.12`, `BOX_MIN_TOUCH_COUNT = 2`, `BOX_MIN_ALTERNATIONS = 2`.
 
 ### 12.2 박스권 이탈 후보
 
@@ -352,12 +352,15 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 
 **대상**: `1y`(일봉)·`5y`(주봉)만. **`3m` 제외**(창이 너무 짧음). `1d` intraday 제외. 최신+최근 후보는 현재 fetch capacity로 충분하며, **fetch lookback 확대는 보류**(§19.1) — 창 부족 초기 구간은 skip한다.
 
+**오탐 방지(보수적 가드)**: ④ handle은 **실제 조정이 있어야** 인정한다 — `handle 저점 < right rim` **그리고** 되돌림이 `[MIN, MAX]` 범위(상한만이 아니라 **하한**도) 안이어야 한다(조정 없이 상승만 하면 배제). ② 저점은 **bottom 근처(±tol)에 최소 봉 수**가 있어야 한다(단봉 V자 급락 배제 — 완전 곡률/기울기 검사는 Phase 2).
+
 **MVP 기본값(config.py §11)**:
 - `CUP_HANDLE_DAILY_LOOKBACK_BARS = 120`, `CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78`
 - `CUP_HANDLE_RIM_TOLERANCE_PCT = 0.05`(좌/우 rim 가격 차 허용)
 - `CUP_HANDLE_MIN_DEPTH_PCT = 0.10`, `CUP_HANDLE_MAX_DEPTH_PCT = 0.40`(rim 대비 깊이)
-- `CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15`(우측 rim 대비 핸들 되돌림)
+- `CUP_HANDLE_MIN_HANDLE_PULLBACK_PCT = 0.02`, `CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15`(핸들 되돌림 하한·상한)
 - `CUP_HANDLE_MIN_HANDLE_BARS = 5`, `CUP_HANDLE_MAX_HANDLE_BARS = 30`
+- `CUP_HANDLE_MIN_BOTTOM_BARS = 3`, `CUP_HANDLE_BOTTOM_TOLERANCE_PCT = 0.03`(둥근 저점 — 단봉 V자 배제)
 
 look-ahead 없이(창 = `source[i-lookback+1:i+1]`, 미래 봉 미참조) visible range를 rolling으로 판정한다. 거래량은 생성 gate가 아니라 `meta.volume_confirmed`/`meta.volume_ratio`로만 기록한다.
 
@@ -386,7 +389,7 @@ importance=`medium`(장기 패턴 후보 — 5y high-only 필터에서 숨겨지
 
 기간별 기본 표시: `3m`=high+medium+일부 low, `1y`=high+medium, `5y`=high 중심. 프론트는 토글로 low도 표시할 수 있다.
 
-> **주의(§4.1·§4.2 diagnostics)**: `5y`=high 중심은 실측상 annotation 대부분(medium)을 숨긴다(5종 종목 공통: high 3~4 / medium 37~56). 이에 대응해 **backend가 5y에서만 장기 패턴 후보(`cup_handle_candidate`·`box_breakout_candidate`→high, `box_range_candidate`→medium)를 선별 승격**한다(§4.2, 구현됨). tactical 이벤트(S/R·volume·RSI·cross)는 5y에서도 medium 유지. 3m/1y importance 코드값은 불변.
+> **주의(§4.1·§4.2 diagnostics)**: `5y`=high 중심은 관측상 annotation 대부분(medium)을 숨긴다(sample 종목 예: high ≈ 3~5 / medium ≈ 37~56 — 고정값 아님, 종목·retier 대상 유무에 따라 달라짐). 이에 대응해 **backend가 5y에서만 장기 패턴 후보(`cup_handle_candidate`·`box_breakout_candidate`→high, `box_range_candidate`→medium)를 선별 승격**한다(§4.2, 구현됨). tactical 이벤트(S/R·volume·RSI·cross)는 5y에서도 medium 유지. 3m/1y importance 코드값은 불변.
 
 ---
 
@@ -477,16 +480,17 @@ annotation 생성 과정은 trace(`chart_generate` 노드)에 남긴다: `period
 
 ## 19.1 구현 로드맵 (`feat/technical-chart-patterns`) · fetch 보류
 
-annotation 개선은 아래 순서로 진행한다(진단 근거는 §4.1).
+annotation 개선은 아래 순서로 진행한다(진단 근거는 §4.1). ✅=완료.
 
-1. annotation diagnostics (`scripts/diagnose_chart_annotations.py`)
-2. annotation / technical_signals 역할 분리 (§1.1·§7.1 — 본 커밋)
-3. period별 display / importance 정책 (§4.1 — 정책 문서화, 코드 미변경)
-4. rolling support/resistance annotations
-5. rolling `box_range_candidate`
-6. `box_breakout_candidate`
-7. `cup_handle_candidate`
-8. 필요 시 fetch lookback 재검토
+1. ✅ annotation diagnostics (`scripts/diagnose_chart_annotations.py`)
+2. ✅ annotation / technical_signals 역할 분리 (§1.1·§7.1)
+3. ✅ period별 display / importance 정책 (§4.1·§4.2)
+4. ✅ rolling support/resistance annotations
+5. ✅ rolling `box_range_candidate`
+6. ✅ `box_breakout_candidate`
+7. ✅ `cup_handle_candidate`
+8. ✅ importance retier (§4.2) + **패턴 heuristic 보강**(cup 최소 handle 조정·단봉 V자 배제, box 왕복/교차 조건, dedup keep-newest)
+9. ⏸ fetch lookback 확대 — **보류**(진단상 병목 아님)
 
 **fetch lookback 확대는 지금 하지 않는다(보류).** rolling box/cup 탐지를 구현한 뒤 diagnostics에서 **pre-buffer 부족이 historical 후보 누락의 실제 원인으로 확인될 때만** 재검토한다.
 *(EN: Fetch lookback expansion is deferred. Revisit only after rolling box/cup detection is implemented and diagnostics show historical rolling candidates are missing due to insufficient pre-buffer.)*
