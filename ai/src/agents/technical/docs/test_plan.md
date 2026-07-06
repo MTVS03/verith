@@ -434,6 +434,24 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 
 `normalize_question`·`focus_analysis` 결과는 `TechnicalAgentOutput`에 포함되지 않는다(내부 orchestration용). `verification`은 supervisor가 흐름에서 유도한다(정상: calc_passed·regime_passed=True; unavailable: 둘 다 False, label_matched=True, outcome=template_fallback).
 
+### 5.11 외부 진입점(AGENT-*)
+
+**성격:** 정상 동작 확인. **대상:** `agent.py`의 `run_technical_agent`. **fake만** — `technical_supervisor.run`을 monkeypatch해 호출 인자만 확인하고 실제 흐름은 돌리지 않는다(실 KIS/LLM 없음). `agent.py`는 입력 검증 후 supervisor에 **위임만** 하는 얇은 wrapper이므로, 계산·조립·fallback 로직을 갖지 않는다(`implementation_plan.md §3` 진입점 2단 분리).
+
+| ID | 상황 | 기대 결과 |
+| --- | --- | --- |
+| AGENT-01 | `TechnicalAgentInput` 입력 | 그대로 `supervisor.run`에 전달 |
+| AGENT-02 | dict payload | `TechnicalAgentInput.model_validate` 후 전달 |
+| AGENT-03 | 잘못된 dict(필수 누락·추가 필드) | pydantic `ValidationError` |
+| AGENT-04 | 미지원 타입(list·int 등) | `TypeError` |
+| AGENT-05 | `llm_client`·`trace_id` | `supervisor.run`에 그대로 전달 |
+| AGENT-06 | `fetcher` 주입 | `supervisor.run`에 전달 |
+| AGENT-07 | `fetcher=None` | `fetcher` 인자 **미전달**(supervisor 기본 fetcher 사용) |
+| AGENT-08 | 반환값 | `supervisor.run` 반환(`TechnicalAgentOutput`)을 그대로 반환 |
+| AGENT-09 | 계층 경계 | `agent.py`가 `nodes/`·`services/kis_client`·계산 모듈을 직접 import하지 않음 |
+
+`agent.py` 허용 import: `schemas.contracts`(In/Out)·`supervisor.technical_supervisor`·typing. `llm_client`는 외부 주입(생성·API key·네트워크 코드 없음).
+
 ---
 
 ## 6. 차트 annotation 계산 테스트 (CHART-*)
