@@ -34,6 +34,10 @@ COL_VALUE: str = "거래대금"
 # 순매수 주체 3인. 반복 계산에서 이 리스트를 돌린다.
 SUBJECTS: tuple[str, ...] = (COL_INDI, COL_FORE, COL_INST)
 
+# 기관계의 세부 7주체 — KIS 공식 한글명(공식 GitHub 필드 사전 기준).
+# 실물 확인: 세부 7개 합 ≈ 기관계(orgn) 항등식 성립(±1백만원 반올림 오차).
+INST_DETAIL: tuple[str, ...] = ("증권", "투자신탁", "사모펀드", "은행", "보험", "종금", "기금")
+
 
 def consecutive_net_buy_days(net: pd.Series) -> int:
     """가장 최근 날짜부터 과거로 거꾸로 세어, 순매수(net > 0)가 끊기지 않고
@@ -140,6 +144,19 @@ def calc_persistence(df: pd.DataFrame) -> dict[str, dict[str, object]]:
     return result
 
 
+def calc_inst_detail(df: pd.DataFrame) -> dict[str, float] | None:
+    """기관 세부 7주체의 최근 RECENT_DAYS일 순매수 합 (단위는 df 그대로).
+
+    df 에 세부 컬럼이 없으면(과거 스키마·간이 fixture) None — 주장하지 않으면
+    표시도 없다(placeholder 후퇴). 있으면 7주체 전부 합산해 담는다: 표시는
+    5개지만 검증(게이트2 항등식)은 7개 전체가 필요하다.
+    """
+    if not all(name in df.columns for name in INST_DETAIL):
+        return None
+    recent = df.tail(config.RECENT_DAYS)
+    return {name: float(recent[name].sum()) for name in INST_DETAIL}
+
+
 def extract_daily(df: pd.DataFrame) -> list[dict]:
     """최근 TREND_DAYS일의 일별 순매수 팩트 목록 (오름차순, 최근이 마지막).
 
@@ -171,4 +188,5 @@ def compute_signals(df: pd.DataFrame) -> dict[str, object]:
         "alignment": calc_alignment(df),
         "daily": extract_daily(df),          # M2: 일별 순매수 팩트(차트용)
         "persistence": calc_persistence(df),  # M2: 지속성 5일 vs 20일
+        "inst_detail": calc_inst_detail(df),  # M2: 기관 세부 7주체 5일 합 (없으면 None)
     }
