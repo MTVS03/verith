@@ -1,4 +1,4 @@
-from src.agents.fundamental.core.contract import Evidence
+from src.agents.fundamental.core.contract import Evidence, EvidenceAccount
 from src.agents.fundamental.evidence.graph_builder import (
     build_analyst_plan,
     build_evidence_graph,
@@ -23,6 +23,19 @@ def test_evidence_graph_builds_section_briefs_and_metric_claims():
             fiscal_year="2025",
             rcept_no="20260301000001",
             account_ids=["ifrs-full_ProfitLoss"],
+            accounts=[
+                EvidenceAccount(
+                    account_id="ifrs-full_ProfitLoss",
+                    account_nm="당기순이익",
+                    sj_div="IS",
+                    amount=-2500.0,
+                    currency="KRW",
+                    role="numerator",
+                    fiscal_year="2025",
+                    rcept_no="20260301000001",
+                    source_url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260301000001",
+                )
+            ],
             source_url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260301000001",
         )
     ]
@@ -33,8 +46,12 @@ def test_evidence_graph_builds_section_briefs_and_metric_claims():
 
     assert "profitability" in plan["section_order"]
     assert "data_limits" in plan["section_order"]
-    assert any(node["metric"] == "roe" and node["stance"] == "caution" for node in graph["nodes"])
-    assert any(edge["relation"] == "supported_by" for edge in graph["edges"])
+    assert any(node.get("metric") == "roe" and node.get("stance") == "caution" for node in graph["nodes"])
+    assert any(node["type"] == "account" and node["account_nm"] == "당기순이익" for node in graph["nodes"])
+    assert any(node["type"] == "claim" and node["metric"] == "roe" for node in graph["nodes"])
+    assert any(edge["relation"] == "contains_account" for edge in graph["edges"])
+    assert any(edge["relation"] == "calculates" and edge["role"] == "numerator" for edge in graph["edges"])
+    assert any(edge["relation"] == "supports_claim" for edge in graph["edges"])
     assert any(claim["metric"] == "eps" and claim["display_value"] == "-4,500원" for claim in context["metric_claims"])
     assert all("를 중심으로" not in brief for brief in plan["section_briefs"].values())
 

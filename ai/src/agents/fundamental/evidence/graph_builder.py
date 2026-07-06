@@ -90,6 +90,11 @@ def _join_context(parts: list[str]) -> str:
     return ", ".join(clean) if clean else "추가로 확인 가능한 정성 정보가 제한적입니다."
 
 
+def _node_id(kind: str, *parts: str) -> str:
+    normalized = [part.replace(":", "_").replace("/", "_").replace(" ", "_") for part in parts if part]
+    return f"{kind}:{':'.join(normalized)}"
+
+
 def build_evidence_graph(
     ratios: dict[str, Any],
     trend: dict[str, Any],
@@ -114,22 +119,56 @@ def build_evidence_graph(
         }
 
     filing_nodes: dict[str, dict[str, Any]] = {}
-    account_edges: list[dict[str, str]] = []
+    account_nodes: dict[str, dict[str, Any]] = {}
+    claim_nodes: dict[str, dict[str, Any]] = {}
+    graph_edges: list[dict[str, Any]] = []
     for item in evidence:
-        filing_nodes[item.rcept_no] = {
-            "id": f"filing:{item.rcept_no}",
+        filing_id = _node_id("filing", item.rcept_no)
+        metric_id = _node_id("metric", item.metric)
+        claim_id = _node_id("claim", item.metric, item.fiscal_year, item.rcept_no)
+        filing_nodes[filing_id] = {
+            "id": filing_id,
             "type": "filing",
             "rcept_no": item.rcept_no,
             "source_url": item.source_url,
         }
-        account_edges.append(
-            {
-                "from": f"metric:{item.metric}",
-                "to": f"filing:{item.rcept_no}",
-                "relation": "supported_by",
-                "accounts": ", ".join(item.account_ids),
+        claim_nodes[claim_id] = {
+            "id": claim_id,
+            "type": "claim",
+            "claim": item.claim,
+            "metric": item.metric,
+            "value": item.value,
+            "unit": item.unit,
+            "display_value": item.display_value or format_metric_value(item.value, item.unit),
+            "fiscal_year": item.fiscal_year,
+        }
+        graph_edges.append({"from": metric_id, "to": claim_id, "relation": "supports_claim"})
+        for account in item.accounts:
+            account_id = _node_id("account", account.rcept_no or item.rcept_no, account.account_id, account.role)
+            account_nodes[account_id] = {
+                "id": account_id,
+                "type": "account",
+                "account_id": account.account_id,
+                "account_nm": account.account_nm,
+                "sj_div": account.sj_div,
+                "amount": account.amount,
+                "currency": account.currency,
+                "role": account.role,
+                "fiscal_year": account.fiscal_year,
+                "rcept_no": account.rcept_no or item.rcept_no,
+                "source_url": account.source_url or item.source_url,
             }
-        )
+            graph_edges.append({"from": filing_id, "to": account_id, "relation": "contains_account"})
+            graph_edges.append({"from": account_id, "to": metric_id, "relation": "calculates", "role": account.role})
+        if not item.accounts:
+            graph_edges.append(
+                {
+                    "from": filing_id,
+                    "to": metric_id,
+                    "relation": "supports_metric",
+                    "accounts": ", ".join(item.account_ids),
+                }
+            )
 
     sections: list[dict[str, Any]] = []
     for section, metric_keys in SECTION_METRICS.items():
@@ -177,8 +216,8 @@ def build_evidence_graph(
         )
 
     return {
-        "nodes": list(metric_nodes.values()) + list(filing_nodes.values()),
-        "edges": account_edges,
+        "nodes": list(filing_nodes.values()) + list(account_nodes.values()) + list(metric_nodes.values()) + list(claim_nodes.values()),
+        "edges": graph_edges,
         "sections": sections,
         "trend_display": trend.get("display", {}),
     }
