@@ -176,25 +176,25 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 ### 8.1 계산 대상
 
-이동평균선은 `config.md`의 `MA_WINDOWS = [5, 20, 60]`를 따른다. 5MA=단기, 20MA=중기, 60MA=장기.
+이동평균선은 `config.md`의 `MA_WINDOWS`(= `[MA_SHORT_WINDOW, MA_MID_WINDOW, MA_LONG_WINDOW]`, 기본 `[5, 20, 60]`)를 따른다. short=단기, mid=중기, long=장기. 아래 표의 `5MA/20MA/60MA`는 기본값 기준 표기이며, 골든/데드크로스는 **고정 숫자가 아니라 역할(short·mid·long) 조합의 교차**로 판정한다 — window 값이 바뀌면 교차 대상 숫자도 함께 바뀐다.
 
 ### 8.2 골든크로스
 
 이전 봉 `short_ma <= long_ma`, 현재 봉 `short_ma > long_ma`이면 `golden_cross`를 생성한다.
 
-| 조합 | 중요도 |
+| 조합 (역할) | 중요도 |
 | --- | --- |
-| 5MA 상향 돌파 20MA | medium |
-| 20MA 상향 돌파 60MA | high |
+| short MA 상향 돌파 mid MA (기본 5MA/20MA) | medium |
+| mid MA 상향 돌파 long MA (기본 20MA/60MA) | high |
 
 ### 8.3 데드크로스
 
 이전 봉 `short_ma >= long_ma`, 현재 봉 `short_ma < long_ma`이면 `dead_cross`를 생성한다.
 
-| 조합 | 중요도 |
+| 조합 (역할) | 중요도 |
 | --- | --- |
-| 5MA 하향 이탈 20MA | medium |
-| 20MA 하향 이탈 60MA | high |
+| short MA 하향 이탈 mid MA (기본 5MA/20MA) | medium |
+| mid MA 하향 이탈 long MA (기본 20MA/60MA) | high |
 
 ### 8.4 중복 제거
 

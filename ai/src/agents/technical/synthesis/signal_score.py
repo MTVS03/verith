@@ -15,6 +15,9 @@ from dataclasses import dataclass
 
 from ..config import (
     INDICATOR_WEIGHTS,
+    MA_LONG_WINDOW,
+    MA_MID_WINDOW,
+    MA_SHORT_WINDOW,
     RSI_OVERBOUGHT,
     RSI_OVERSOLD,
     RSI_PERIOD,
@@ -141,7 +144,7 @@ def compute_signal_score(daily_ohlcv: Sequence[OHLCV]) -> SignalScoreResult:
 
     close = float(daily_ohlcv[-1].close)
     prev_close = float(daily_ohlcv[-2].close) if len(daily_ohlcv) >= 2 else None
-    ma5, ma20, ma60 = mas[5][-1], mas[20][-1], mas[60][-1]
+    ma_short, ma_mid, ma_long = mas[MA_SHORT_WINDOW][-1], mas[MA_MID_WINDOW][-1], mas[MA_LONG_WINDOW][-1]
     rsi = rsis[-1]
     ratio = ratios[-1]
     support, resistance = supports[-1]["support"], supports[-1]["resistance"]
@@ -149,11 +152,11 @@ def compute_signal_score(daily_ohlcv: Sequence[OHLCV]) -> SignalScoreResult:
 
     results: list[IndicatorSignalResult] = []
 
-    ma_sig = moving_average_signal(close, ma5, ma20)
+    ma_sig = moving_average_signal(close, ma_short, ma_mid)
     if ma_sig is not None:
-        metrics = [f"5MA {ma5:.1f}", f"20MA {ma20:.1f}"]
-        if ma60 is not None:
-            metrics.append(f"60MA {ma60:.1f}")
+        metrics = [f"{MA_SHORT_WINDOW}MA {ma_short:.1f}", f"{MA_MID_WINDOW}MA {ma_mid:.1f}"]
+        if ma_long is not None:
+            metrics.append(f"{MA_LONG_WINDOW}MA {ma_long:.1f}")
         results.append(_row(IndicatorType.MOVING_AVERAGE, ma_sig, close, metrics))
 
     rsi_sig = rsi_signal(rsi)
