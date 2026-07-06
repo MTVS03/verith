@@ -97,6 +97,19 @@ def test_agent05c_trace_sink_defaults_none(monkeypatch):
     assert calls[0][1]["trace_sink"] is None  # 미주입 시 None(하위호환·Noop)
 
 
+def test_agent05d_cache_forwarded(monkeypatch):
+    calls = _patch_supervisor(monkeypatch)
+    sentinel_cache = object()  # 임의 cache 대역 — agent는 만들지 않고 통과만 시킨다
+    agent.run_technical_agent(dict(VALID_PAYLOAD), llm_client=FakeLlm(), cache=sentinel_cache)
+    assert calls[0][1]["cache"] is sentinel_cache
+
+
+def test_agent05e_cache_defaults_none(monkeypatch):
+    calls = _patch_supervisor(monkeypatch)
+    agent.run_technical_agent(dict(VALID_PAYLOAD), llm_client=FakeLlm())
+    assert calls[0][1]["cache"] is None  # 미주입 시 None(캐시 미사용)
+
+
 def test_agent06_fetcher_forwarded_when_given(monkeypatch):
     calls = _patch_supervisor(monkeypatch)
 
@@ -126,6 +139,7 @@ _ALLOWED_IMPORT_MODULES = frozenset({
     "__future__", "typing",
     "schemas.contracts",
     "observability.trace_logger",  # TraceSink 타입만(주입 통과용) — sink 생성/경로는 agent가 모른다
+    "services.cache_service",      # OhlcvCache 타입만(주입 통과용) — cache 생성은 agent가 모른다
     "supervisor", "supervisor.technical_supervisor",
 })
 
