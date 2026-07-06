@@ -247,6 +247,8 @@ MVP는 전체 JSONL 원문이 아니라 요약만 반환한다. 전체 trace log
 
 ## 7. Backend → AI Agent 내부 API
 
+> **구현 상태(`feat/technical-ai-endpoint`):** §7.1·§7.2가 `src/api/technical.py`(FastAPI router, `main.py`에 등록)로 구현됐다. runtime 의존성은 `src/api/dependencies.py`가 주입한다 — OpenAI client(`default_openai_client()`)·KIS fetcher(기본 None=실 KIS)·Redis cache(`default_cache()`, `REDIS_URL` 없으면 None=비활성)·trace sink(이번 브랜치는 Noop). 에러는 §9 envelope로 매핑(`src/api/errors.py`, secret-free 고정 메시지). sync agent는 `run_in_threadpool`로 실행한다. **인증 미구현**(내부망/후속 gateway 전제, §7.1 "내부망 또는 내부 토큰"). **전체 60초 deadline 강제·PostgreSQL 저장/조회는 후속**(§10·§11 backend integration). OpenAI `store=False`(stateless)이며 분석 이력·follow-up context는 backend PostgreSQL이 관리한다(이 브랜치 미구현).
+
 ### 7.1 분석 실행
 
 ```
