@@ -38,9 +38,15 @@ def build_intraday_context(
     status: IntradayStatus | None = None,
     short_ma_window: int = DEFAULT_INTRADAY_SHORT_MA_WINDOW,
     volume_spike_multiplier: float = DEFAULT_INTRADAY_VOLUME_SPIKE_MULTIPLIER,
+    latest_price: float | None = None,
+    cumulative_volume: int | None = None,
+    cumulative_trading_value: int | None = None,
 ) -> IntradayContext:
     """`list[IntradayCandle]` → IntradayContext(관측 컨테이너). KIS 호출·재계산 없음.
 
+    latest_price·cumulative_volume·cumulative_trading_value는 KIS output1 정본값(fetcher metadata)을
+    **우선**하고, 없으면 candle 기반 fallback(마지막 close·분봉 volume 합)으로 채운다(kis_mapping §12.5).
+    day_high/low·range_position·short_ma·vwap·latest_timestamp는 candle 기준을 유지한다.
     candles가 비면 status=(인자 status 또는 "unavailable")로 latest 값 없이 안전 생성한다.
     값을 만들 수 없으면 0으로 강제하지 않고 None으로 둔다(honest scoping).
     """
@@ -50,27 +56,34 @@ def build_intraday_context(
             status=status or "unavailable",
             as_of=as_of,
             previous_close=previous_close,
+            latest_price=latest_price,
+            cumulative_volume=cumulative_volume,
+            cumulative_trading_value=cumulative_trading_value,
         )
 
     latest = candles[-1]
     day_high = max(c.high for c in candles)
     day_low = min(c.low for c in candles)
     short_ma = _sma_points(candles, short_ma_window)
+    # output1 정본 우선, 없으면 candle fallback.
+    eff_latest = latest_price if latest_price is not None else latest.close
+    eff_cum_vol = cumulative_volume if cumulative_volume is not None else sum(c.volume for c in candles)
 
     return IntradayContext(
         status=status or "normal",
         as_of=as_of,
         interval=interval,
-        latest_timestamp=latest.timestamp,
-        latest_price=latest.close,
+        latest_timestamp=latest.timestamp,  # 시각은 candle 기준
+        latest_price=eff_latest,
         previous_close=previous_close,
-        intraday_return_pct=_return_pct(latest.close, previous_close),
+        intraday_return_pct=_return_pct(eff_latest, previous_close),  # latest_price와 동일 기준
         day_high=day_high,
         day_low=day_low,
-        day_range_position=_range_position(latest.close, day_high, day_low),
+        day_range_position=_range_position(latest.close, day_high, day_low),  # candle 기준 유지
         short_ma=short_ma,
         short_ma_trend=_ma_trend(short_ma),
-        cumulative_volume=sum(c.volume for c in candles),
+        cumulative_volume=eff_cum_vol,
+        cumulative_trading_value=cumulative_trading_value,  # candle 합산 불가 — metadata만(없으면 None)
         volume_spike=_volume_spike(candles, volume_spike_multiplier),
         vwap=_vwap_points(candles),
         # 아래는 이번 커밋 미계산(후속 Phase) — 스키마 기본값 유지.

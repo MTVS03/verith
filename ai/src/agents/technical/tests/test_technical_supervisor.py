@@ -107,12 +107,13 @@ def _run(responses, *, fetcher=None, trace_id=None, agent_input=None,
                    intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher)
 
 
-def _minute_fetcher(candles=None, *, previous_close=101.0):
+def _minute_fetcher(candles=None, *, previous_close=101.0, latest_price=None,
+                    cumulative_volume=None, cumulative_trading_value=None):
     """테스트용 fake intraday fetcher — IntradayFetchResult를 돌려준다(KIS 없음)."""
     result = IntradayFetchResult(
         candles=list(INTRADAY_CANDLES if candles is None else candles),
-        previous_close=previous_close, latest_price=None,
-        cumulative_volume=None, cumulative_trading_value=None,
+        previous_close=previous_close, latest_price=latest_price,
+        cumulative_volume=cumulative_volume, cumulative_trading_value=cumulative_trading_value,
     )
     return lambda ticker, *, as_of=None, **kw: result
 
@@ -664,3 +665,21 @@ def test_intraday_date_mismatch_keeps_dwm_and_regime():
     assert {p.period.value for p in mm.charts} == {"3m", "1y", "5y"}
     assert mm.regime == base.regime      # final_regime 등 불변
     assert mm.signal == base.signal       # top-level confidence/signal_score 불변
+
+
+# ── SUP intraday: output1 metadata 보존 (fetcher path) ───────────────────────
+def test_intraday_fetcher_metadata_flows_to_context():
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher(
+        latest_price=99999.0, cumulative_volume=555, cumulative_trading_value=777))
+    ctx = out.intraday_context
+    assert ctx.latest_price == 99999.0            # output1 정본 우선(마지막 candle close 아님)
+    assert ctx.cumulative_volume == 555            # output1.acml_vol 우선(sum 아님)
+    assert ctx.cumulative_trading_value == 777      # output1.acml_tr_pbmn 보존
+
+
+def test_intraday_direct_candles_use_candle_fallback():
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)  # 직접 주입 → metadata 없음
+    ctx = out.intraday_context
+    assert ctx.latest_price == pytest.approx(100.0 + 9 * 0.1)  # 마지막 candle close
+    assert ctx.cumulative_volume == 120 * 9 + 600              # sum(candle volume)
+    assert ctx.cumulative_trading_value is None                 # metadata 없음 → None

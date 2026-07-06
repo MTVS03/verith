@@ -157,3 +157,36 @@ def test_deterministic_pure_helper():
     a = build_intraday_context(candles, previous_close=99.0, as_of=AS_OF)
     b = build_intraday_context(candles, previous_close=99.0, as_of=AS_OF)
     assert a.model_dump() == b.model_dump()  # final_regime 등 외부 상태와 무관
+
+
+# ── output1 metadata 우선순위 ─────────────────────────────────────────────────
+def test_metadata_latest_price_preferred():
+    ctx = build_intraday_context(_candles([100, 101, 102]), previous_close=99.0, as_of=AS_OF,
+                                 latest_price=555.0)
+    assert ctx.latest_price == 555.0  # metadata 우선(마지막 close 102 아님)
+    assert ctx.intraday_return_pct == pytest.approx((555.0 - 99.0) / 99.0 * 100)  # return_pct도 동일 기준
+
+
+def test_metadata_latest_price_none_falls_back():
+    ctx = build_intraday_context(_candles([100, 101, 102]), previous_close=99.0, as_of=AS_OF)
+    assert ctx.latest_price == 102  # fallback = 마지막 close
+
+
+def test_metadata_cumulative_volume_preferred():
+    ctx = build_intraday_context([_candle(1, 100, volume=10), _candle(2, 101, volume=20)],
+                                 previous_close=99.0, as_of=AS_OF, cumulative_volume=99999)
+    assert ctx.cumulative_volume == 99999  # metadata 우선(sum 30 아님)
+
+
+def test_metadata_cumulative_volume_none_falls_back():
+    ctx = build_intraday_context([_candle(1, 100, volume=10), _candle(2, 101, volume=20)],
+                                 previous_close=99.0, as_of=AS_OF)
+    assert ctx.cumulative_volume == 30  # fallback = sum
+
+
+def test_metadata_cumulative_trading_value_passthrough():
+    ctx = build_intraday_context(_candles([100, 101]), previous_close=99.0, as_of=AS_OF,
+                                 cumulative_trading_value=123456)
+    assert ctx.cumulative_trading_value == 123456
+    ctx2 = build_intraday_context(_candles([100, 101]), previous_close=99.0, as_of=AS_OF)
+    assert ctx2.cumulative_trading_value is None  # metadata 없으면 None(candle 합산 안 함)
