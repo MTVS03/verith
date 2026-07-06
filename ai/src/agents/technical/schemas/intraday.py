@@ -15,7 +15,7 @@ D/W/M `OHLCV`(schemas/ohlcv.py, **날짜 전용**)와 분리한다. 기존 `OHLC
 from __future__ import annotations
 
 import re
-from datetime import datetime as _datetime
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
@@ -30,7 +30,7 @@ def _validate_iso_datetime(value: str) -> str:
     if not isinstance(value, str) or not _ISO_DATETIME_RE.match(value):
         raise ValueError(f"timestamp must be ISO 'YYYY-MM-DDTHH:MM:SS': {value!r}")
     try:
-        _datetime.fromisoformat(value)
+        datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError(f"invalid datetime: {value!r}") from exc
     return value
@@ -87,3 +87,64 @@ class IntradayChartData(_StrictModel):
     # 선택/후순위(Phase 이후) — 지금은 빈 배열로 예약해 계약 확장 없이 채운다.
     vwap: list[IntradayPoint] = Field(default_factory=list)
     rsi: list[IntradayPoint] = Field(default_factory=list)
+
+
+# ── intraday 보조 컨텍스트 상태·라벨 (enums.py 미확장, intraday 로컬 Literal로 최소 시작) ──
+IntradayStatus = Literal[
+    "normal",
+    "data_limited",
+    "unavailable",
+    "market_closed",
+    "not_trading_day",
+    "api_error",
+]
+# 장중 흐름 요약 힌트 — final_regime(D/W/M 확정)과 별개. 판단이 아니라 힌트.
+IntradayRegimeHint = Literal[
+    "upward_intraday",
+    "downward_intraday",
+    "sideways_intraday",
+    "volatile_intraday",
+    "unavailable",
+]
+# D/W/M 판단과 intraday 흐름의 정합 — confidence 보정의 근거키(보정은 Phase 2).
+RegimeAlignment = Literal["aligned", "counter", "neutral", "unavailable"]
+ShortMaTrend = Literal["up", "down", "flat"]
+
+
+class IntradayContext(_StrictModel):
+    """1D intraday 보조 컨텍스트 — `TechnicalAgentOutput.intraday_context`(optional).
+
+    **관측 데이터 컨테이너**다. D/W/M 판단의 보조 근거로만 쓰며, `final_regime`을 바꾸지 않는다.
+    이 단계 범위는 **계약(필드)뿐** — 계산 로직·실제 보정은 후속(Phase 2)이다.
+    intraday risk는 기존 `RiskFlag`(enums.py)를 확장하지 않고 `risk_notes`(문자열 리스트)로만 담는다.
+    값이 없으면 0/빈값으로 강제 채우지 않고 None(또는 상태 라벨)로 둔다(honest scoping).
+    """
+    source: Literal["KIS"] = "KIS"
+    status: IntradayStatus
+    as_of: datetime  # 조회 기준 시각(요청 as_of). 문자열 입력을 Pydantic이 파싱.
+
+    interval: IntradayInterval | None = None
+    latest_timestamp: IsoDateTime | None = None
+    latest_price: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    previous_close: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    # 전일 종가 대비 등락률 — 음수 가능(하락). 비율(예: -0.5 = -0.5%) 단위는 생성 로직에서 정한다.
+    intraday_return_pct: float | None = Field(default=None, allow_inf_nan=False)
+    day_high: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    day_low: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    day_range_position: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+
+    short_ma: list[IntradayPoint] = Field(default_factory=list)
+    short_ma_trend: ShortMaTrend | None = None
+    cumulative_volume: int | None = Field(default=None, ge=0)
+    volume_spike: bool | None = None
+    # 선택/후순위 — 빈 배열로 예약.
+    vwap: list[IntradayPoint] = Field(default_factory=list)
+    rsi: list[IntradayPoint] = Field(default_factory=list)
+
+    intraday_regime_hint: IntradayRegimeHint | None = None
+    regime_alignment: RegimeAlignment | None = None
+
+    # 실제 적용된 보정값(감사용). v1은 미보정이라 0.0. cap(confidence ±0.05 등)은 Phase 2에서 적용.
+    confidence_adjustment: float = Field(default=0.0, allow_inf_nan=False)
+    signal_score_adjustment: float = Field(default=0.0, allow_inf_nan=False)
+    risk_notes: list[str] = Field(default_factory=list)
