@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -67,6 +68,8 @@ from ..synthesis.confidence import ConfidenceResult
 from ..synthesis.intraday_adjustment import apply_intraday_adjustments
 from ..synthesis.intraday_alignment import apply_intraday_hint_to_context
 from ..synthesis.signal_score import IndicatorSignalResult, SignalScoreResult
+
+logger = logging.getLogger(__name__)
 
 OhlcvFetcher = Callable[[str], dict[str, Sequence[OHLCV]]]
 # 1D 분봉 fetcher(선택 주입). (ticker, *, as_of) → IntradayFetchResult. 기본 None(주입 시에만 호출).
@@ -306,6 +309,12 @@ def _resolve_intraday(
         try:
             result = intraday_fetcher(ticker, as_of=as_of)  # KIS REST 1회+제한 반복(fetcher 내부 정책)
         except Exception:  # noqa: BLE001 - intraday fetch 실패는 D/W/M와 분리·흡수(전체 실패 아님)
+            # best-effort: 1d 없이 계속하되 원인은 기록(secret 미포함 — ticker/as_of/stage만).
+            logger.warning(
+                "intraday_fetch_failed",
+                extra={"ticker": ticker, "as_of": str(as_of), "stage": "resolve_intraday"},
+                exc_info=True,
+            )
             return None
         resolved = _ResolvedIntraday(
             result.candles, result.previous_close, result.latest_price,
@@ -348,6 +357,12 @@ def _assemble_intraday(
         context = apply_intraday_adjustments(context)  # confidence_adjustment·risk_notes(context 내부만)
         return [payload], context
     except Exception:  # noqa: BLE001 - intraday 실패가 D/W/M 전체를 깨지 않도록 흡수
+        # best-effort: 1d 없이 계속하되 원인은 기록(secret 미포함 — as_of/stage만).
+        logger.warning(
+            "intraday_assemble_failed",
+            extra={"as_of": str(as_of), "stage": "assemble_intraday"},
+            exc_info=True,
+        )
         return [], None
 
 
