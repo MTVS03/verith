@@ -18,8 +18,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from ..config import BATTERY_TICKERS, REGEN_MAX_COUNT
+from ..charts.intraday_chart_builder import build_intraday_chart_payload
+from ..charts.intraday_context_builder import build_intraday_context
 from ..nodes import interpret_report as interp
 from ..nodes._llm_utils import LlmCallError, call_llm
 from ..nodes.chart_generate import run_chart_generate
@@ -53,9 +56,11 @@ from ..schemas.enums import (
     Trend,
     VerificationOutcome,
 )
+from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
 from ..services.kis_client import fetch_multi_timeframe_ohlcv
 from ..synthesis.confidence import ConfidenceResult
+from ..synthesis.intraday_alignment import apply_intraday_hint_to_context
 from ..synthesis.signal_score import IndicatorSignalResult, SignalScoreResult
 
 OhlcvFetcher = Callable[[str], dict[str, Sequence[OHLCV]]]
@@ -79,8 +84,13 @@ def run(
     llm_client: interp.LlmClient,
     fetcher: OhlcvFetcher = fetch_multi_timeframe_ohlcv,
     trace_id: str | None = None,
+    intraday_candles: Sequence[IntradayCandle] | None = None,
 ) -> TechnicalAgentOutput:
-    """TechnicalAgentInput → 1~10 노드 조율 → TechnicalAgentOutput."""
+    """TechnicalAgentInput → 1~10 노드 조율 → TechnicalAgentOutput.
+
+    intraday_candles(선택)가 주어지면 1d 장중 차트·intraday_context를 조건부로 붙인다(KIS 호출 아님 —
+    이미 주어진 분봉만 사용). 없으면 기존 D/W/M 출력과 완전히 동일하다.
+    """
     trace_id = trace_id or uuid.uuid4().hex
 
     # 노드 1·2 (LLM 전처리). 최종 output엔 싣지 않지만, focus는 노드 10 설명 강조 힌트로 쓴다(H1).
@@ -129,6 +139,11 @@ def run(
     technical_signals = _to_technical_signals(signal_result.technical_signals, result.details)
     data_status = _data_status(regime_result)
 
+    # 선택적 1D intraday 조립(입력 있을 때만). 실패는 흡수 — D/W/M 출력은 그대로 유지.
+    intraday_charts, intraday_context = _assemble_intraday(
+        intraday_candles, daily=daily, as_of=agent_input.as_of, final_regime=regime.final_regime,
+    )
+
     return TechnicalAgentOutput(
         request_id=agent_input.request_id,
         ticker=agent_input.ticker,
@@ -140,9 +155,10 @@ def run(
         signal=signal_summary,
         technical_signals=technical_signals,
         risk=RiskSummary(items=list(risk_items)),
-        charts=list(charts),
+        charts=list(charts) + intraday_charts,  # D/W/M 3종 유지 + 1d 조건부 추가
         interpretation=result.interpretation,
         verification=result.verification,
+        intraday_context=intraday_context,
     )
 
 
@@ -223,6 +239,34 @@ def _data_status(m: MultiframeRegimeResult) -> DataStatus:
     if m.weekly_trend == Trend.UNAVAILABLE or m.monthly_trend == Trend.UNAVAILABLE:
         return DataStatus.DATA_LIMITED
     return DataStatus.NORMAL
+
+
+def _assemble_intraday(
+    intraday_candles: Sequence[IntradayCandle] | None,
+    *,
+    daily: Sequence[OHLCV],
+    as_of: datetime,
+    final_regime: Regime,
+) -> tuple[list[ChartPayload], IntradayContext | None]:
+    """선택적 1D intraday 조립. 이미 만든 builder/helper만 호출하고 KIS는 부르지 않는다.
+
+    candles가 없으면 `([], None)` — D/W/M 출력과 완전히 동일하게 동작한다.
+    previous_close는 최근 일봉 종가에서 파생한다(정식 전일 종가 판정은 fetcher 도입 시 정교화).
+    intraday 조립 중 어떤 예외든 흡수해 D/W/M 출력이 통째로 실패하지 않게 한다.
+    final_regime은 읽기만 하며 절대 바꾸지 않는다(보정도 하지 않음).
+    """
+    if not intraday_candles:
+        return [], None
+    try:
+        previous_close = daily[-1].close if daily else None
+        payload = build_intraday_chart_payload(intraday_candles, previous_close=previous_close)
+        context = build_intraday_context(
+            intraday_candles, previous_close=previous_close, as_of=as_of,
+        )
+        context = apply_intraday_hint_to_context(context, final_regime)
+        return [payload], context
+    except Exception:  # noqa: BLE001 - intraday 실패가 D/W/M 전체를 깨지 않도록 흡수
+        return [], None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

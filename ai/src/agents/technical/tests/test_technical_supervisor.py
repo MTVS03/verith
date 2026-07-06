@@ -15,6 +15,7 @@ from src.agents.technical.nodes.risk_detect import run_risk_detect
 from src.agents.technical.nodes.signal_aggregate import run_signal_aggregate
 from src.agents.technical.schemas.contracts import TechnicalAgentInput, TechnicalSignal
 from src.agents.technical.schemas.enums import DataStatus, GenerationSource, Regime
+from src.agents.technical.schemas.intraday import IntradayCandle, IntradayChartData
 from src.agents.technical.schemas.ohlcv import OHLCV
 from src.agents.technical.supervisor import technical_supervisor as sup
 
@@ -39,6 +40,17 @@ def _series(n: int, *, day_stride: int, start: str) -> list[OHLCV]:
 DAILY = _series(120, day_stride=1, start="2023-01-02")
 WEEKLY = _series(80, day_stride=7, start="2021-01-04")
 MONTHLY = _series(36, day_stride=28, start="2020-01-06")
+
+# 선택적 1D intraday 입력(이미 주어진 분봉 — KIS 호출 아님).
+INTRADAY_CANDLES = [
+    IntradayCandle(
+        timestamp=f"2026-06-30T09:{i:02d}:00",
+        open=100.0 + i * 0.1, high=100.0 + i * 0.1 + 0.3,
+        low=100.0 + i * 0.1 - 0.3, close=100.0 + i * 0.1,
+        volume=600 if i == 5 else 120, interval="1min",
+    )
+    for i in range(10)
+]
 
 
 def _input(query: str = "LG엔솔 지금 사도 돼?") -> TechnicalAgentInput:
@@ -86,10 +98,10 @@ def _good_interp_response(daily, weekly, monthly) -> str:
     return json.dumps({"interpretation_text": text, "details": details}, ensure_ascii=False)
 
 
-def _run(responses, *, fetcher=None, trace_id=None, agent_input=None):
+def _run(responses, *, fetcher=None, trace_id=None, agent_input=None, intraday_candles=None):
     fetcher = fetcher or (lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY})
     return sup.run(agent_input or _input(), llm_client=ScriptedLlm(responses),
-                   fetcher=fetcher, trace_id=trace_id)
+                   fetcher=fetcher, trace_id=trace_id, intraday_candles=intraday_candles)
 
 
 # ── SUP-01·02: 정상 출력 · trace_id ─────────────────────────────────────────
@@ -395,3 +407,52 @@ def test_focus_change_does_not_alter_confirmed_values():
         ts_b = b_by[ind]
         assert (ts_a.signal, ts_a.value, ts_a.metrics, ts_a.weight) == \
                (ts_b.signal, ts_b.value, ts_b.metrics, ts_b.weight)
+
+
+# ── SUP intraday: 선택적 1D 조립(입력 있을 때만) ────────────────────────────
+_INTRA = [NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD]
+
+
+def test_intraday_absent_charts_dwm_only():
+    out = _run(_INTRA)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+    assert out.intraday_context is None
+
+
+def test_intraday_present_adds_1d_chart():
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
+    one_d = next(p for p in out.charts if p.period.value == "1d")
+    assert isinstance(one_d.chart_data, IntradayChartData)
+    assert one_d.chart_data.candle_unit == "1min"
+    out.model_dump_json()  # 직렬화 가능(판별 유니온)
+
+
+def test_intraday_context_set_with_hint_and_alignment():
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert out.intraday_context is not None
+    assert out.intraday_context.intraday_regime_hint is not None
+    assert out.intraday_context.regime_alignment is not None
+
+
+def test_final_regime_unchanged_by_intraday():
+    without = _run(_INTRA)
+    with_intraday = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert with_intraday.regime == without.regime  # RegimeResult 전체 동일(final_regime 포함)
+
+
+def test_confidence_signal_unchanged_by_intraday():
+    without = _run(_INTRA)
+    with_intraday = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert with_intraday.signal == without.signal  # signal_score·confidence 동일
+    assert with_intraday.intraday_context.confidence_adjustment == 0.0
+    assert with_intraday.intraday_context.signal_score_adjustment == 0.0
+
+
+def test_intraday_failure_does_not_break_dwm(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("intraday build failed")
+    monkeypatch.setattr(sup, "build_intraday_chart_payload", boom)
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 유지
+    assert out.intraday_context is None  # 조립 실패 → 붙이지 않음
