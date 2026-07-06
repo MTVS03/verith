@@ -190,13 +190,16 @@ class RaisingLlm:
         raise TimeoutError("LLM timed out")
 
 
-def test_normalize_call_error_propagates():
-    with pytest.raises(TimeoutError):
+def test_normalize_call_error_propagates_as_llmcallerror():
+    # 호출 자체 예외는 LlmCallError로 전파(노드가 내부 fallback으로 삼키지 않음, M2).
+    from src.agents.technical.nodes._llm_utils import LlmCallError
+    with pytest.raises(LlmCallError):
         run_normalize_question(RaisingLlm(), ticker=TICKER, query="q", as_of=AS_OF)
 
 
-def test_focus_call_error_propagates():
-    with pytest.raises(TimeoutError):
+def test_focus_call_error_propagates_as_llmcallerror():
+    from src.agents.technical.nodes._llm_utils import LlmCallError
+    with pytest.raises(LlmCallError):
         run_focus_analysis(RaisingLlm(), ticker=TICKER, normalized_question=SAFE_QUESTION)
 
 
