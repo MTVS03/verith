@@ -1,16 +1,20 @@
-"""AI Technical Supervisor — 1~10 노드 조율 + contracts.* 최종 조립.
+"""AI Technical Supervisor — `run()` 진입점(allowlist·trace lifecycle·예외 분기) + 노드 계산 helper.
 
-정본: architecture.md·pipeline.md·sequence.md·contracts.md §4. 이 파일에서 처음으로
-`TechnicalAgentOutput`을 조립한다(그전 노드들은 로컬 dataclass만 반환).
+정본: architecture.md·pipeline.md·sequence.md·contracts.md §4. `TechnicalAgentOutput` 최종 조립은
+`build_output` 노드(technical_graph)에서 하며, 그 helper(`_to_*`·`_unavailable_output` 등)를 이 파일이 소유한다.
 
 책임:
-  - 노드 1~10을 순서대로 실행하고 결과를 계약 모델로 조립한다.
-  - interpret_report 재생성 루프(1회)와 template fallback을 소유한다.
+  - `run()`: allowlist 선검증 → trace_start → LangGraph graph.invoke(state) → trace_end → output.
+  - **노드 1~10 실행 순서 조율은 `technical_graph`(LangGraph StateGraph)가 담당**하고, 이 파일은 각
+    노드가 호출하는 계산 helper(_preprocess·_collect_ohlcv·regime/indicator/signal/risk 조립·_interpret)를 소유한다.
+  - interpret_report 재생성 루프(1회)와 template fallback을 소유한다(`_interpret`).
   - LLM 호출 자체 예외(client.complete)는 잡아 template fallback으로 진행(사용자 응답 생성).
   - fetcher/KIS 실패·envelope 불량·계약 조립 불가·예상 못한 계산 오류는 전파(조용히 삼키지 않음).
 
-경계(이번 브랜치 범위 밖): trace_logger·cache·DB·FastAPI·agent.py·LangGraph·E-하네스
-(KIS 재시도/stale_cache, source="KIS (stale)"). 전역 state 스키마도 만들지 않는다.
+known debt(후속 리팩토링): graph가 이 파일의 private helper를 `_sup.`로 호출하고 이 파일은 graph를
+lazy import하는 **양방향 결합**이 남아 있다 — 계산 helper를 별도 `pipeline_steps` 모듈로 옮겨
+`supervisor → graph → steps` 단방향으로 정리하는 것은 다음 브랜치 범위다. checkpointer/persistent
+memory는 state 정화 전까지 도입하지 않는다(langgraph_state.py 보안 경계).
 """
 
 from __future__ import annotations
@@ -22,20 +26,17 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-from ..config import BATTERY_TICKERS, INTRADAY_FETCH_ENABLED, REGEN_MAX_COUNT
+# INTRADAY_FETCH_ENABLED·fetch_minute_ohlcv는 supervisor 코드가 직접 쓰진 않지만, technical_graph가
+# `_sup.<name>`으로 런타임 조회하고 테스트가 sup에 monkeypatch하므로 여기 import를 유지한다(noqa F401).
+from ..config import BATTERY_TICKERS, REGEN_MAX_COUNT
+from ..config import INTRADAY_FETCH_ENABLED  # noqa: F401 - technical_graph가 _sup로 참조·테스트 monkeypatch
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
 from ..charts.intraday_context_builder import build_intraday_context
 from ..nodes import interpret_report as interp
 from ..nodes._llm_utils import LlmCallError, call_llm
-from ..nodes.chart_generate import run_chart_generate
-from ..nodes.confidence_calculate import run_confidence_calculate
 from ..nodes.data_collect import run_data_collect
 from ..nodes.focus_analysis import FocusResult, run_focus_analysis
-from ..nodes.indicator_calculate import run_indicator_calculate
 from ..nodes.normalize_question import NormalizeResult, run_normalize_question
-from ..nodes.regime_classify import run_regime_classify
-from ..nodes.risk_detect import run_risk_detect
-from ..nodes.signal_aggregate import run_signal_aggregate
 from ..observability import trajectory_eval
 from ..regime.multiframe import MultiframeRegimeResult
 from ..schemas.contracts import (
@@ -43,7 +44,6 @@ from ..schemas.contracts import (
     InterpretationResult,
     RegimeResult,
     RiskItem,
-    RiskSummary,
     SignalSummary,
     TechnicalAgentInput,
     TechnicalAgentOutput,
@@ -63,7 +63,7 @@ from ..schemas.ohlcv import OHLCV
 from ..services.cache_service import OhlcvCache, as_of_identity
 from ..observability.trace_logger import TraceLogger, TraceSink, hash_query
 from ..runtime.deadline import Deadline, check_deadline
-from ..services.kis_client import (
+from ..services.kis_client import (  # noqa: F401 - fetch_minute_ohlcv는 technical_graph가 _sup로 참조
     IntradayFetchResult,
     KisApiError,
     OutOfScopeTickerError,
@@ -134,12 +134,17 @@ def run(
         "as_of": str(agent_input.as_of),
         "original_query_hash": hash_query(agent_input.query),  # 원문 평문 미기록(§10)
     })
+    # 파이프라인(노드 1~10)은 LangGraph StateGraph가 조율한다(technical_graph). 흐름 표현만 바뀌고
+    # 계산·output schema는 그대로다. lazy import로 순환(graph→supervisor helper)을 끊는다.
+    from .technical_graph import build_technical_graph
+    initial_state = {
+        "payload": agent_input, "trace_id": trace_id, "llm_client": llm_client,
+        "fetcher": fetcher, "cache": cache, "trace": trace, "deadline": deadline,
+        "intraday_candles": intraday_candles, "intraday_fetcher": intraday_fetcher,
+    }
     try:
-        output = _run_pipeline(
-            agent_input, llm_client=llm_client, fetcher=fetcher, trace_id=trace_id, cache=cache,
-            intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher, trace=trace,
-            deadline=deadline,
-        )
+        final_state = build_technical_graph().invoke(initial_state)
+        output = final_state["output"]
     except Exception as exc:
         trace.emit("trace_end", "failed", started_at=run_started, ended_at=trace.now_iso(),
                    error=exc, output_summary={"status": "failed"})
@@ -147,130 +152,6 @@ def run(
     trace.emit("trace_end", "success", started_at=run_started, ended_at=trace.now_iso(),
                output_summary=_trace_end_summary(output))
     return output
-
-
-def _run_pipeline(
-    agent_input: TechnicalAgentInput,
-    *,
-    llm_client: interp.LlmClient,
-    fetcher: OhlcvFetcher,
-    trace_id: str,
-    cache: OhlcvCache | None,
-    intraday_candles: Sequence[IntradayCandle] | None,
-    intraday_fetcher: MinuteFetcher | None,
-    trace: TraceLogger,
-    deadline: Deadline | None,
-) -> TechnicalAgentOutput:
-    """노드 1~10 본체. run()이 trace_start/trace_end로 감싸고, 각 노드 이벤트는 여기서 남긴다.
-
-    주요 stage 시작 전 `check_deadline`으로 예산 초과를 조기 감지한다(초과 시 DeadlineExceeded 전파)."""
-    # 노드 1·2 (LLM 전처리). 최종 output엔 싣지 않지만, focus는 노드 10 설명 강조 힌트로 쓴다(H1).
-    check_deadline(deadline, "preprocess")
-    _normalized, focus = _preprocess(llm_client, agent_input, trace, deadline)
-
-    # 노드 3 데이터수집(cache-aware). as_of를 KIS 조회 종료일로 스레딩(kis_mapping §8.2). 실패는 전파.
-    # cache 주입 시: fresh 캐시 사용 / miss·만료면 KIS 후 write / KIS 실패면 stale 폴백(config.md §7·§8).
-    check_deadline(deadline, "data_collect")
-    ohlcv, used_stale = _collect_ohlcv(agent_input.ticker, agent_input.as_of, fetcher, cache, trace)
-    check_deadline(deadline, "post_data_collect")
-    daily, weekly, monthly = ohlcv["D"], ohlcv["W"], ohlcv["M"]
-    source = "KIS (stale)" if used_stale else "KIS"  # stale 폴백 시 시세 출처 라벨(test_plan §7)
-
-    # 일봉 빈 데이터 → 안전 착지(data_limited-B).
-    if not daily:
-        return _unavailable_output(
-            agent_input, trace_id, DataStatus.DATA_LIMITED,
-            regime=_empty_regime("시세 데이터를 확보하지 못해 국면을 판정하지 않습니다."),
-            charts=[], source=source,
-        )
-
-    # 노드 5 국면분류. 일봉 부족 시 final_regime=unavailable.
-    check_deadline(deadline, "regime_classify")
-    with trace.node("regime_classify") as span:
-        regime_result = run_regime_classify(daily, weekly, monthly)
-        span.output_summary = {
-            "daily_regime": regime_result.daily_regime.value,
-            "final_regime": regime_result.final_regime.value,
-            "alignment_flag": regime_result.alignment_flag.value,
-        }
-    if regime_result.final_regime == Regime.UNAVAILABLE:
-        _emit_regime_unavailable_skips(trace)  # 노드 6·7·8 skipped 기록(§9.1)
-        with trace.node("chart_generate") as span:
-            charts = run_chart_generate(daily, weekly, monthly)
-            span.output_summary = _chart_summary(charts)
-        return _unavailable_output(
-            agent_input, trace_id, DataStatus.REGIME_UNAVAILABLE,
-            regime=_to_regime_result(regime_result), charts=charts, source=source,
-        )
-
-    # 노드 4·6·7·8 (코드 확정 계산).
-    check_deadline(deadline, "indicator_calculate")
-    with trace.node("indicator_calculate") as span:
-        bundle = run_indicator_calculate(daily)
-        span.output_summary = {"bar_count": len(daily)}
-    with trace.node("signal_aggregate") as span:
-        signal_result = run_signal_aggregate(daily)
-        span.output_summary = {
-            "signal_score": signal_result.signal_score, "consensus": signal_result.consensus.value,
-        }
-    with trace.node("confidence_calculate") as span:
-        confidence = run_confidence_calculate(signal_result, bundle, regime_result)
-        span.output_summary = {
-            "confidence": confidence.confidence, "confidence_level": confidence.confidence_level.value,
-        }
-    with trace.node("risk_detect") as span:
-        risk_items = run_risk_detect(signal_result, bundle, regime_result)
-        span.output_summary = {"risk_count": len(risk_items)}
-
-    # 노드 9 차트.
-    with trace.node("chart_generate") as span:
-        charts = run_chart_generate(daily, weekly, monthly)
-        span.output_summary = _chart_summary(charts)
-
-    # 계약 조립 (interpret 호출 전에 RegimeResult·SignalSummary 완성).
-    regime = _to_regime_result(regime_result)
-    signal_summary = _to_signal_summary(signal_result, confidence)
-
-    # 노드 10 국면해석 + 재생성 루프 + granular fallback.
-    check_deadline(deadline, "interpret_report")
-    result = _interpret(
-        llm_client, regime=regime, signal=signal_summary,
-        signals=signal_result.technical_signals, risks=risk_items, focus=focus, trace=trace,
-        deadline=deadline,
-    )
-
-    technical_signals = _to_technical_signals(signal_result.technical_signals, result.details)
-    # stale 폴백을 썼으면 data_status로도 드러낸다(정상 완료 경로). 데이터 부족 경로는 위 early-return이 우선.
-    data_status = DataStatus.STALE_CACHE if used_stale else _data_status(regime_result)
-
-    # 선택적 1D intraday: 직접 주입 candles 우선, 없으면 intraday_fetcher로 snapshot 조회(best-effort).
-    # C안 gate: fetcher 미주입 + INTRADAY_FETCH_ENABLED=True 일 때만 기본 KIS 분봉 fetcher를 쓴다.
-    # 우선순위: intraday_candles > 명시 intraday_fetcher > (flag ON) fetch_minute_ohlcv > off.
-    if intraday_fetcher is None and INTRADAY_FETCH_ENABLED:
-        intraday_fetcher = fetch_minute_ohlcv
-    resolved_intraday = _resolve_intraday(
-        intraday_candles, intraday_fetcher, agent_input.ticker, agent_input.as_of,
-    )
-    intraday_charts, intraday_context = _assemble_intraday(
-        resolved_intraday, daily=daily, as_of=agent_input.as_of, final_regime=regime.final_regime,
-    )
-
-    return TechnicalAgentOutput(
-        request_id=agent_input.request_id,
-        ticker=agent_input.ticker,
-        as_of=agent_input.as_of,
-        source=source,
-        trace_id=trace_id,
-        data_status=data_status,
-        regime=regime,
-        signal=signal_summary,
-        technical_signals=technical_signals,
-        risk=RiskSummary(items=list(risk_items)),
-        charts=list(charts) + intraday_charts,  # D/W/M 3종 유지 + 1d 조건부 추가
-        interpretation=result.interpretation,
-        verification=result.verification,
-        intraday_context=intraday_context,
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -303,10 +184,14 @@ def _trace_end_summary(output: TechnicalAgentOutput) -> dict[str, object]:
 
 
 def _emit_regime_unavailable_skips(trace: TraceLogger) -> None:
-    """regime_unavailable → 노드 6·7·8 skipped 기록(trace_schema.md §9.1)."""
+    """regime_unavailable → 노드 4·6·7·8 skipped 기록(trace_schema.md §9.1).
+
+    국면분류(노드 5·gate)를 지표계산(노드 4·신호용 bundle)보다 먼저 실행하므로, unavailable이면
+    지표계산부터 스킵된다 — indicator_calculate까지 skipped로 기록해 trace 정직성을 지킨다(§10노드).
+    """
     reason = {"reason": "regime_unavailable"}
     input_summary = {"final_regime": "unavailable", "data_status": "regime_unavailable"}
-    for node_code in ("signal_aggregate", "confidence_calculate", "risk_detect"):
+    for node_code in ("indicator_calculate", "signal_aggregate", "confidence_calculate", "risk_detect"):
         trace.emit("node_end", "skipped", node=node_code,
                    input_summary=input_summary, output_summary=reason)
 
