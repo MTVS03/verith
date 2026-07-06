@@ -374,15 +374,20 @@ INTRADAY_MARKET_OPEN_HHMMSS: str = "090000"       # 이 시각 이전으로는 �
 #     .env(배포/실험별) = API key(secret) + MODEL(환경마다 갈리는 선택값). 코드에 값을 박제하지
 #     않고 반드시 .env/환경변수에서 읽는다(technical_coding_guidelines §2.2·§13.2). MODEL은
 #     import 시점이 아니라 load_openai_settings()에서 .env 로드 후 읽어야 실제로 override가 먹는다.
-#     아래 timeout/temperature/max_tokens는 secret도 환경차도 아닌 "튜닝 상수"이므로 여기(코드)에
-#     둔다 — KIS_TIMEOUT_SECONDS와 같은 급이다(.env에 넣지 않는다).
+#     아래 timeout/max_retries/temperature/max_tokens/store는 secret도 환경차도 아닌 "튜닝/안전 상수"
+#     이므로 여기(코드)에 둔다 — KIS_TIMEOUT_SECONDS와 같은 급이다(.env에 넣지 않는다).
+#     안전 정책: SDK 재시도는 끄고(max_retries=0) agent-level 재생성/fallback을 쓴다 — SDK retry는
+#     중복이자 60초 API 계약(api_spec §)을 초과할 위험이 있다. store=False로 OpenAI 측 저장을 끈다
+#     (stateless). 총 60초 deadline 완전 보장(호출 간 deadline 전파)은 후속 AI endpoint 범위.
 #     runtime wiring(run_technical_agent 자동 생성)은 이 브랜치 범위 밖 — 후속 AI endpoint에서 주입.
 # ─────────────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"    # 키 "이름"만(값 아님) — 값은 .env
 OPENAI_MODEL_ENV = "OPENAI_MODEL"        # 모델 "이름"만 — 값은 .env(단일 출처, 코드에 기본값 없음)
-OPENAI_TIMEOUT_SECONDS: float = 30.0     # 1회 호출 timeout(초) — 튜닝 상수(코드)
+OPENAI_TIMEOUT_SECONDS: float = 20.0     # 1회 호출 timeout(초) — 60초 계약 안에서 보수적 하향
+OPENAI_MAX_RETRIES: int = 0              # SDK 재시도 끔 — agent-level 재생성/template fallback 우선
 OPENAI_TEMPERATURE: float | None = 0.0   # None이면 요청 파라미터에서 생략 — 튜닝 상수(코드)
 OPENAI_MAX_OUTPUT_TOKENS: int = 1200     # 응답 최대 토큰(보수적 기본) — 튜닝 상수(코드)
+OPENAI_STORE: bool = False               # OpenAI 측 application state 저장 끔(stateless). 분석 이력은 backend DB.
 
 
 @dataclass(frozen=True)
