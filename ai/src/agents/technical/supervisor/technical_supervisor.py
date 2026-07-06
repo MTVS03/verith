@@ -62,9 +62,11 @@ from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
 from ..services.cache_service import OhlcvCache, as_of_identity
 from ..observability.trace_logger import TraceLogger, TraceSink, hash_query
+from ..runtime.deadline import Deadline, check_deadline
 from ..services.kis_client import (
     IntradayFetchResult,
     KisApiError,
+    OutOfScopeTickerError,
     fetch_minute_ohlcv,
     fetch_multi_timeframe_ohlcv,
     normalize_end_date,
@@ -103,6 +105,7 @@ def run(
     cache: OhlcvCache | None = None,
     intraday_candles: Sequence[IntradayCandle] | None = None,
     intraday_fetcher: MinuteFetcher | None = None,
+    deadline: Deadline | None = None,
 ) -> TechnicalAgentOutput:
     """TechnicalAgentInput → 1~10 노드 조율 → TechnicalAgentOutput.
 
@@ -113,7 +116,15 @@ def run(
 
     `trace_sink`(선택): 주입 시 실행 trace를 emit한다(trace_schema.md). 미주입이면 Noop —
     기존 동작·출력·성능이 불변이다. trace emit 실패는 흡수하며 계산/판단 로직에 영향을 주지 않는다.
+
+    `deadline`(선택): 주요 stage 시작 전 `check()`로 예산 초과를 조기 감지한다(cooperative). 초과 시
+    `DeadlineExceeded`를 그대로 전파(endpoint가 504 AI_TIMEOUT으로 변환). 미주입이면 시간 제한 없음.
+
+    **allowlist**: MVP 조사 범위(BATTERY_TICKERS) 밖 ticker는 OpenAI/cache/KIS **이전에** 즉시
+    `OutOfScopeTickerError`로 거절한다 — fake/custom fetcher·fresh cache를 주입해도 우회되지 않는다.
     """
+    if agent_input.ticker not in BATTERY_TICKERS:  # allowlist 선검증(전 진입 경로 보호, OpenAI 호출 전)
+        raise OutOfScopeTickerError(f"MVP 조사 범위 밖 종목입니다: {agent_input.ticker!r}")
     trace_id = trace_id or uuid.uuid4().hex
     # 관측 계층(trace_schema.md). sink 미주입이면 Noop — 기존 동작·성능 불변. trace 실패는 흡수(계산 무영향).
     trace = TraceLogger(trace_sink, trace_id=trace_id)
@@ -127,6 +138,7 @@ def run(
         output = _run_pipeline(
             agent_input, llm_client=llm_client, fetcher=fetcher, trace_id=trace_id, cache=cache,
             intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher, trace=trace,
+            deadline=deadline,
         )
     except Exception as exc:
         trace.emit("trace_end", "failed", started_at=run_started, ended_at=trace.now_iso(),
@@ -147,14 +159,20 @@ def _run_pipeline(
     intraday_candles: Sequence[IntradayCandle] | None,
     intraday_fetcher: MinuteFetcher | None,
     trace: TraceLogger,
+    deadline: Deadline | None,
 ) -> TechnicalAgentOutput:
-    """노드 1~10 본체. run()이 trace_start/trace_end로 감싸고, 각 노드 이벤트는 여기서 남긴다."""
+    """노드 1~10 본체. run()이 trace_start/trace_end로 감싸고, 각 노드 이벤트는 여기서 남긴다.
+
+    주요 stage 시작 전 `check_deadline`으로 예산 초과를 조기 감지한다(초과 시 DeadlineExceeded 전파)."""
     # 노드 1·2 (LLM 전처리). 최종 output엔 싣지 않지만, focus는 노드 10 설명 강조 힌트로 쓴다(H1).
-    _normalized, focus = _preprocess(llm_client, agent_input, trace)
+    check_deadline(deadline, "preprocess")
+    _normalized, focus = _preprocess(llm_client, agent_input, trace, deadline)
 
     # 노드 3 데이터수집(cache-aware). as_of를 KIS 조회 종료일로 스레딩(kis_mapping §8.2). 실패는 전파.
     # cache 주입 시: fresh 캐시 사용 / miss·만료면 KIS 후 write / KIS 실패면 stale 폴백(config.md §7·§8).
+    check_deadline(deadline, "data_collect")
     ohlcv, used_stale = _collect_ohlcv(agent_input.ticker, agent_input.as_of, fetcher, cache, trace)
+    check_deadline(deadline, "post_data_collect")
     daily, weekly, monthly = ohlcv["D"], ohlcv["W"], ohlcv["M"]
     source = "KIS (stale)" if used_stale else "KIS"  # stale 폴백 시 시세 출처 라벨(test_plan §7)
 
@@ -167,6 +185,7 @@ def _run_pipeline(
         )
 
     # 노드 5 국면분류. 일봉 부족 시 final_regime=unavailable.
+    check_deadline(deadline, "regime_classify")
     with trace.node("regime_classify") as span:
         regime_result = run_regime_classify(daily, weekly, monthly)
         span.output_summary = {
@@ -185,6 +204,7 @@ def _run_pipeline(
         )
 
     # 노드 4·6·7·8 (코드 확정 계산).
+    check_deadline(deadline, "indicator_calculate")
     with trace.node("indicator_calculate") as span:
         bundle = run_indicator_calculate(daily)
         span.output_summary = {"bar_count": len(daily)}
@@ -212,9 +232,11 @@ def _run_pipeline(
     signal_summary = _to_signal_summary(signal_result, confidence)
 
     # 노드 10 국면해석 + 재생성 루프 + granular fallback.
+    check_deadline(deadline, "interpret_report")
     result = _interpret(
         llm_client, regime=regime, signal=signal_summary,
         signals=signal_result.technical_signals, risks=risk_items, focus=focus, trace=trace,
+        deadline=deadline,
     )
 
     technical_signals = _to_technical_signals(signal_result.technical_signals, result.details)
@@ -294,6 +316,7 @@ def _emit_regime_unavailable_skips(trace: TraceLogger) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 def _preprocess(
     client: interp.LlmClient, agent_input: TechnicalAgentInput, trace: TraceLogger,
+    deadline: Deadline | None = None,
 ) -> tuple[NormalizeResult, FocusResult]:
     # LlmCallError(LLM 호출 실패)만 흡수 → fallback. 파일 로딩·타입·프로그래밍 오류는 전파(M2).
     # 원문 query는 hash만 기록(§10). LLM prompt/response 원문은 절대 남기지 않는다.
@@ -311,6 +334,7 @@ def _preprocess(
             trace.emit("fallback", node="normalize_question",
                        output_summary={"fallback_type": "template_fallback", "reason": "llm_call_failed"})
         span.output_summary = {"source": normalized.source.value}
+    check_deadline(deadline, "focus_analysis")  # 노드 2 LLM 호출 전 예산 확인
     with trace.node("focus_analysis") as span:
         try:
             focus = run_focus_analysis(
@@ -522,7 +546,7 @@ def _interpret(
     client: interp.LlmClient, *,
     regime: RegimeResult, signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult], risks: Sequence[RiskItem], focus: FocusResult,
-    trace: TraceLogger,
+    trace: TraceLogger, deadline: Deadline | None = None,
 ) -> _Interpretation:
     # LLM prompt/response 원문은 trace에 남기지 않는다 — 재생성/폴백은 retry/fallback 이벤트로만 관측(§12).
     with trace.node("interpret_report") as span:
@@ -536,6 +560,7 @@ def _interpret(
         result: _Interpretation | None = None
         for i, name in enumerate(prompt_seq):
             if i > 0:  # 직전 검증 실패로 재생성 시도 → retry 이벤트(§12)
+                check_deadline(deadline, "interpret_regeneration")  # 재생성 시도 전 예산 확인
                 trace.emit("retry", node="interpret_report",
                            output_summary={"attempt": i, "reason": "verification_failed"})
             attempt = _attempt(client, name, payload,

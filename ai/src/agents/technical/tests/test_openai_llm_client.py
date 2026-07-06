@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 import openai
 import pytest
 
 from src.agents.technical import config
 from src.agents.technical.nodes._llm_utils import LlmCallError
+from src.agents.technical.runtime.deadline import Deadline, DeadlineExceeded
 from src.agents.technical.services.openai_llm_client import (
     OpenAiLlmClient,
     default_openai_client,
@@ -193,6 +196,29 @@ def test_last_usage_not_carried_over_after_failure():
 def test_model_attribute_exposed():
     client = _client(_FakeResponses(response=_FakeResponse("ok")), model="gpt-x")
     assert client.model == "gpt-x"
+
+
+# ── deadline: remaining time을 per-call timeout으로 전달 / 만료 시 호출 안 함 ──
+def test_deadline_caps_request_timeout():
+    fr = _FakeResponses(response=_FakeResponse("ok"))
+    dl = Deadline(expires_at=time.monotonic() + 5.0)  # 남은 ~5초
+    _client(fr, timeout=20.0, deadline=dl).complete("p")
+    t = fr.last_kwargs["timeout"]
+    assert 0.0 < t <= 5.0 and t < 20.0                # config timeout(20)이 아니라 남은 예산 이하
+
+
+def test_expired_deadline_raises_before_call():
+    fr = _FakeResponses(response=_FakeResponse("ok"))
+    dl = Deadline(expires_at=time.monotonic() - 1.0)  # 이미 만료
+    with pytest.raises(DeadlineExceeded):
+        _client(fr, deadline=dl).complete("p")
+    assert fr.calls == 0                               # responses.create 자체를 호출 안 함
+
+
+def test_no_deadline_uses_config_timeout():
+    fr = _FakeResponses(response=_FakeResponse("ok"))
+    _client(fr, timeout=20.0).complete("p")
+    assert fr.last_kwargs["timeout"] == 20.0           # deadline 없으면 기존 timeout
 
 
 def test_default_client_builds_without_network(monkeypatch):

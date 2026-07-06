@@ -80,12 +80,28 @@ async def app_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     return error_response(exc)
 
 
+def _request_id_from_body(exc: RequestValidationError) -> str | None:
+    """검증 실패한 요청에서도 추적을 위해 request_id를 best-effort로 회수한다.
+
+    `RequestValidationError.body`(원본 파싱 body)가 dict이고 request_id가 비어있지 않은 문자열이면
+    그대로 쓴다. 그 외(JSON 파싱 실패·타입 불일치)는 None."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        rid = body.get("request_id")
+        if isinstance(rid, str) and rid.strip():
+            return rid
+    return None
+
+
 async def validation_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     """RequestValidationError → 400(INVALID_REQUEST, JSON 파싱 실패) 또는 422(VALIDATION_ERROR).
 
     api_spec §8: JSON 파싱 실패는 400, 필수값 누락/형식 오류는 422로 구분한다.
+    body에 request_id가 있으면 error envelope에 실어 추적성을 유지한다.
     """
-    errors = exc.errors() if isinstance(exc, RequestValidationError) else []
-    if any(e.get("type") == "json_invalid" for e in errors):
-        return error_response(invalid_request())
-    return error_response(validation_error())
+    if not isinstance(exc, RequestValidationError):
+        return error_response(validation_error())
+    request_id = _request_id_from_body(exc)
+    if any(e.get("type") == "json_invalid" for e in exc.errors()):
+        return error_response(invalid_request(request_id))
+    return error_response(validation_error(request_id))
