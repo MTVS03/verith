@@ -142,7 +142,12 @@ def load_kis_settings() -> KISSettings:
 # 5. 지표 계산 상수 (config.md §1). indicators/ 모듈이 사용한다.
 #    regime 판정 임계값(RSI_OVERBOUGHT/OVERSOLD·NEAR_*·SLOPE_* 등)은 여기 없다 — 7단계 regime에서 추가.
 # ─────────────────────────────────────────────────────────────────────────────
-MA_WINDOWS = [5, 20, 60]        # 이동평균 기간 (단기/중기/장기)
+# 이동평균은 역할(단기/중기/장기) 의미 상수로 정의하고 MA_WINDOWS는 파생시킨다.
+# 소비 코드는 mas[5] 같은 하드코딩 키가 아니라 이 상수로 접근한다(refactor/technical-ma-window-config).
+MA_SHORT_WINDOW = 5             # 단기 이동평균
+MA_MID_WINDOW = 20             # 중기 이동평균
+MA_LONG_WINDOW = 60            # 장기 이동평균
+MA_WINDOWS = [MA_SHORT_WINDOW, MA_MID_WINDOW, MA_LONG_WINDOW]  # 파생 (단기 < 중기 < 장기)
 RSI_PERIOD = 14                 # RSI 계산 기간 (와일더 표준)
 BOLLINGER_PERIOD = 20           # 볼린저밴드 기간 (중심선 SMA 기간)
 BOLLINGER_STD = 2.0             # 볼린저밴드 표준편차 배수

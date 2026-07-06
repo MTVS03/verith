@@ -27,6 +27,9 @@ from ..config import (
     CHART_PERIOD_DAYS,
     KIS_PERIOD_DAILY,
     KIS_PERIOD_WEEKLY,
+    MA_LONG_WINDOW,
+    MA_MID_WINDOW,
+    MA_SHORT_WINDOW,
     MA_WINDOWS,
     NEAR_RESISTANCE_THRESHOLD_PCT,
     NEAR_SUPPORT_THRESHOLD_PCT,
@@ -57,11 +60,11 @@ _LABELS = {
     "box_range_candidate": "박스권 후보",
 }
 
-# 골든/데드 크로스 판정 MA 조합 (config.md MA_WINDOWS 기반, chart_annotation_spec §8.2).
-# 단기/중기 = medium, 중기/장기 = high.
+# 골든/데드 크로스 판정 MA 조합 (config 역할 상수, chart_annotation_spec §8.2).
+# short/mid = medium, mid/long = high. overlays는 아래에서 MA_WINDOWS 전체를 순회한다.
 _CROSS_PAIRS = (
-    (MA_WINDOWS[0], MA_WINDOWS[1], "medium"),
-    (MA_WINDOWS[1], MA_WINDOWS[2], "high"),
+    (MA_SHORT_WINDOW, MA_MID_WINDOW, "medium"),
+    (MA_MID_WINDOW, MA_LONG_WINDOW, "high"),
 )
 
 

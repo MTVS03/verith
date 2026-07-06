@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ..config import MA_LONG_WINDOW, MA_MID_WINDOW, MA_SHORT_WINDOW
 from ..indicators.moving_average import calculate_moving_averages
 from ..indicators.pattern import CandleFeatureRow, calculate_candle_features
 from ..indicators.rsi import calculate_rsi
@@ -34,9 +35,9 @@ class IndicatorBundle:
     """
     close: float
     prev_close: float | None
-    ma5: float | None
-    ma20: float | None
-    ma60: float | None
+    ma_short: float | None  # 단기 MA (기본 MA_SHORT_WINDOW=5)
+    ma_mid: float | None    # 중기 MA (기본 MA_MID_WINDOW=20)
+    ma_long: float | None   # 장기 MA (기본 MA_LONG_WINDOW=60)
     rsi: float | None
     volume_ratio: float | None
     support: float | None
@@ -62,9 +63,9 @@ def run_indicator_calculate(daily: Sequence[OHLCV]) -> IndicatorBundle:
     return IndicatorBundle(
         close=float(daily[-1].close),
         prev_close=float(daily[-2].close) if len(daily) >= 2 else None,
-        ma5=mas[5][-1],
-        ma20=mas[20][-1],
-        ma60=mas[60][-1],
+        ma_short=mas[MA_SHORT_WINDOW][-1],
+        ma_mid=mas[MA_MID_WINDOW][-1],
+        ma_long=mas[MA_LONG_WINDOW][-1],
         rsi=rsis[-1],
         volume_ratio=ratios[-1],
         support=sr[-1]["support"],
