@@ -79,6 +79,23 @@
   .legend .dot { display:inline-block; width:9px; height:9px; border-radius:3px;
                  margin-right:5px; vertical-align:-1px; }
 
+  /* 지속성 블록 */
+  .prow { display:flex; align-items:center; gap:14px; padding:10px 0;
+          border-bottom:1px solid #F2F4F6; }
+  .prow:last-of-type { border-bottom:none; }
+  .prow .nm { width:52px; flex-shrink:0; text-align:right; font-size:14px;
+              font-weight:700; color:#4E5968; }
+  .pbars { flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .pline { display:flex; align-items:center; gap:8px; }
+  .plabel { width:34px; font-size:11px; font-weight:700; color:#B0B8C1; text-align:right; }
+  .ptrack { flex:1; height:14px; background:#F2F4F6; border-radius:5px; overflow:hidden; }
+  .pbar { height:100%; border-radius:5px; }
+  .pbar.buy { background:#F04452; } .pbar.sell { background:#3182F6; }
+  .pbar.dim { opacity:0.55; }
+  .pval { width:92px; flex-shrink:0; text-align:right; font-size:12.5px;
+          font-weight:800; font-variant-numeric:tabular-nums; }
+  .pverdict { margin-top:12px; font-size:13px; color:#4E5968; line-height:1.6; }
+
   /* 해석 신호 3카드 */
   .sigrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
   @media (max-width: 720px) { .sigrid { grid-template-columns:1fr; } }
@@ -207,11 +224,29 @@
       {% endif %}
     </section>
 
-    {# ── [B] 지속성 5일 vs 20일 — M2 ── #}
+    {# ── [A] 지속성 5일 vs 20일 — persistence 팩트(게이트2 규칙5 검증분)를 그리기만 ── #}
     <section class="card" id="persist">
       <h2>지속성 · 5일 vs 20일</h2>
-      <div class="cap">최근 흐름이 일시적인지, 20일에 걸쳐 지속되는지</div>
-      <div class="placeholder">데이터 준비 중 (M2) — 5일·20일 누적 비교가 이 자리에 들어갑니다.</div>
+      <div class="cap">최근 흐름이 일시적인지, 20일에 걸쳐 지속되는지 · 단위 백만원</div>
+      {% if persistence %}
+      {% for r in persistence.rows %}
+      <div class="prow">
+        <span class="nm">{{ r.name }}</span>
+        <div class="pbars">
+          <div class="pline"><span class="plabel">5일</span>
+            <div class="ptrack"><div class="pbar {{ r.d5.cls }}" style="width:{{ r.d5.w }}%"></div></div>
+            <span class="pval {{ r.d5.cls }}">{{ r.d5.val }}</span></div>
+          <div class="pline"><span class="plabel">20일</span>
+            <div class="ptrack"><div class="pbar {{ r.d20.cls }} dim" style="width:{{ r.d20.w }}%"></div></div>
+            <span class="pval {{ r.d20.cls }}">{{ r.d20.val }}</span></div>
+        </div>
+        {% if r.consistent %}<span class="chip on">일관</span>{% else %}<span class="chip off">–</span>{% endif %}
+      </div>
+      {% endfor %}
+      {% if persistence.verdict %}<div class="pverdict">{{ persistence.verdict }}</div>{% endif %}
+      {% else %}
+      <div class="placeholder">데이터 준비 중 — 지속성 비교가 아직 없습니다.</div>
+      {% endif %}
     </section>
 
     {# ── [A] 해석 신호 · 판정 근거 ── #}
