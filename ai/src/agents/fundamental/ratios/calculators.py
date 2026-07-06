@@ -58,14 +58,16 @@ def yoy(current: float | None, previous: float | None) -> float | None:
     return round((current - previous) / abs(previous) * 100, 2)
 
 
-def _growth_status(current: float | None, previous: float | None) -> tuple[str, str | None]:
+def _growth_status(current: float | None, previous: float | None) -> tuple[str, str | None, str | None]:
     if current is None or previous in (None, 0):
-        return "unavailable", None
+        return "unavailable", None, None
     if previous < 0:
-        return "not_meaningful", "전기 적자 또는 음수 기준이라 성장률을 %로 표시하지 않습니다."
+        if current > 0:
+            return "not_meaningful", "전기 적자에서 당기 흑자로 전환되어 성장률을 %로 표시하지 않습니다.", "turnaround_positive"
+        return "not_meaningful", "전기 적자 또는 음수 기준이라 성장률을 %로 표시하지 않습니다.", "loss_continued"
     if current < 0:
-        return "not_meaningful", "전기 흑자에서 당기 적자로 전환되어 성장률을 %로 표시하지 않습니다."
-    return "available", None
+        return "not_meaningful", "전기 흑자에서 당기 적자로 전환되어 성장률을 %로 표시하지 않습니다.", "turnaround_negative"
+    return "available", None, None
 
 
 def _source_url(rcept_no: str) -> str:
@@ -125,8 +127,8 @@ def calculate_ratios(
     current_assets = _metric_value(latest, "current_assets")
     current_liabilities = _metric_value(latest, "current_liabilities")
 
-    revenue_growth_status, revenue_growth_reason = _growth_status(revenue, _metric_value(previous, "revenue"))
-    operating_income_growth_status, operating_income_growth_reason = _growth_status(
+    revenue_growth_status, revenue_growth_reason, revenue_growth_direction = _growth_status(revenue, _metric_value(previous, "revenue"))
+    operating_income_growth_status, operating_income_growth_reason, operating_income_growth_direction = _growth_status(
         operating_income,
         _metric_value(previous, "operating_income"),
     )
@@ -150,11 +152,23 @@ def calculate_ratios(
         "revenue_growth": revenue_growth_reason,
         "operating_income_growth": operating_income_growth_reason,
     }
+    direction_overrides = {
+        "revenue_growth": revenue_growth_direction,
+        "operating_income_growth": operating_income_growth_direction,
+    }
     display_overrides = {
-        "revenue_growth": "적자전환" if revenue_growth_status == "not_meaningful" and revenue is not None and revenue < 0 else None,
+        "revenue_growth": (
+            "흑자전환"
+            if revenue_growth_direction == "turnaround_positive"
+            else "적자전환"
+            if revenue_growth_direction == "turnaround_negative"
+            else None
+        ),
         "operating_income_growth": (
-            "적자전환"
-            if operating_income_growth_status == "not_meaningful" and operating_income is not None and operating_income < 0
+            "흑자전환"
+            if operating_income_growth_direction == "turnaround_positive"
+            else "적자전환"
+            if operating_income_growth_direction == "turnaround_negative"
             else None
         ),
     }
@@ -231,6 +245,8 @@ def calculate_ratios(
             item["reason"] = reason_overrides.get(metric) or MISSING_REASONS[metric]
         if display_overrides.get(metric):
             item["display_value"] = display_overrides[metric]
+        if direction_overrides.get(metric):
+            item["direction"] = direction_overrides[metric]
         if metric == "bps" and value is not None and share_count is not None:
             item["basis"] = share_count.basis
             item["share_class"] = share_count.share_class

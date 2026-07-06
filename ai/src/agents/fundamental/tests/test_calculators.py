@@ -40,6 +40,22 @@ def test_growth_marks_profit_to_loss_as_not_meaningful():
     assert ratios["operating_income_growth"]["value"] is None
     assert ratios["operating_income_growth"]["status"] == "not_meaningful"
     assert ratios["operating_income_growth"]["display_value"] == "적자전환"
+    assert ratios["operating_income_growth"]["direction"] == "turnaround_negative"
+    assert "NOT_MEANINGFUL_OPERATING_INCOME_GROWTH" in flags
+
+
+def test_growth_marks_loss_to_profit_turnaround_direction():
+    ratios, _, flags = calculate_ratios(
+        {
+            "2024": {"operating_income": metric(-100), "revenue": metric(1000)},
+            "2025": {"operating_income": metric(55), "revenue": metric(1100)},
+        }
+    )
+
+    assert ratios["operating_income_growth"]["value"] is None
+    assert ratios["operating_income_growth"]["status"] == "not_meaningful"
+    assert ratios["operating_income_growth"]["display_value"] == "흑자전환"
+    assert ratios["operating_income_growth"]["direction"] == "turnaround_positive"
     assert "NOT_MEANINGFUL_OPERATING_INCOME_GROWTH" in flags
 
 
@@ -116,3 +132,72 @@ def test_score_boundaries_and_insufficient_data():
 
     insufficient = base | {"roe": {"value": None}, "operating_margin": {"value": None}}
     assert score_financials(insufficient)[2] == "insufficient_data"
+
+
+def test_score_interpolates_negative_profitability_instead_of_flat_zero():
+    mild_negative = {
+        "roe": {"value": -2},
+        "operating_margin": {"value": 12},
+        "debt_ratio": {"value": 80},
+        "current_ratio": {"value": 180},
+        "revenue_growth": {"value": 20},
+        "operating_income_growth": {"value": 30},
+    }
+    severe_negative = mild_negative | {"roe": {"value": -79}}
+
+    _, mild_breakdown, _ = score_financials(mild_negative)
+    _, severe_breakdown, _ = score_financials(severe_negative)
+    mild_roe = next(item for item in mild_breakdown["scored_metrics"] if item["metric"] == "roe")
+    severe_roe = next(item for item in severe_breakdown["scored_metrics"] if item["metric"] == "roe")
+
+    assert mild_roe["points"] > severe_roe["points"]
+    assert severe_roe["points"] == 0
+
+
+def test_score_renormalizes_when_metric_is_unavailable():
+    score, breakdown, label = score_financials(
+        {
+            "roe": {"value": 15},
+            "operating_margin": {"value": None},
+            "debt_ratio": {"value": 80},
+            "current_ratio": {"value": 180},
+            "revenue_growth": {"value": 20},
+            "operating_income_growth": {"value": 30},
+        }
+    )
+
+    assert score == 100
+    assert label == "strong"
+    assert breakdown["attainable_max"] == 80
+    assert "operating_margin" in breakdown["skipped_metrics"]
+
+
+def test_turnaround_positive_scores_above_continued_loss():
+    base = {
+        "roe": {"value": 15},
+        "operating_margin": {"value": 12},
+        "debt_ratio": {"value": 80},
+        "current_ratio": {"value": 180},
+        "revenue_growth": {"value": 20},
+    }
+    positive_score, _, _ = score_financials(base | {"operating_income_growth": {"value": None, "direction": "turnaround_positive"}})
+    continued_loss_score, _, _ = score_financials(base | {"operating_income_growth": {"value": None, "direction": "loss_continued"}})
+
+    assert positive_score > continued_loss_score
+
+
+def test_all_scored_metrics_at_max_return_100():
+    score, breakdown, label = score_financials(
+        {
+            "roe": {"value": 15},
+            "operating_margin": {"value": 12},
+            "debt_ratio": {"value": 80},
+            "current_ratio": {"value": 180},
+            "revenue_growth": {"value": 20},
+            "operating_income_growth": {"value": 30},
+        }
+    )
+
+    assert score == 100
+    assert label == "strong"
+    assert breakdown["attainable_max"] == 100
