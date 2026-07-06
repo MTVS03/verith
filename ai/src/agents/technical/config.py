@@ -367,3 +367,35 @@ INTRADAY_RISK_NOTE_MAX_COUNT: int = 3             # intraday risk_notes 최대 �
 # services/kis_client.py — 분봉 역방향 페이징 상한
 INTRADAY_MINUTE_MAX_CALLS: int = 20               # 30건×20 ≈ 600봉(1일 ~391) — 무한 루프 방지 상한
 INTRADAY_MARKET_OPEN_HHMMSS: str = "090000"       # 이 시각 이전으로는 더 역방향 조회하지 않는다
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. OpenAI LLM client 상수 (services/openai_llm_client.py가 사용한다).
+#     실 LLM adapter 설정 — API key 값은 여기 저장하지 않고 반드시 .env/환경변수에서 읽는다
+#     (technical_coding_guidelines §2.2·§13.2). 모델은 env override 우선(운영/실험 교체 용이).
+#     runtime wiring(run_technical_agent 자동 생성)은 이 브랜치 범위 밖 — 후속 AI endpoint에서 주입.
+# ─────────────────────────────────────────────────────────────────────────────
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"                         # 키 "이름"만(값 아님)
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")      # env 있으면 우선, 없으면 기본
+OPENAI_TIMEOUT_SECONDS: float = 30.0                          # 1회 호출 timeout(초)
+OPENAI_TEMPERATURE: float | None = 0.0                        # None이면 요청 파라미터에서 생략
+OPENAI_MAX_OUTPUT_TOKENS: int = 1200                          # 응답 최대 토큰(보수적 기본)
+
+
+def load_openai_api_key() -> str:
+    """.env(또는 환경변수)에서 OpenAI API key를 읽어 반환한다(fail-fast).
+
+    KIS(§4)와 동일하게 코드에 하드코딩하지 않는다. 누락 시 어디에 무엇을 넣어야 하는지 명시하며
+    즉시 실패한다 — 이 config error는 client 생성 시점 오류이며 LlmCallError(호출 실패)와 구분된다.
+    반환값(키 문자열)은 로그·trace·repr 어디에도 남기지 않는다."""
+    env_path = _find_env_file()
+    if env_path is not None:
+        load_dotenv(env_path, override=False)  # 실제 환경변수가 .env보다 우선
+    key = (os.getenv(OPENAI_API_KEY_ENV) or "").strip()
+    if not key:
+        where = f"{env_path}" if env_path else "환경변수(.env 파일 미발견)"
+        raise RuntimeError(
+            f"[OpenAI config] 필수 인증정보 누락: {OPENAI_API_KEY_ENV}. "
+            f"{where} 에 {OPENAI_API_KEY_ENV} 를 설정하세요."
+        )
+    return key

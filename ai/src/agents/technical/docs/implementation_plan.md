@@ -74,7 +74,8 @@ src/ai/
         │   └── keyword_rules.py      # 검증 ③ 키워드 사전(대표어·충돌어·금지어)
         ├── services/                 # IO/인프라 어댑터(주입식)
         │   ├── kis_client.py         # KIS REST 클라이언트
-        │   └── cache_service.py      # OHLCV 캐시(Redis-like 주입)
+        │   ├── cache_service.py      # OHLCV 캐시(Redis-like 주입)
+        │   └── openai_llm_client.py  # OpenAI LLM 어댑터(complete(prompt)->str, Responses API)
         ├── nodes/                    # LangGraph 노드 = 얇은 어댑터(state→모듈 호출→state)
         │   ├── normalize_question.py    # 1. 질문 안전 정규화 (LLM)
         │   ├── focus_analysis.py        # 2. 분석 포커스 정리 (LLM)
@@ -121,6 +122,7 @@ src/ai/
 | `config.py` | 임계값·가중치·기간·재시도 설정 로딩 | `config.md` |
 | `services/kis_client.py` | allowlist 검증 후 KIS 종목별 기간별시세 호출, 100건 제한 구간 분할, 원본→내부 OHLCV 변환 | `kis_mapping.md`, `config.md` |
 | `services/cache_service.py` | Redis 가격 캐시 조회·저장 | `schema.md`, `config.md` |
+| `services/openai_llm_client.py` | **OpenAI LLM 어댑터**(`feat/technical-openai-client`). 기존 `complete(prompt)->str` 계약을 OpenAI **Responses API**로 구현(`responses.create`→`output_text`). 순수 어댑터 — orchestration·prompt·검증 로직 불변, fake LLM과 교체 가능. OpenAI 예외는 모두 `LlmCallError`로 변환(secret-free: type 이름만). `OPENAI_API_KEY` 누락은 `default_openai_client()` 생성 시점의 **config error(fail-fast)**로 LlmCallError와 분리. `model`·`last_usage`(토큰수)를 optional 노출(후속 trace 배선 대비). **runtime wiring(run_technical_agent 자동 생성)·supervisor trace 배선은 후속 AI endpoint로 이연** | `config.md`, `technical_coding_guidelines.md` |
 | `indicators/*.py` | 이동평균·RSI·거래량·지지저항·패턴 계산 | `regime_rules.md`, `config.md`, `test_plan.md`(검증 ①) |
 | `regime/rules.py` | 일봉 국면 분류(6종 우선순위) | `regime_rules.md`, `enums.md` |
 | `regime/multiframe.py` | 주/월봉 추세, alignment_flag, regime_context | `regime_rules.md`, `enums.md` |
