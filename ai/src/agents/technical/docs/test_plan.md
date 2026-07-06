@@ -475,7 +475,7 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 | CHART-09 | 데이터 부족 | 해당 annotation 생성하지 않음 (억지 생성 없음) |
 | CHART-10 | 같은 kind가 가까운 기간 내 반복 | 중복 제거 규칙 적용 |
 
-**MVP 구현 범위 주의:** 크로스 kind는 `golden_cross`/`dead_cross`로 확정한다(chart_annotation_spec §7). `box_breakout_candidate`·`cup_handle_candidate`는 **이번 MVP 구현 범위에서 제외**(후속). 기간별 candles는 `config.md §10 CHART_PERIOD_DAYS`(3m=90/1y=365/5y=1825일) 기준으로 기본 candle source의 마지막 candle date에서 slice하며, 데이터 부족 시 확보된 봉까지만 쓰고 예외를 내지 않는다. chart_data에는 regime/synthesis/risk 값을 넣지 않는다(순수 chart JSON).
+**구현 범위:** 크로스 kind는 `golden_cross`/`dead_cross`로 확정한다(chart_annotation_spec §7). **annotation 10종 전부 구현됨** — `support_touch`/`resistance_touch`/`box_range_candidate`/`box_breakout_candidate`/`cup_handle_candidate`는 `feat/technical-chart-patterns`에서 rolling 방식으로 구현됐다(look-ahead 없음). `cup_handle_candidate`는 **1y 일봉·5y 주봉만**(3m 제외)이고 **annotation-only**(signal_score/regime 미반영). **5y importance retier**: 실측상 5y=high 중심 표시면 medium 대부분이 숨겨져(5종 종목 high 3~4/medium 37~56), backend가 **5y에서만** 장기 패턴 후보(`cup_handle_candidate`·`box_breakout_candidate`→high, `box_range_candidate`→medium)를 선별 승격한다(`_apply_period_importance_policy`, dedup 이후·3m/1y 불변·kind/meta 불변 — `chart_annotation_spec §4.2`). fetch lookback 확대는 병목이 아니라 **보류**. 기간별 candles는 `config.md §10 CHART_PERIOD_DAYS`(3m=90/1y=365/5y=1825일) 기준으로 기본 candle source의 마지막 candle date에서 slice하며, 데이터 부족 시 확보된 봉까지만 쓰고 예외를 내지 않는다. chart_data에는 regime/synthesis/risk 값을 넣지 않는다(순수 chart JSON).
 
 **chart_data 계약 검증(CONTRACT-CHART-*):** `ChartPayload.chart_data`는 `schemas/chart.py`의 `ChartData`로 검증한다(자유 dict 아님). 잘못된 구조·문서에 없는 key(extra)·잘못된 Literal(`candle_unit`·SR `type`·annotation `source`/`importance`)·범위 밖 수치(음수 가격/volume, RSI 0~100 밖, window/period ≤0)는 거부한다. `annotation.kind`는 문서 10종 전체를 계약상 허용하되 chart_builder는 8종만 생성한다. `from` key는 `model_dump(mode="json")`(by_alias 유무 무관)에서 `"from"`으로 유지되고 `"from_"`은 새어나오지 않는다. `test_chart_builder`는 dict 접근 대신 `payload.chart_data.model_dump(mode="json", by_alias=True)`로 최종 JSON을 검증한다.
 
@@ -586,3 +586,9 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 `devtools/streamlit_technical_lab.py` 는 **pytest/CI 대상이 아니다**. real KIS + fake LLM 으로 `run_technical_agent()` 출력과 chart payload 를 화면에서 사람이 눈으로 검수하는 **수동 도구**다(real KIS env 필요). Streamlit `session_state` 는 production cache 가 아니라 수동 QA 용 임시 상태이며, secret 값은 화면에 표시하지 않는다(존재 여부만 OK/MISSING). 실행법은 `implementation_plan.md` §8 참고.
 
 이 도구의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반이다 — KIS 호출·자동 refresh·WebSocket·polling 없이 이미 만든 intraday 빌더/헬퍼(chart payload·context·hint/alignment·adjustment)를 호출해 표시만 한다. KIS 분봉 fetcher 미구현 상태에서 1d 조립·렌더를 눈으로 확인하기 위한 것이다(`implementation_plan.md` §9).
+
+### 11.1 chart annotation 진단 도구 (read-only 계측)
+
+`scripts/diagnose_chart_annotations.py` 는 **"차트 전략(annotation)이 잘 안 보인다"의 원인을 숫자로 가르는** read-only 계측 도구다(기능 구현 아님, 프로덕션 무변경). `build_chart_payloads`(post-dedup 정본)와 chart_builder 내부 생성기(`_cross_annotations` 등)를 읽기 전용으로 호출해 period(3m/1y/5y)별로 다음을 계측한다: annotation kind별/importance별 개수, **dedup 전/후 개수**(pre−post = 줄어든 수), **capacity check**(각 detector 필요 봉 vs 확보 봉 → 봉 부족인지 조건 불충족인지), 미구현 kind의 **"contract exists but generator missing"** 표시(현재 **전 10종 구현 완료**라 목록은 비어 있음). 기본은 **fixture mode**(합성 OHLCV·KIS 호출 없음, `--fixture`), real KIS mode는 `--ticker`로만 켜지며 env 없으면 graceful skip한다. 출력 JSON은 gitignore된 `scripts/chart_annotation_diagnostics_output/`에 저장. 도구 계약(출력 shape·미구현 kind 표시·capacity·production 무변경)은 `test_chart_annotation_diagnostics.py`(fixture 기반)가 고정한다.
+
+이 진단은 단순 개수 확인뿐 아니라 **chart annotations와 technical_signals의 역할 분리**(`chart_annotation_spec.md §1.1·§7.1`)와 **period별 importance/display 정책**(`chart_annotation_spec.md §4.1`) 검증에도 쓴다 — 예: `5y`에서 medium이 대부분이라 high-only 표시면 대부분 숨겨지는지 등.
