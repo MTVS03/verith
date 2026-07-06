@@ -84,6 +84,19 @@ def test_agent05_llm_client_and_trace_id_forwarded(monkeypatch):
     assert kwargs["trace_id"] == "trace_x"
 
 
+def test_agent05b_trace_sink_forwarded(monkeypatch):
+    calls = _patch_supervisor(monkeypatch)
+    sink = object()  # 임의 sink 대역 — agent는 만들지 않고 통과만 시킨다
+    agent.run_technical_agent(dict(VALID_PAYLOAD), llm_client=FakeLlm(), trace_sink=sink)
+    assert calls[0][1]["trace_sink"] is sink
+
+
+def test_agent05c_trace_sink_defaults_none(monkeypatch):
+    calls = _patch_supervisor(monkeypatch)
+    agent.run_technical_agent(dict(VALID_PAYLOAD), llm_client=FakeLlm())
+    assert calls[0][1]["trace_sink"] is None  # 미주입 시 None(하위호환·Noop)
+
+
 def test_agent06_fetcher_forwarded_when_given(monkeypatch):
     calls = _patch_supervisor(monkeypatch)
 
@@ -112,6 +125,7 @@ def test_agent08_returns_supervisor_result(monkeypatch):
 _ALLOWED_IMPORT_MODULES = frozenset({
     "__future__", "typing",
     "schemas.contracts",
+    "observability.trace_logger",  # TraceSink 타입만(주입 통과용) — sink 생성/경로는 agent가 모른다
     "supervisor", "supervisor.technical_supervisor",
 })
 
