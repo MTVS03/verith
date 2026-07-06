@@ -222,3 +222,29 @@ src/ai/
 cd ai
 uv run streamlit run src/agents/technical/devtools/streamlit_technical_lab.py
 ```
+
+Streamlit lab의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반이다 — KIS 호출·자동 refresh·WebSocket·polling 없이 이미 만든 intraday 빌더/헬퍼를 호출해 표시만 한다(기존 D/W/M chart QA와 분리).
+
+---
+
+## 9. 1D intraday (Beta) 구현 현황
+
+장중 분봉(1d)은 **보조 화면**이다(정본 정책: `chart_annotation_spec.md §3.1`, 계약: `contracts.md` "1D intraday"). 기존 **D/W/M 계약은 그대로 유지**되며, intraday는 그 위에 얹히는 **선택적** 확장이다.
+
+**fetcher-무관 범위(구현됨):**
+
+| 항목 | 위치 |
+| --- | --- |
+| `IntradayCandle`(timestamp)·`IntradayPoint`·`IntradayChartData`(candle_unit `1min`)·`IntradayContext` 스키마 | `schemas/intraday.py` |
+| `ChartPeriod`에 `1d` 추가 | `schemas/enums.py` |
+| `ChartPayload.chart_data` = `ChartData \| IntradayChartData` 판별 유니온(candle_unit 기준) + `1d→1min` validator | `schemas/contracts.py` |
+| 1d chart payload 생성 | `charts/intraday_chart_builder.py` |
+| intraday 관측 컨텍스트 계산 | `charts/intraday_context_builder.py` |
+| intraday_regime_hint·regime_alignment | `synthesis/intraday_alignment.py` |
+| confidence_adjustment(cap ±0.05)·risk_notes(context 내부) | `synthesis/intraday_adjustment.py` |
+| supervisor의 optional 조립(`run(..., intraday_candles=...)`, 실패는 흡수) | `supervisor/technical_supervisor.py` |
+| 1D Intraday QA(fixture/manual) | `devtools/streamlit_technical_lab.py` |
+
+**정지선(미구현):** **KIS 분봉 fetcher(`kis_client.fetch_minute_ohlcv`)는 착수하지 않는다** — KIS 공식 분봉 TR/endpoint/필드/페이징이 확정되기 전까지 정지한다(`kis_mapping.md §12`). 현재 1d는 **주어진 `IntradayCandle` 리스트**에서만 조립된다.
+
+**불변식:** `charts`는 `{3m, 1y, 5y}`가 항상 존재하고 `1d`는 조건부(소비 측은 `len == 3`이 아닌 period 집합으로 처리). `OHLCV.date`는 날짜 전용 유지. intraday는 `final_regime`을 덮어쓰지 않고, top-level `confidence`/`signal_score`/`risk`도 이 단계에서 변경하지 않는다(`signal_score_adjustment`=0.0). intraday **마커 annotation은 Phase 3(Future Work)**.
