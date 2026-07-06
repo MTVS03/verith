@@ -288,3 +288,7 @@ docker-compose.override.yml
 # KIS 토큰 캐시 (샘플 테스트 스크립트)
 ai/src/agents/technical/scripts/.kis_token.json
 **/.kis_token.json
+
+# technical agent smoke script 출력 JSON (수동 실행 산출물 — 커밋하지 않음)
+ai/scripts/technical_smoke_output/
+**/technical_smoke_output/

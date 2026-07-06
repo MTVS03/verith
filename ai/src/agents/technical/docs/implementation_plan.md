@@ -167,6 +167,8 @@ src/ai/
 
 코드 확정 로직(5~9)을 LLM(11)보다 먼저 세운다 — LLM은 이미 확정된 값을 문장으로 풀 뿐이므로, 확정 로직이 있어야 LLM 노드를 붙일 수 있다. 개별 노드·모듈이 다 선 뒤(1~12) supervisor(13)가 그것들을 순서대로 엮고(재생성 루프 포함), api(14)는 supervisor를 호출만 한다. 노드 10 자체(`nodes/interpret_report.py`)는 순수 함수(생성·검증·병합·fallback 문장)까지만 책임지고, 재생성 루프 실행은 13에서 붙인다.
 
+**수동 smoke script(`ai/scripts/smoke_technical_agent.py`).** 공식 진입점 `run_technical_agent()`를 **real KIS + fake LLM**으로 호출해 전체 파이프라인이 끝까지 도는지·`TechnicalAgentOutput`이 나오는지 눈으로 확인하는 개발자용 도구다. KIS는 실제 호출(기존 `kis_client`/`supervisor` 경로만), LLM은 payload-aware fake(검증 ③ 1차 통과하도록 확정 라벨 echo). **pytest/CI 기본 흐름에는 포함하지 않는다**(real KIS env 필요). 결과 JSON은 `ai/scripts/technical_smoke_output/`에 저장하고 커밋하지 않는다(`.gitignore`). smoke는 계산·조율 로직을 만들지 않고 entrypoint 위임만 확인한다.
+
 ---
 
 ## 6. MVP에서 제외할 것
