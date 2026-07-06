@@ -134,7 +134,7 @@
 | --- | --- | --- | --- |
 | 지표명 | `technical_signals[].indicator` | 표시 라벨 | 코드 |
 | 신호 | `technical_signals[].signal` | 긍정/중립/부정 배지 (청록) | 코드 |
-| 대표 수치 | `technical_signals[].value` | 숫자 (청록) | 코드 |
+| 대표 수치 | `technical_signals[].value` | 숫자 (청록). **`null`이면 0이 아니라 "계산 불가"/"—"로 표시**(`contracts.md` `float \| None` — 데이터 부족 등으로 산출 불가) | 코드 |
 | 계산 지표 칩 | `technical_signals[].metrics[]` | 칩 리스트 (청록) | 코드 |
 | 설명 | `technical_signals[].detail` | 문장 (보라) | LLM |
 | 설명 출처 | `technical_signals[].detail_source` | 작은 출처 표시 | — |
