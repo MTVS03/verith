@@ -17,6 +17,7 @@ from src.agents.technical.schemas.contracts import TechnicalAgentInput, Technica
 from src.agents.technical.schemas.enums import DataStatus, GenerationSource, Regime
 from src.agents.technical.schemas.intraday import IntradayCandle, IntradayChartData
 from src.agents.technical.schemas.ohlcv import OHLCV
+from src.agents.technical.services.kis_client import IntradayFetchResult
 from src.agents.technical.supervisor import technical_supervisor as sup
 
 TICKER = "373220"  # LG에너지솔루션
@@ -98,10 +99,22 @@ def _good_interp_response(daily, weekly, monthly) -> str:
     return json.dumps({"interpretation_text": text, "details": details}, ensure_ascii=False)
 
 
-def _run(responses, *, fetcher=None, trace_id=None, agent_input=None, intraday_candles=None):
+def _run(responses, *, fetcher=None, trace_id=None, agent_input=None,
+         intraday_candles=None, intraday_fetcher=None):
     fetcher = fetcher or (lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY})
     return sup.run(agent_input or _input(), llm_client=ScriptedLlm(responses),
-                   fetcher=fetcher, trace_id=trace_id, intraday_candles=intraday_candles)
+                   fetcher=fetcher, trace_id=trace_id,
+                   intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher)
+
+
+def _minute_fetcher(candles=None, *, previous_close=101.0):
+    """테스트용 fake intraday fetcher — IntradayFetchResult를 돌려준다(KIS 없음)."""
+    result = IntradayFetchResult(
+        candles=list(INTRADAY_CANDLES if candles is None else candles),
+        previous_close=previous_close, latest_price=None,
+        cumulative_volume=None, cumulative_trading_value=None,
+    )
+    return lambda ticker, *, as_of=None, **kw: result
 
 
 # ── SUP-01·02: 정상 출력 · trace_id ─────────────────────────────────────────
@@ -456,3 +469,59 @@ def test_intraday_failure_does_not_break_dwm(monkeypatch):
     out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 유지
     assert out.intraday_context is None  # 조립 실패 → 붙이지 않음
+
+
+# ── SUP intraday: KIS fetcher 연결(커밋 14) ──────────────────────────────────
+def test_intraday_fetcher_success_adds_1d_and_context():
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher())
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
+    assert out.intraday_context is not None
+
+
+def test_intraday_fetcher_previous_close_used():
+    # fetcher previous_close=200 → return_pct는 200 기준(일봉 fallback 아님)
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher(previous_close=200.0))
+    ctx = out.intraday_context
+    assert ctx.previous_close == 200.0  # INTRADAY_CANDLES last close=100.9
+    assert ctx.intraday_return_pct == pytest.approx((100.9 - 200.0) / 200.0 * 100)
+
+
+def test_intraday_fetcher_previous_close_none_falls_back_to_daily():
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher(previous_close=None))
+    # DAILY[-1].close (i=119 홀수 → 102.0) 로 fallback
+    assert out.intraday_context.previous_close == 102.0
+
+
+def test_intraday_fetcher_empty_candles_dwm_only():
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher(candles=[]))
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+    assert out.intraday_context is None
+
+
+def test_intraday_fetcher_exception_does_not_break_dwm():
+    def boom(ticker, *, as_of=None, **kw):
+        raise RuntimeError("kis intraday down")
+    out = _run(_INTRA, intraday_fetcher=boom)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
+    assert out.intraday_context is None
+
+
+def test_direct_candles_take_precedence_over_fetcher():
+    called = {"n": 0}
+
+    def counting(ticker, *, as_of=None, **kw):
+        called["n"] += 1
+        return IntradayFetchResult([], None, None, None, None)
+
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES, intraday_fetcher=counting)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}  # 직접 주입이 1d 생성
+    assert called["n"] == 0  # fetcher 호출 안 함(직접 주입 우선)
+
+
+def test_final_regime_and_signal_unchanged_by_fetcher():
+    without = _run(_INTRA)
+    with_fetch = _run(_INTRA, intraday_fetcher=_minute_fetcher())
+    assert with_fetch.regime == without.regime      # final_regime 등 불변
+    assert with_fetch.signal == without.signal       # top-level confidence/signal_score 불변
+    # 보정값은 context 내부에만
+    assert with_fetch.intraday_context.signal_score_adjustment == 0.0
