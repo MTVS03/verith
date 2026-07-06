@@ -98,6 +98,36 @@ def _gauge(signals: dict) -> dict:
             "arc": None, "knob_x": 140, "knob_y": 30}
 
 
+def _daily_view(signals: dict) -> list[dict] | None:
+    """일별 팩트 → 차트 표시용 뷰. 값 변형 없음 — 표시 스케일·포맷만.
+
+    h 는 기간 내 최대 |값| 을 48%(트랙 반높이 여유분)로 놓은 상대 막대 높이
+    — M1 게이지·강도 바와 같은 '표시 스케일' 범주다. 값 텍스트는 천단위
+    콤마 포맷뿐, 단위는 팩트 그대로 백만원(변환 없음). daily 가 없으면
+    None → 템플릿이 placeholder 로 후퇴(구버전 신호 dict 방어).
+    """
+    daily = signals.get("daily")
+    if not daily:
+        return None
+    max_abs = max(
+        (abs(row.get(s) or 0.0) for row in daily for s in SUBJECTS), default=0.0
+    )
+    view = []
+    for row in daily:
+        bars = []
+        for s in SUBJECTS:
+            v = row.get(s) or 0.0
+            bars.append({
+                "subject": s,
+                "cls": "buy" if v > 0 else "sell",
+                "h": round(abs(v) / max_abs * 48.0, 1) if max_abs and v else 0.0,
+                "val": f"{v:+,.0f}",
+            })
+        iso = row.get("date", "")
+        view.append({"iso": iso, "label": iso[5:].replace("-", "/"), "bars": bars})
+    return view
+
+
 def _headline(rows: list[dict]) -> str:
     """요약 헤드라인 — 각 주체 direction(이미 확정된 부호의 단어)을 문구로 조립.
 
@@ -135,10 +165,12 @@ def build_report(
         "gauge": _gauge(signals),
         "headline": _headline(rows),
         "interpretation": interpretation,   # None이면 템플릿이 placeholder로 후퇴
+        "daily": _daily_view(signals),      # None이면 템플릿이 placeholder로 후퇴
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",
         "recent_days": config.RECENT_DAYS,
+        "trend_days": config.TREND_DAYS,
         "disclaimer": "본 리포트는 투자 자문이 아니며 과거 수급 데이터 기반 참고 자료입니다.",
     }
     template = _env.get_template(_TEMPLATE_NAME)

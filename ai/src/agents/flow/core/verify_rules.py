@@ -92,6 +92,70 @@ def verify_signals(df: pd.DataFrame, signals: dict) -> GateResult:
             f"원본 부호 판정 '{expected_alignment}' 과 불일치"
         )
 
+    # ── 규칙 4: 일별 배열 정합 ───────────────────────────
+    # 대조 원칙: signals.extract_daily 를 다시 부르지 않는다(같은 코드를 재실행하면
+    # 같은 버그가 양쪽에 실려 통과한다). 여기서는 df 에서 직접 날짜·값을 읽어
+    # daily 가 '주장하는' 내용과 일치하는지만 확인한다.
+    daily = signals.get("daily")
+    recent_daily = df.tail(config.TREND_DAYS)
+    expected_n = len(recent_daily)
+
+    if daily is None:
+        failures.append("일별 정합: daily 가 신호에 없음")
+    elif len(daily) != expected_n:
+        # 4a: 길이 — 행이 사라지거나 부풀지 않았나.
+        failures.append(
+            f"일별 길이 정합: daily {len(daily)}건이 원본 기준 {expected_n}건과 불일치"
+        )
+    else:
+        checks.append(f"일별 길이 정합: {expected_n}건 일치")
+
+        # 4b: 날짜 — 원본 index(오름차순)와 순서까지 그대로인가.
+        expected_dates = [idx.date().isoformat() for idx in recent_daily.index]
+        claimed_dates = [row.get("date") for row in daily]
+        if claimed_dates != expected_dates:
+            failures.append("일별 날짜 정합: daily 날짜열이 원본 index 와 불일치")
+        else:
+            checks.append("일별 날짜 정합: 날짜열·순서가 원본과 일치")
+
+        # 4c: 값 — 각 날짜·각 주체 값이 원본과 일치하는가 (규칙 4의 본체).
+        mismatches = [
+            f"{row['date']} {subject}"
+            for row, (_, orig) in zip(daily, recent_daily.iterrows())
+            for subject in sig.SUBJECTS
+            if not math.isclose(
+                row.get(subject, float("nan")), float(orig[subject]),
+                rel_tol=1e-9, abs_tol=1e-6,
+            )
+        ]
+        if mismatches:
+            failures.append(
+                f"일별 값 정합: {len(mismatches)}개 셀이 원본과 불일치"
+                f" (첫 건: {mismatches[0]})"
+            )
+        else:
+            checks.append(f"일별 값 정합: {expected_n}일 × 3주체 전 셀이 원본과 일치")
+
+        # 4d: 교차 정합 — daily 마지막 RECENT_DAYS 합이, 강도 계산이 쓴
+        #     같은 창(recent)의 합과 맞는가. 차트(일별)와 게이지(강도)가
+        #     서로 딴소리하는 것을 구조적으로 차단한다.
+        window = daily[-len(recent):]
+        cross_bad = [
+            subject for subject in sig.SUBJECTS
+            if not math.isclose(
+                sum(row.get(subject, 0.0) for row in window),
+                float(recent[subject].sum()),
+                rel_tol=1e-9, abs_tol=1e-6,
+            )
+        ]
+        if cross_bad:
+            failures.append(
+                f"일별-강도 교차 정합: {', '.join(cross_bad)} 의 {len(recent)}일 합이"
+                " 강도 계산 창과 불일치"
+            )
+        else:
+            checks.append(f"일별-강도 교차 정합: 3주체 {len(recent)}일 합 일치")
+
     return GateResult(
         gate=2,
         passed=(len(failures) == 0),

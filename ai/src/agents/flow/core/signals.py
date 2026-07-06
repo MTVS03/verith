@@ -120,6 +120,26 @@ def calc_alignment(df: pd.DataFrame) -> str:
     return "엇갈림"
 
 
+def extract_daily(df: pd.DataFrame) -> list[dict]:
+    """최근 TREND_DAYS일의 일별 순매수 팩트 목록 (오름차순, 최근이 마지막).
+
+    원리: 계산이 아니라 "있는 값의 직렬화".
+      df 의 행을 dict 목록으로 옮겨 담을 뿐, 어떤 값도 만들거나 바꾸지 않는다
+      (단위도 df 그대로 백만원). 일별 차트가 쓸 팩트를 signals dict(검증된
+      팩트 컨테이너)에 실어 보내기 위한 것 — 이 배열도 게이트2 규칙 4 가
+      원본 df 와 대조한다. 거래대금은 차트가 안 쓰므로 싣지 않는다(컨테이너
+      최소주의: 표시할 팩트만).
+    """
+    recent = df.tail(config.TREND_DAYS)
+    return [
+        {
+            "date": idx.date().isoformat(),
+            **{subject: float(row[subject]) for subject in SUBJECTS},
+        }
+        for idx, row in recent.iterrows()
+    ]
+
+
 def compute_signals(df: pd.DataFrame) -> dict[str, object]:
     """세 계산을 묶어 하나의 신호 dict로 반환한다.
 
@@ -129,4 +149,5 @@ def compute_signals(df: pd.DataFrame) -> dict[str, object]:
         "consecutive": calc_consecutive(df),
         "strength": calc_strength(df),
         "alignment": calc_alignment(df),
+        "daily": extract_daily(df),          # M2: 일별 순매수 팩트(차트용)
     }
