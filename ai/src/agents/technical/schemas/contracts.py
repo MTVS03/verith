@@ -12,10 +12,11 @@ HTML 렌더링·DB 저장은 이 파일 책임이 아니다(각각 frontend·bac
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .chart import ChartData
 from .intraday import IntradayChartData, IntradayContext
@@ -43,11 +44,39 @@ class _StrictModel(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 # 입력 계약 (Top Supervisor → ai) — contracts.md §1
 # ─────────────────────────────────────────────────────────────────────────────
+_TICKER_RE = re.compile(r"\d{6}")
+
+
 class TechnicalAgentInput(_StrictModel):
     ticker: str  # 6자리 종목코드. 앞자리 0 보존을 위해 반드시 str.
     query: str  # 기술적 분석 관점으로 변형된 도메인 질의
     request_id: str  # 요청 추적용 런타임 필드. 출력에 되돌려주지만 DB에는 저장하지 않음.
     as_of: datetime  # 분석 기준 시점(ISO8601). 문자열 입력을 Pydantic이 파싱.
+
+    # 의미 검증(형식 오류 = 사용자 요청 오류 → endpoint 422 VALIDATION_ERROR). allowlist 소속 검사는
+    # 여기가 아니라 supervisor 시작부(전 진입 경로 보호)에서 한다(OutOfScopeTickerError).
+    @field_validator("ticker")
+    @classmethod
+    def _ticker_is_6_digits(cls, v: str) -> str:
+        if not _TICKER_RE.fullmatch(v):
+            raise ValueError("ticker must be exactly 6 digits")
+        return v
+
+    @field_validator("query", "request_id")
+    @classmethod
+    def _not_blank(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return v
+
+    @field_validator("as_of")
+    @classmethod
+    def _as_of_not_future(cls, v: datetime) -> datetime:
+        # tz-safe 비교 — aware/naive를 각각 같은 종류의 now와 비교(normalize_end_date와 동일 원칙).
+        now = datetime.now(v.tzinfo) if v.tzinfo is not None else datetime.now()
+        if v > now:
+            raise ValueError("as_of must not be in the future")
+        return v
 
 
 # ─────────────────────────────────────────────────────────────────────────────
