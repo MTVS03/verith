@@ -204,8 +204,11 @@ CACHE_KEY_MINUTE = "ohlcv:minute:{ticker}"  # 1d 정식 지원 시 사용 (chart
 
 **구현 매핑(`feat/technical-cache-service`):** 전체 D/W/M **시계열 하나**를 timeframe별 key(`ohlcv:daily|weekly|monthly:{ticker}`)에 캐시한다. key에 as_of를 넣지 않고 **entry에 `as_of`를 저장**해, 요청 as_of와 다르면 fresh/stale 모두 쓰지 않고 miss 처리한다. entry는 `fetched_at`도 저장한다.
 - **fresh(primary 서빙)** = `fetched_at` 나이 ≤ `CACHE_FRESH_TTL_SECONDS`(=`CACHE_TTL_TODAY` 15분). 시계열이 오늘/당주/당월 봉을 포함해 가변이므로 "오늘 15분" 갱신을 freshness로 쓴다.
-- **Redis expire** = `STALE_CACHE_MAX_AGE_BY_PERIOD[tf] × 86400`(D=1일·W=7일·M=31일). 그 안엔 stale 폴백으로 재사용 가능하게 보존한다. (위 `CACHE_TTL_*=None`은 *historical-only key* 가정이라 full-series에는 이 매핑을 쓴다.)
-- **stale 폴백** = KIS 실패 시 D/W/M 모두 stale(fresh 포함)이 있으면 사용, `data_status=stale_cache`·`source="KIS (stale)"`.
+- **Redis expire** = `STALE_CACHE_MAX_AGE_BY_PERIOD[tf] × 86400`(D=1일·W=7일·M=31일, **calendar-day 기반 근사** — "거래일"은 주말/휴장로 달력일과 다를 수 있으나 MVP는 달력일로 근사한다). 그 안엔 stale 폴백으로 재사용 가능하게 보존한다. (위 `CACHE_TTL_*=None`은 *historical-only key* 가정이라 full-series에는 이 매핑을 쓴다.)
+- **stale 폴백은 KIS 통신 실패(`KisApiError`)에만** 적용한다 — envelope 오류·잘못된 as_of·OHLCV/타입/프로그래밍 오류는 stale로 덮지 않고 **전파**한다(fail-fast, technical_coding_guidelines §14).
+- **per-timeframe 복원**: KIS 실패 시 tf별로 fresh/stale을 재구성한다. **D(일봉)는 필수**(fresh/stale 없으면 KIS 예외 전파), **W/M은 optional**(없으면 빈 리스트 → regime unavailable·chart 빈 5y로 안전 처리). 하나라도 stale을 쓰면 `data_status=stale_cache`·`source="KIS (stale)"`.
+- **get 무결성**: entry의 `ticker`·`timeframe`·`as_of`가 요청과 모두 일치해야 사용(불일치=miss — 종목 혼입 차단). `fetched_at`이 naive(tz 없음)·미래·파싱 불가·age 계산 오류면 전부 miss(예외 전파 없음).
+- **official runtime wiring은 후속**: cache는 supervisor **주입식**(기본 None)이며 agent.py/AI router에서 `default_cache()` 주입·Redis lifecycle·실 Redis smoke는 별도 브랜치(AI endpoint 통합)에서 한다.
 
 ## 8. 복원력 (resilience)
 

@@ -727,6 +727,7 @@ def test_intraday_assemble_failure_logs_warning(monkeypatch, caplog):
 from src.agents.technical.config import REGEN_MAX_COUNT  # noqa: E402
 from src.agents.technical.schemas.enums import DataStatus as _DataStatus  # noqa: E402
 from src.agents.technical.services.cache_service import CacheLookup  # noqa: E402
+from src.agents.technical.services.kis_client import KisApiError  # noqa: E402
 
 
 class _FakeCache:
@@ -735,10 +736,8 @@ class _FakeCache:
     def __init__(self, entries=None):
         self._entries = dict(entries or {})
         self.sets = []
-        self.get_tfs = []
 
     def get(self, ticker, tf, as_of_id, *, now):
-        self.get_tfs.append(tf)
         e = self._entries.get(tf)
         return CacheLookup(e[0], e[1]) if e is not None else CacheLookup("miss")
 
@@ -765,10 +764,19 @@ def _recording_fetcher():
     return fetch, calls
 
 
-def _boom_fetcher(t, *, end_date=None):
-    raise RuntimeError("KIS down")
+def _kis_fail_fetcher(t, *, end_date=None):
+    raise KisApiError("KIS 최대 재시도 초과")     # 복구 가능한 KIS 통신 실패
 
 
+def _envelope_bad_fetcher(t, *, end_date=None):
+    return {"D": DAILY}                            # W/M 누락 → run_data_collect envelope ValueError
+
+
+def _type_error_fetcher(t, *, end_date=None):
+    raise TypeError("programming error")
+
+
+# ── 기본: fresh hit / miss→write / 하위호환 ────────────────────────────────────
 def test_res_cache_hit_skips_fetcher():
     fetch, calls = _recording_fetcher()
     out = _run_cache(_FakeCache(_DWM_FRESH), fetcher=fetch)
@@ -779,35 +787,77 @@ def test_res_cache_hit_skips_fetcher():
 
 def test_res_cache_miss_fetches_and_writes():
     fetch, calls = _recording_fetcher()
-    cache = _FakeCache()  # 비어있음 → miss
+    cache = _FakeCache()
     out = _run_cache(cache, fetcher=fetch)
     assert calls["n"] == 1                        # miss → KIS 1회
     assert cache.sets == ["D", "W", "M"]          # 3종 write
     assert out.source == "KIS"
 
 
-def test_res_kis_fail_uses_stale_cache():
-    out = _run_cache(_FakeCache(_DWM_STALE), fetcher=_boom_fetcher)
-    assert out.source == "KIS (stale)"            # stale 폴백
+def test_res_no_cache_is_backward_compatible():
+    fetch, calls = _recording_fetcher()
+    out = sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1)),
+                  fetcher=fetch, trace_id="t")
+    assert calls["n"] == 1 and out.source == "KIS"
+
+
+# ── stale 폴백은 KisApiError만 허용, 나머지는 전파(fail-fast) ──────────────────
+def test_res_kis_apierror_uses_stale_cache():
+    out = _run_cache(_FakeCache(_DWM_STALE), fetcher=_kis_fail_fetcher)
+    assert out.source == "KIS (stale)"
     assert out.data_status == _DataStatus.STALE_CACHE
-    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # 정상 산출
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+
+
+def test_res_envelope_error_propagates_even_with_stale():
+    with pytest.raises(ValueError):              # envelope 오류는 stale로 덮지 않음
+        _run_cache(_FakeCache(_DWM_STALE), fetcher=_envelope_bad_fetcher)
+
+
+def test_res_type_error_propagates_even_with_stale():
+    with pytest.raises(TypeError):              # 프로그래밍 오류 전파
+        _run_cache(_FakeCache(_DWM_STALE), fetcher=_type_error_fetcher)
+
+
+def test_res_bad_as_of_propagates_even_with_stale():
+    # 미래 as_of → normalize_end_date ValueError(run_data_collect 안) → stale로 덮지 않고 전파
+    future = TechnicalAgentInput(ticker=TICKER, query="q", request_id="r",
+                                 as_of="2099-01-01T00:00:00+09:00")
+    with pytest.raises(ValueError):
+        sup.run(future, llm_client=ScriptedLlm([NORM_OK, FOCUS_OK]),
+                fetcher=_kis_fail_fetcher, cache=_FakeCache(_DWM_STALE), trace_id="t")
+
+
+# ── per-timeframe stale 재구성 (D 필수 · W/M optional) ────────────────────────
+def test_res_kis_fail_d_stale_only_continues():
+    # KIS 실패 + D stale만 있음(W/M 없음) → 실패하지 않고 제한 분석 진행
+    out = _run_cache(_FakeCache({"D": ("stale", DAILY)}), fetcher=_kis_fail_fetcher)
+    assert out.source == "KIS (stale)"
+    assert out.data_status == _DataStatus.STALE_CACHE
+    assert {"3m", "1y", "5y"} <= {p.period.value for p in out.charts}  # 산출됨(W/M 빈 데이터 허용)
+
+
+def test_res_kis_fail_no_d_stale_propagates():
+    # KIS 실패 + D stale 없음(W/M만 있음) → 재구성 불가 → KIS 예외 전파
+    with pytest.raises(KisApiError):
+        _run_cache(_FakeCache({"W": ("stale", WEEKLY), "M": ("stale", MONTHLY)}), fetcher=_kis_fail_fetcher)
+
+
+def test_res_mixed_fresh_and_stale_marks_stale():
+    # D fresh + W/M stale인데 전체 fresh가 아니라 KIS 시도 → 실패 → per-tf 재구성(D fresh·W/M stale)
+    entries = {"D": ("fresh", DAILY), "W": ("stale", WEEKLY), "M": ("stale", MONTHLY)}
+    out = _run_cache(_FakeCache(entries), fetcher=_kis_fail_fetcher)
+    assert out.source == "KIS (stale)"             # 하나라도 stale이면 stale 표기
+    assert out.data_status == _DataStatus.STALE_CACHE
 
 
 def test_res_redis_down_kis_ok_uses_live():
-    # Redis get 장애는 cache_service가 miss로 흡수 → 여기선 miss 캐시로 모사. KIS 성공 → live.
+    # Redis get 장애는 cache_service가 miss로 흡수 → miss 캐시로 모사. KIS 성공 → live.
     fetch, calls = _recording_fetcher()
     out = _run_cache(_FakeCache(), fetcher=fetch)
     assert calls["n"] == 1 and out.source == "KIS"
 
 
 def test_res_redis_down_kis_fail_no_stale_propagates():
-    with pytest.raises(RuntimeError):
-        _run_cache(_FakeCache(), fetcher=_boom_fetcher)   # stale 없음 → 기존 KIS 실패 전파
-
-
-def test_res_no_cache_is_backward_compatible():
-    # cache=None(기본)이면 캐시 없이 기존 동작
-    fetch, calls = _recording_fetcher()
-    out = sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1)),
-                  fetcher=fetch, trace_id="t")
-    assert calls["n"] == 1 and out.source == "KIS"
+    with pytest.raises(KisApiError):
+        _run_cache(_FakeCache(), fetcher=_kis_fail_fetcher)   # stale 없음 → KIS 실패 전파

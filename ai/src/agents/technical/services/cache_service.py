@@ -73,18 +73,29 @@ def _serialize(ticker: str, timeframe: str, as_of_id: str,
     )
 
 
-def _deserialize(raw: bytes | str) -> tuple[str, datetime, list[OHLCV]] | None:
-    """(as_of, fetched_at, candles) 복원. 하나라도 깨지면 None(→ miss)."""
+def _deserialize(raw: bytes | str) -> dict | None:
+    """entry 복원 → {ticker, timeframe, as_of, fetched_at(datetime|None), candles}. 손상이면 None(miss).
+
+    candles(계약 재검증)·JSON은 반드시 성공해야 하고, `fetched_at` 파싱은 관용적으로 처리해
+    실패/누락 시 None을 담는다(get에서 None·naive를 miss로 판정한다)."""
     try:
         text = raw.decode() if isinstance(raw, bytes) else raw
         obj = json.loads(text)
-        as_of = obj["as_of"]
-        fetched_at = datetime.fromisoformat(obj["fetched_at"])
-        candles = [OHLCV(**c) for c in obj["candles"]]  # 계약 재검증
-        return as_of, fetched_at, candles
+        candles = [OHLCV(**c) for c in obj["candles"]]  # 계약 재검증(실패=손상)
     except Exception:  # noqa: BLE001 - 손상된 캐시는 조용히 miss(운영 안전)
         logger.warning("cache_deserialize_failed", exc_info=True)
         return None
+    try:
+        fetched_at: datetime | None = datetime.fromisoformat(obj["fetched_at"])
+    except Exception:  # noqa: BLE001 - 파싱 불가한 fetched_at은 None → get에서 miss
+        fetched_at = None
+    return {
+        "ticker": obj.get("ticker"),
+        "timeframe": obj.get("timeframe"),
+        "as_of": obj.get("as_of"),
+        "fetched_at": fetched_at,
+        "candles": candles,
+    }
 
 
 class OhlcvCache:
@@ -101,16 +112,26 @@ class OhlcvCache:
             return CacheLookup("miss")
         if raw is None:
             return CacheLookup("miss")
-        parsed = _deserialize(raw)
-        if parsed is None:
+        entry = _deserialize(raw)
+        if entry is None:
             return CacheLookup("miss")
-        entry_as_of, fetched_at, candles = parsed
-        if entry_as_of != as_of_id:  # as_of 불일치 → fresh/stale 모두 사용 금지
+        # 무결성: ticker·timeframe·as_of 모두 일치해야 사용(하나라도 다르면 miss — 종목 혼입/오배치 차단).
+        if (entry["ticker"] != ticker or entry["timeframe"] != timeframe
+                or entry["as_of"] != as_of_id):
             return CacheLookup("miss")
-        age = (now - fetched_at).total_seconds()
-        if age <= CACHE_FRESH_TTL_SECONDS:  # 시계 역전(음수)도 fresh로 포함
-            return CacheLookup("fresh", candles)
-        return CacheLookup("stale", candles)  # Redis expire가 stale 상한을 강제
+        fetched_at = entry["fetched_at"]
+        if fetched_at is None or fetched_at.tzinfo is None:  # 파싱 실패·naive(tz 없음) → miss
+            return CacheLookup("miss")
+        try:
+            age = (now - fetched_at).total_seconds()
+        except Exception:  # noqa: BLE001 - aware/naive 등 연산 오류도 miss(전파 금지)
+            logger.warning("cache_age_failed", extra={"timeframe": timeframe}, exc_info=True)
+            return CacheLookup("miss")
+        if age < 0:  # 미래 fetched_at(손상/시계 역전) → miss
+            return CacheLookup("miss")
+        if age <= CACHE_FRESH_TTL_SECONDS:
+            return CacheLookup("fresh", entry["candles"])
+        return CacheLookup("stale", entry["candles"])  # Redis expire가 stale 상한을 강제
 
     def set(self, ticker: str, timeframe: str, as_of_id: str,
             candles: Sequence[OHLCV], *, now: datetime) -> None:

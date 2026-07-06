@@ -6,7 +6,10 @@ now를 주입해 시간 의존성을 제거한다.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from src.agents.technical.config import CACHE_FRESH_TTL_SECONDS
 from src.agents.technical.schemas.ohlcv import OHLCV
@@ -28,10 +31,11 @@ def _candles(n=3):
 
 
 class FakeRedis:
-    """in-memory Redis. fail_get/fail_set로 장애를 시뮬레이션."""
+    """in-memory Redis. fail_get/fail_set로 장애를 시뮬레이션. ex(expire)도 key별로 기록."""
 
     def __init__(self, *, fail_get=False, fail_set=False):
         self.store: dict[str, str] = {}
+        self.ex_by_key: dict[str, int | None] = {}
         self.fail_get = fail_get
         self.fail_set = fail_set
         self.get_calls = 0
@@ -48,6 +52,7 @@ class FakeRedis:
         if self.fail_set:
             raise ConnectionError("redis down")
         self.store[key] = value
+        self.ex_by_key[key] = ex
 
 
 def _cache(**kw):
@@ -111,12 +116,15 @@ def test_set_failure_does_not_raise():
     _cache(fail_set=True).set("373220", "D", "latest", _candles(), now=_NOW)  # no raise
 
 
-def test_set_uses_stale_expire_seconds():
+@pytest.mark.parametrize("tf,key,ex", [
+    ("D", "ohlcv:daily:373220", 86400),        # 1일
+    ("W", "ohlcv:weekly:373220", 604800),      # 7일
+    ("M", "ohlcv:monthly:373220", 2678400),    # 31일
+])
+def test_set_uses_stale_expire_seconds(tf, key, ex):
     fake = FakeRedis()
-    # ex가 STALE_CACHE_MAX_AGE(D=1일)×86400로 설정되는지(간접): set 호출이 성공하고 값 저장됨
-    OhlcvCache(fake).set("373220", "D", "latest", _candles(), now=_NOW)
-    assert fake.store  # 저장됨
-    assert fake.set_calls == 1
+    OhlcvCache(fake).set("373220", tf, "latest", _candles(), now=_NOW)
+    assert fake.ex_by_key[key] == ex  # Redis expire = STALE_CACHE_MAX_AGE[tf] × 86400
 
 
 # ── as_of_identity ────────────────────────────────────────────────────────────
@@ -130,3 +138,56 @@ def test_as_of_identity():
 def test_default_cache_none_without_env(monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
     assert default_cache() is None
+
+
+# ── 무결성: ticker/timeframe mismatch → miss (종목 혼입 차단) ──────────────────
+def _raw_entry(*, ticker="373220", timeframe="D", as_of="latest", fetched_at, candles=None):
+    return json.dumps({
+        "ticker": ticker, "timeframe": timeframe, "as_of": as_of,
+        "fetched_at": fetched_at, "source": "KIS",
+        "candles": [c.model_dump(mode="json") for c in (candles or _candles())],
+    })
+
+
+def _put(fake, key, **entry_kw):
+    fake.store[key] = _raw_entry(**entry_kw)
+
+
+def test_ticker_mismatch_is_miss():
+    fake = FakeRedis()
+    # 373220 key에 006400 payload가 들어감 → 사용 금지
+    _put(fake, "ohlcv:daily:373220", ticker="006400", fetched_at=_NOW.isoformat())
+    assert OhlcvCache(fake).get("373220", "D", "latest", now=_NOW).status == "miss"
+
+
+def test_timeframe_mismatch_is_miss():
+    fake = FakeRedis()
+    _put(fake, "ohlcv:daily:373220", timeframe="W", fetched_at=_NOW.isoformat())
+    assert OhlcvCache(fake).get("373220", "D", "latest", now=_NOW).status == "miss"
+
+
+def test_mismatch_not_used_as_stale_either():
+    fake = FakeRedis()
+    old = (_NOW - timedelta(hours=2)).isoformat()  # 나이 오래됨(정상이면 stale)
+    _put(fake, "ohlcv:daily:373220", ticker="006400", fetched_at=old)
+    assert OhlcvCache(fake).get("373220", "D", "latest", now=_NOW).status == "miss"  # stale도 아님
+
+
+# ── fetched_at 손상/naive/future → miss (예외 전파 없음) ──────────────────────
+def test_naive_fetched_at_is_miss():
+    fake = FakeRedis()
+    _put(fake, "ohlcv:daily:373220", fetched_at="2026-07-07T00:00:00")  # tz 없음(naive)
+    assert OhlcvCache(fake).get("373220", "D", "latest", now=_NOW).status == "miss"  # TypeError 아님
+
+
+def test_invalid_fetched_at_is_miss():
+    fake = FakeRedis()
+    _put(fake, "ohlcv:daily:373220", fetched_at="not-a-datetime")
+    assert OhlcvCache(fake).get("373220", "D", "latest", now=_NOW).status == "miss"
+
+
+def test_future_fetched_at_is_miss():
+    fake = FakeRedis()
+    future = (_NOW + timedelta(hours=1)).isoformat()
+    _put(fake, "ohlcv:daily:373220", fetched_at=future)
+    assert OhlcvCache(fake).get("373220", "D", "latest", now=_NOW).status == "miss"  # 미래 → fresh 아님
