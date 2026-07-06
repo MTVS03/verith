@@ -391,23 +391,32 @@ if ticker not in BATTERY_TICKERS:
 
 ## 11. OpenAI LLM client (`feat/technical-openai-client`)
 
-실 LLM 어댑터(`services/openai_llm_client.py`)가 기존 `complete(prompt) -> str` 계약을 OpenAI **Responses API**(`responses.create`→`output_text`)로 구현할 때 쓰는 설정. **API key 값은 config에 저장하지 않고 반드시 `.env`/환경변수에서 읽는다**(`technical_coding_guidelines §2.2·§13.2`).
+실 LLM 어댑터(`services/openai_llm_client.py`)가 기존 `complete(prompt) -> str` 계약을 OpenAI **Responses API**(`responses.create`→`output_text`)로 구현할 때 쓰는 설정. **`.env` = secret + 환경별 선택값(API key·MODEL), config.py = 튜닝 상수**로 나눈다. 값의 단일 출처가 겹치지 않게 한다(`technical_coding_guidelines §2.2·§13.2`).
 
-| 상수 | 기본값 | 단위 | 의미 | 사용처 |
-|---|---|---|---|---|
-| `OPENAI_API_KEY_ENV` | `"OPENAI_API_KEY"` | 환경변수 이름 | 키 **이름**만(값 아님). `load_openai_api_key()`가 `.env`에서 값을 읽음 | `services/openai_llm_client.py` |
-| `OPENAI_MODEL` | `os.getenv("OPENAI_MODEL", "gpt-5.4-mini")` | 모델 ID | **env override 우선** — 운영/실험 모델 교체는 `.env`의 `OPENAI_MODEL`만 변경 | `services/openai_llm_client.py` |
-| `OPENAI_TIMEOUT_SECONDS` | `30.0` | 초 | 1회 호출 timeout | `services/openai_llm_client.py` |
-| `OPENAI_TEMPERATURE` | `0.0` | — | 재현성 위해 0. **`None`이면 요청 파라미터에서 생략**(모델별 미허용 대비) | `services/openai_llm_client.py` |
-| `OPENAI_MAX_OUTPUT_TOKENS` | `1200` | 토큰 | 응답 최대 토큰(보수적 기본) | `services/openai_llm_client.py` |
+**.env에서 읽는 값(`load_openai_settings()`, fail-fast — 코드에 기본값 두지 않음)**
 
-- **환경변수**: `OPENAI_API_KEY`(필수, 값은 `.env`) / `OPENAI_MODEL`(선택 override).
-- **예외 정책**: OpenAI SDK 예외(timeout·rate limit·auth·connection·API·BadRequest)는 모두 `LlmCallError`로 변환(메시지는 type 이름만 — API key·raw prompt·raw response 미포함). `OPENAI_API_KEY` 누락은 `default_openai_client()` 생성 시점의 **config error(fail-fast)** 로 `LlmCallError`와 구분한다.
+| 항목 | 환경변수 | 필수 | 의미 |
+|---|---|---|---|
+| API key | `OPENAI_API_KEY` | ✅ | 값은 `.env`에만. 코드/로그/trace/repr 미저장 |
+| 모델 | `OPENAI_MODEL` | ✅ | **단일 출처=.env**(예: `OPENAI_MODEL=gpt-5.4-mini`). 환경/실험별 교체는 `.env`만 변경. **코드 기본값 없음** — import 시점이 아니라 `.env` 로드 후 읽어야 override가 실제로 먹기 때문 |
+
+> `OPENAI_API_KEY_ENV`·`OPENAI_MODEL_ENV`는 환경변수 "이름" 상수일 뿐(값 아님). 모델은 코드에 기본값을 두면 import 시점 평가라 `.env`를 무시하므로, 일부러 `load_openai_settings()`에서 읽고 누락 시 fail-fast한다.
+
+**config.py 튜닝 상수(코드 — secret도 환경차도 아님, `KIS_TIMEOUT_SECONDS`와 같은 급. `.env`에 넣지 않는다)**
+
+| 상수 | 기본값 | 단위 | 의미 |
+|---|---|---|---|
+| `OPENAI_TIMEOUT_SECONDS` | `30.0` | 초 | 1회 호출 timeout |
+| `OPENAI_TEMPERATURE` | `0.0` | — | 재현성 위해 0. **`None`이면 요청 파라미터에서 생략**(모델별 미허용 대비) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | `1200` | 토큰 | 응답 최대 토큰(보수적 기본) |
+
+- **환경변수(.env 필수)**: `OPENAI_API_KEY`, `OPENAI_MODEL`.
+- **예외 정책**: OpenAI SDK 예외(timeout·rate limit·auth·connection·API·BadRequest)는 모두 `LlmCallError`로 변환(메시지는 type 이름만 — API key·raw prompt·raw response 미포함). `OPENAI_API_KEY`·`OPENAI_MODEL` 누락은 `default_openai_client()` 생성 시점의 **config error(fail-fast)** 로 `LlmCallError`와 구분한다.
 - **secret/trace**: raw prompt·raw response·API key·Authorization 헤더를 로그·trace·test snapshot에 남기지 않는다. 어댑터는 `model`·`last_usage`(토큰수)를 optional 노출하지만, **trace sink 배선은 이 브랜치 밖**(후속 AI endpoint 통합).
 - **테스트/실행**: `pytest`는 **network-free**(fake SDK 주입). 실제 연결은 수동 smoke(`scripts/smoke_openai_llm.py`, 비용 발생)로만 확인한다.
 - **runtime wiring**: `run_technical_agent`는 이 client를 **자동 생성하지 않는다**(계속 주입식, A안). 운영에서는 endpoint가 `default_openai_client()`를 주입한다.
 
-*연결: `config.py` §15, `services/openai_llm_client.py`, `nodes/_llm_utils.py`(`LlmCallError`·`complete` 계약)*
+*연결: `config.py` §15(`load_openai_settings`), `services/openai_llm_client.py`, `nodes/_llm_utils.py`(`LlmCallError`·`complete` 계약)*
 
 ---
 

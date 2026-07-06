@@ -51,16 +51,18 @@ class _FakeSDK:
 
 
 def _client(responses: _FakeResponses, **kw) -> OpenAiLlmClient:
+    kw.setdefault("model", "gpt-test")  # model은 필수 인자 — 테스트 기본값 주입
     return OpenAiLlmClient(_FakeSDK(responses), **kw)
 
 
-# ── 1. API key 누락 → config error(fail-fast, LlmCallError 아님) ──────────────
+# ── 1. API key/model 누락 → config error(fail-fast, LlmCallError 아님) ────────
 def test_missing_api_key_raises_config_error(monkeypatch):
     monkeypatch.setattr(config, "_find_env_file", lambda: None)  # .env 로드 차단
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
     with pytest.raises(RuntimeError) as ei:
         default_openai_client()
-    assert "OPENAI_API_KEY" in str(ei.value)
+    assert "OPENAI_API_KEY" in str(ei.value)  # 누락 항목을 명시
     assert not isinstance(ei.value, LlmCallError)  # 호출 실패가 아니라 설정 오류
 
 
@@ -145,8 +147,9 @@ def test_model_attribute_exposed():
 
 
 def test_default_client_builds_without_network(monkeypatch):
-    # load_openai_api_key를 가짜로 대체해 실제 .env/네트워크 없이 SDK 조립만 확인
+    # load_openai_settings를 가짜로 대체해 실제 .env/네트워크 없이 SDK 조립만 확인
     monkeypatch.setattr(
-        "src.agents.technical.services.openai_llm_client.load_openai_api_key", lambda: "sk-test")
-    client = default_openai_client(model="gpt-x")
-    assert isinstance(client, OpenAiLlmClient) and client.model == "gpt-x"
+        "src.agents.technical.services.openai_llm_client.load_openai_settings",
+        lambda: config.OpenAiSettings(api_key="sk-test", model="gpt-env"))
+    assert default_openai_client().model == "gpt-env"          # .env 값 사용
+    assert default_openai_client(model="gpt-x").model == "gpt-x"  # 명시 override 우선
