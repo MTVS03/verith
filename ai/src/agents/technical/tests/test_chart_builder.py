@@ -544,3 +544,103 @@ def test_box_breakout_schema_and_importance():
     assert a["label"] == "박스권 이탈 관찰"
     assert {"direction", "box_top", "box_bottom", "box_range_pct", "box_window_bars",
             "breakout_close", "breakout_pct", "volume_confirmed", "volume_ratio"} <= set(a["meta"])
+
+
+# ── cup_handle_candidate (feat/technical-chart-patterns) ────────────────────────
+def _cup_series(n, *, top=110.0, bottom_v=85.0, right_top=109.0, handle_bottom=104.0,
+                step_days=1, start=date(2025, 1, 1)) -> list[OHLCV]:
+    """컵(좌 rim→둥근 저점→우 rim)+핸들 형태의 결정론 시계열. 파라미터로 조건 위반 케이스 구성."""
+    a, b, c = int(n * 0.05), int(n * 0.46), int(n * 0.88)
+    closes = []
+    for i in range(n):
+        if i <= a:
+            p = top
+        elif i <= b:
+            p = top - (top - bottom_v) * (i - a) / (b - a)
+        elif i <= c:
+            p = bottom_v + (right_top - bottom_v) * (i - b) / (c - b)
+        else:
+            p = right_top - (right_top - handle_bottom) * (i - c) / (n - 1 - c)
+        closes.append(round(p, 2))
+    return series(closes, highs=[round(x + 1, 2) for x in closes],
+                  lows=[round(x - 1, 2) for x in closes], step_days=step_days, start=start)
+
+
+def _cup_kinds(payloads, period) -> set[str]:
+    return {a["kind"] for a in cdata(payload_of(payloads, period))["annotations"]}
+
+
+def _cup_anns_1y(daily) -> list[dict]:
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    return [a for a in anns if a["kind"] == "cup_handle_candidate"]
+
+
+def test_cup_handle_1y_daily():
+    cups = _cup_anns_1y(_cup_series(120))
+    assert cups
+    m = cups[0]["meta"]
+    assert m["lookback_bars"] == 120
+    assert cups[0]["importance"] == "medium"
+    assert 0.10 <= m["cup_depth_pct"] <= 0.40
+
+
+def test_cup_handle_5y_weekly():
+    weekly = _cup_series(78, step_days=7)
+    kinds = _cup_kinds(build_chart_payloads([], weekly, []), ChartPeriod.FIVE_YEARS)
+    assert "cup_handle_candidate" in kinds
+
+
+def test_cup_handle_excluded_on_3m():
+    # 같은 일봉 source라도 3m은 gate에서 제외, 1y는 생성
+    daily = _cup_series(120)
+    payloads = build_chart_payloads(daily, [], [])
+    assert "cup_handle_candidate" in _cup_kinds(payloads, ChartPeriod.ONE_YEAR)
+    assert "cup_handle_candidate" not in _cup_kinds(payloads, ChartPeriod.THREE_MONTHS)
+
+
+def test_cup_handle_no_lookahead_future_independent():
+    # bar 119 컵 판정은 과거 창만 사용 → 미래 봉을 더 붙여도 그대로 유지
+    base = _cup_series(120)
+    future = series([104.0] * 5, highs=[105.0] * 5, lows=[103.0] * 5,
+                    start=date(2025, 1, 1) + timedelta(days=120))
+    d_base = {a["date"] for a in _cup_anns_1y(base)}
+    d_ext = {a["date"] for a in _cup_anns_1y(base + future)}
+    assert _d(119) in d_base
+    assert _d(119) in d_ext   # 미래 봉 추가와 무관
+
+
+def test_cup_handle_rim_tolerance_fail():
+    # 우측 rim이 좌측과 너무 차이나면(회복 부족) 생성 안 됨
+    assert _cup_anns_1y(_cup_series(120, right_top=95.0, handle_bottom=92.0)) == []
+
+
+def test_cup_handle_depth_too_shallow_fail():
+    # 저점이 충분히 낮지 않으면(depth < min) 생성 안 됨
+    assert _cup_anns_1y(_cup_series(120, bottom_v=106.0, handle_bottom=108.0)) == []
+
+
+def test_cup_handle_depth_too_deep_fail():
+    # 저점이 너무 깊으면(depth > max) 생성 안 됨
+    assert _cup_anns_1y(_cup_series(120, bottom_v=50.0)) == []
+
+
+def test_cup_handle_handle_pullback_too_deep_fail():
+    # 핸들 조정이 너무 깊으면 생성 안 됨
+    assert _cup_anns_1y(_cup_series(120, handle_bottom=88.0)) == []
+
+
+def test_cup_handle_dedup_bounds_count():
+    # 큰 컵이어도 후보가 과도하게 남발되지 않는다(엄격 조건 + dedup)
+    assert len(_cup_anns_1y(_cup_series(140))) <= 3
+
+
+def test_cup_handle_schema_and_meta():
+    a = _cup_anns_1y(_cup_series(120))[0]
+    assert a["kind"] == "cup_handle_candidate"
+    assert a["label"] == "컵앤핸들 후보"
+    assert a["importance"] == "medium"
+    assert a["source"] == "code"
+    assert a["meta"]["candidate_stage"] == "handle_forming"
+    assert {"lookback_bars", "left_rim_price", "right_rim_price", "bottom_price",
+            "cup_depth_pct", "rim_tolerance_pct", "handle_pullback_pct", "handle_bars",
+            "candidate_stage", "volume_confirmed", "volume_ratio"} <= set(a["meta"])

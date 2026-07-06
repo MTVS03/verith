@@ -192,9 +192,9 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 | `rsi_oversold` | RSI 과매도 | RSI가 과매도 기준 이하 | ✅ |
 | `box_range_candidate` | 박스권 후보 | 일정 기간 가격이 제한된 범위에서 움직임 | ✅ |
 | `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 | ✅ |
-| `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 | ⏳ 후속 |
+| `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 | ✅ |
 
-크로스 kind는 MVP 구현에서 `golden_cross`/`dead_cross`로 확정한다(§8은 이동평균선 크로스 규칙을 정의한다). `box_breakout_candidate`는 **rolling box_range 이후 상/하단 이탈 후보로 구현됐다**(§12.2). `cup_handle_candidate`는 오탐 가능성이 크고 구현 난도가 높아 **아직 후속**으로 남긴다(§13 규칙은 정본으로 유지).
+크로스 kind는 MVP 구현에서 `golden_cross`/`dead_cross`로 확정한다(§8은 이동평균선 크로스 규칙을 정의한다). `box_breakout_candidate`는 rolling box_range 이후 상/하단 이탈 후보로 구현됐다(§12.2). `cup_handle_candidate`는 **1y 일봉·5y 주봉에서 후보 탐지로 구현됐다**(§13, 3m 제외·annotation-only). **전 10종 생성기 구현 완료**.
 
 패턴 관련 annotation은 확정이 아니라 **후보(candidate)**로 표기한다. 패턴 탐지는 오탐 가능성이 높으므로 "확정" 표현을 쓰지 않는다(honest scoping).
 
@@ -333,17 +333,32 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 
 ## 13. 컵앤핸들 annotation 규칙
 
-오탐 가능성이 높은 패턴이므로 MVP에서는 후보 탐지까지만 한다.
+오탐 가능성이 높은 패턴이므로 **후보 탐지까지만** 한다(돌파 확정·neckline breakout·거래량 필수 조건 없음). **v1 구현됨**(`chart_builder._cup_handle_annotations`, annotation-only — §7.1).
 
 ### 13.1 컵앤핸들 후보
 
-① 이전 고점 형성 → ② 완만한 하락 후 둥근 저점 → ③ 이전 고점 부근 회복 → ④ 짧은 조정. MVP 기본값(config.md에 정의): `CUP_LOOKBACK_DAYS = 120`, `CUP_MIN_DEPTH_PCT = 0.10`, `CUP_MAX_DEPTH_PCT = 0.40`, `HANDLE_MAX_PULLBACK_PCT = 0.15`.
+① 이전 고점(left rim) 형성 → ② 완만한 하락 후 둥근 저점(bottom) → ③ 이전 고점 부근 회복(right rim) → ④ 짧은 조정(handle). **탐색 창은 timeframe별 봉(BARS) 기준**으로 분리한다(같은 120이라도 일봉 120일·주봉 120주로 의미가 달라 `DAYS` 이름을 쓰지 않는다).
+
+**대상**: `1y`(일봉)·`5y`(주봉)만. **`3m` 제외**(창이 너무 짧음). `1d` intraday 제외. 최신+최근 후보는 현재 fetch capacity로 충분하며, **fetch lookback 확대는 보류**(§19.1) — 창 부족 초기 구간은 skip한다.
+
+**MVP 기본값(config.py §11)**:
+- `CUP_HANDLE_DAILY_LOOKBACK_BARS = 120`, `CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78`
+- `CUP_HANDLE_RIM_TOLERANCE_PCT = 0.05`(좌/우 rim 가격 차 허용)
+- `CUP_HANDLE_MIN_DEPTH_PCT = 0.10`, `CUP_HANDLE_MAX_DEPTH_PCT = 0.40`(rim 대비 깊이)
+- `CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15`(우측 rim 대비 핸들 되돌림)
+- `CUP_HANDLE_MIN_HANDLE_BARS = 5`, `CUP_HANDLE_MAX_HANDLE_BARS = 30`
+
+look-ahead 없이(창 = `source[i-lookback+1:i+1]`, 미래 봉 미참조) visible range를 rolling으로 판정한다. 거래량은 생성 gate가 아니라 `meta.volume_confirmed`/`meta.volume_ratio`로만 기록한다.
 
 ### 13.2 표시 방식
 
+importance=`medium`(장기 패턴 후보 — 5y high-only 필터에서 숨겨지지 않게, 확정 신호는 아니라 high는 과함). label은 중립 `"컵앤핸들 후보"`.
+
 ```json
-{ "kind": "cup_handle_candidate", "date": "2026-06-30", "label": "컵앤핸들 후보", "importance": "low", "source": "code",
-  "meta": { "cup_start": "2026-01-10", "cup_bottom": "2026-03-15", "cup_end": "2026-05-20", "handle_start": "2026-05-21", "handle_end": "2026-06-15" } }
+{ "kind": "cup_handle_candidate", "date": "2026-06-30", "label": "컵앤핸들 후보", "importance": "medium", "source": "code",
+  "meta": { "lookback_bars": 120, "left_rim_price": 82000.0, "right_rim_price": 81500.0, "bottom_price": 64000.0,
+            "cup_depth_pct": 0.2, "rim_tolerance_pct": 0.006, "handle_pullback_pct": 0.07, "handle_bars": 14,
+            "candidate_stage": "handle_forming", "volume_confirmed": false, "volume_ratio": 1.1 } }
 ```
 
 ---

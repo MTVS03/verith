@@ -39,7 +39,8 @@ from src.agents.technical.charts import chart_builder as cb  # noqa: E402
 from src.agents.technical.config import (  # noqa: E402
     BOX_LOOKBACK_DAYS,
     CHART_PERIOD_DAYS,
-    CUP_LOOKBACK_DAYS,
+    CUP_HANDLE_DAILY_LOOKBACK_BARS,
+    CUP_HANDLE_WEEKLY_LOOKBACK_BARS,
     MA_LONG_WINDOW,
     RSI_PERIOD,
     SUPPORT_LOOKBACK_DAYS,
@@ -62,8 +63,9 @@ ALL_KINDS = [
     "rsi_overbought", "rsi_oversold", "box_range_candidate",
     "box_breakout_candidate", "cup_handle_candidate",
 ]
-# 계약엔 있지만 chart_builder 생성기가 없는 kind (0개가 정상 — "contract exists but generator missing").
-UNIMPLEMENTED_KINDS = ["cup_handle_candidate"]
+# 계약엔 있지만 chart_builder 생성기가 없는 kind. 전 kind 구현 완료 → 비어 있음
+# (남으면 "contract exists but generator missing"으로 표시).
+UNIMPLEMENTED_KINDS: list[str] = []
 _IMPORTANCE_LEVELS = ["high", "medium", "low"]
 
 # period → 기본 candle_unit (build_chart_payloads 매핑과 동일: 3m·1y=D, 5y=W)
@@ -74,16 +76,14 @@ _PERIOD_UNIT = {
 }
 
 # capacity 기준(봉 수). 각 detector가 "최신 시점에서 계산 가능"하려면 source에 필요한 최소 봉 수.
-#   - cup_handle_weekly는 아직 config에 없다(정식 분리는 후속 커밋). 진단 로컬 placeholder다.
-_CUP_HANDLE_WEEKLY_REQUIRED_BARS = 78  # diagnostic-local (config CUP_*_WEEKLY 분리는 step 4)
 _REQUIRED_BARS = {
     "ma_cross_required_bars": MA_LONG_WINDOW + 1,          # 두 MA + 직전봉 비교
     "rsi_required_bars": RSI_PERIOD + 1,                   # 와일더: period+1
     "volume_required_bars": VOLUME_AVG_WINDOW,
     "support_resistance_required_bars": SUPPORT_LOOKBACK_DAYS,
     "box_required_bars": BOX_LOOKBACK_DAYS,
-    "cup_handle_daily_required_bars": CUP_LOOKBACK_DAYS,   # 기존 config(일봉 proxy)
-    "cup_handle_weekly_required_bars": _CUP_HANDLE_WEEKLY_REQUIRED_BARS,
+    "cup_handle_daily_required_bars": CUP_HANDLE_DAILY_LOOKBACK_BARS,
+    "cup_handle_weekly_required_bars": CUP_HANDLE_WEEKLY_LOOKBACK_BARS,
 }
 
 
@@ -99,6 +99,9 @@ def _pre_dedup_annotations(period: ChartPeriod, source: list[OHLCV]) -> list[dic
     rsis = calculate_rsi(source)
     vol_avg = calculate_volume_average(source)
     tv_avg = calculate_trading_value_average(source)
+    unit = _PERIOD_UNIT[period]
+    cup = (cb._cup_handle_annotations(source, start, candle_unit=unit, vol_avg=vol_avg)
+           if period in (ChartPeriod.ONE_YEAR, ChartPeriod.FIVE_YEARS) else [])
     return (
         cb._cross_annotations(source, mas, start)
         + cb._volume_spike_annotations(source, vol_avg, tv_avg, start)
@@ -106,6 +109,7 @@ def _pre_dedup_annotations(period: ChartPeriod, source: list[OHLCV]) -> list[dic
         + cb._rsi_annotations(source, rsis, start)
         + cb._box_range_annotations(source, start)
         + cb._box_breakout_annotations(source, start, vol_avg)
+        + cup
     )
 
 

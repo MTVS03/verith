@@ -297,10 +297,15 @@ TRADING_VALUE_SPIKE_MULTIPLIER = 2.0   # 거래대금 급증 배수
 BOX_LOOKBACK_DAYS = 40                 # 박스권 탐색 기간
 BOX_RANGE_THRESHOLD_PCT = 0.12         # 박스권 상·하단 범위 허용 폭
 BOX_MIN_TOUCH_COUNT = 2                # 박스권 왕복 최소 횟수
-CUP_LOOKBACK_DAYS = 120                # 컵앤핸들 탐색 기간
-CUP_MIN_DEPTH_PCT = 0.10               # 컵 최소 깊이
-CUP_MAX_DEPTH_PCT = 0.40               # 컵 최대 깊이
-HANDLE_MAX_PULLBACK_PCT = 0.15         # 핸들 최대 되돌림
+# 컵앤핸들 후보 — 탐색 창은 timeframe별 봉(BARS) 기준(1y 일봉·5y 주봉, 3m 제외). chart_annotation_spec §13.
+CUP_HANDLE_DAILY_LOOKBACK_BARS = 120       # 1y 일봉 탐색 창(봉)
+CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78       # 5y 주봉 탐색 창(봉)
+CUP_HANDLE_RIM_TOLERANCE_PCT = 0.05        # 좌/우 rim 가격 차 허용
+CUP_HANDLE_MIN_DEPTH_PCT = 0.10            # 컵 최소 깊이(rim 대비)
+CUP_HANDLE_MAX_DEPTH_PCT = 0.40            # 컵 최대 깊이
+CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15  # 핸들 최대 되돌림
+CUP_HANDLE_MIN_HANDLE_BARS = 5             # 핸들 최소 길이(봉)
+CUP_HANDLE_MAX_HANDLE_BARS = 30            # 핸들 최대 길이(봉)
 
 # annotation 중복 제거 창 — 달력일이 아니라 candle(봉) index 거리 기준(주말·휴장 왜곡 방지).
 # chart_annotation_spec §8.4의 "거래일/4주"를 봉 개수로 표현. 5y는 주봉이라 "4주"=4봉.

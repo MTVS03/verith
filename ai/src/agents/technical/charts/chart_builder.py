@@ -10,9 +10,10 @@
   - annotation은 전부 코드가 생성한다(source="code"). label은 코드 템플릿(투자 권유 표현 없음).
   - D→W/M 리샘플을 하지 않는다. 5y는 주봉 candle을 그대로 쓴다.
 
-구현 annotation: golden_cross·dead_cross·volume_spike·support_touch·resistance_touch·
-rsi_overbought·rsi_oversold·box_range_candidate·box_breakout_candidate. cup_handle은 후속(제외).
-support/resistance·box_range·box_breakout은 visible range 전체를 rolling으로 판정한다(look-ahead 없음).
+구현 annotation(10종): golden_cross·dead_cross·volume_spike·support_touch·resistance_touch·
+rsi_overbought·rsi_oversold·box_range_candidate·box_breakout_candidate·cup_handle_candidate.
+support/resistance·box_range·box_breakout·cup_handle은 visible range 전체를 rolling으로 판정한다
+(look-ahead 없음). cup_handle은 1y(일봉)·5y(주봉)만(3m 제외). 패턴 후보는 annotation-only(signal 미반영).
 """
 
 from __future__ import annotations
@@ -26,6 +27,14 @@ from ..config import (
     BOX_MIN_TOUCH_COUNT,
     BOX_RANGE_THRESHOLD_PCT,
     CHART_PERIOD_DAYS,
+    CUP_HANDLE_DAILY_LOOKBACK_BARS,
+    CUP_HANDLE_MAX_DEPTH_PCT,
+    CUP_HANDLE_MAX_HANDLE_BARS,
+    CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT,
+    CUP_HANDLE_MIN_DEPTH_PCT,
+    CUP_HANDLE_MIN_HANDLE_BARS,
+    CUP_HANDLE_RIM_TOLERANCE_PCT,
+    CUP_HANDLE_WEEKLY_LOOKBACK_BARS,
     KIS_PERIOD_DAILY,
     KIS_PERIOD_WEEKLY,
     MA_LONG_WINDOW,
@@ -60,6 +69,7 @@ _LABELS = {
     "rsi_oversold": "RSI 과매도",
     "box_range_candidate": "박스권 후보",
     "box_breakout_candidate": "박스권 이탈 관찰",
+    "cup_handle_candidate": "컵앤핸들 후보",
 }
 
 # 골든/데드 크로스 판정 MA 조합 (config 역할 상수, chart_annotation_spec §8.2).
@@ -139,6 +149,9 @@ def _build_chart_data(period: ChartPeriod, candle_unit: str, source: Sequence[OH
         "volume": _volume_subchart(source, vol_avg, start),
     }
 
+    # 컵앤핸들은 1y(일봉)·5y(주봉)만 — 3m은 창이 너무 짧아 제외(chart_annotation_spec §13).
+    cup = (_cup_handle_annotations(source, start, candle_unit=candle_unit, vol_avg=vol_avg)
+           if period in (ChartPeriod.ONE_YEAR, ChartPeriod.FIVE_YEARS) else [])
     annotations = (
         _cross_annotations(source, mas, start)
         + _volume_spike_annotations(source, vol_avg, tv_avg, start)
@@ -146,6 +159,7 @@ def _build_chart_data(period: ChartPeriod, candle_unit: str, source: Sequence[OH
         + _rsi_annotations(source, rsis, start)
         + _box_range_annotations(source, start)
         + _box_breakout_annotations(source, start, vol_avg)
+        + cup
     )
     date_to_index = {bar.date: i for i, bar in enumerate(source)}
     annotations = _finalize_annotations(annotations, ANNOTATION_DEDUP_BARS[period.value], date_to_index)
@@ -400,6 +414,97 @@ def _box_breakout_annotations(source: Sequence[OHLCV], start: int, vol_avg: list
             "volume_confirmed": bool(vol_ratio is not None and vol_ratio >= VOLUME_SPIKE_MULTIPLIER),
             "volume_ratio": vol_ratio,
         }))
+    return anns
+
+
+def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_avg: list) -> dict | None:
+    """`source[end_i]`를 끝으로 하는 직전 `lookback`봉 창(현재봉 포함, look-ahead 없음)이 컵앤핸들
+    **후보** 형태면 annotation dict, 아니면 None(chart_annotation_spec §13). 미래 봉은 보지 않는다.
+
+    보수적 결정론 판정: ① left_rim=앞 30% 최고 high ② bottom=전체 최저 low(중앙부·left_rim 이후)
+    ③ right_rim=bottom 이후 최고 high(핸들 최소 여지 남김) → rim 차 ≤tol · depth∈[min,max] ·
+    handle 길이∈[min,max]·되돌림 ≤max·handle 저점이 컵 깊이 절반 위·최신 close가 handle~rim 근처.
+    **돌파(neckline breakout)는 요구하지 않는다**(관찰 후보). 거래량은 gate가 아니라 meta로만 남긴다.
+    """
+    lo_i = end_i - lookback + 1
+    if lo_i < 0:  # 창(lookback봉)을 못 채우는 초기 구간 skip
+        return None
+    highs = [float(source[k].high) for k in range(lo_i, end_i + 1)]
+    lows = [float(source[k].low) for k in range(lo_i, end_i + 1)]
+    last_close = float(source[end_i].close)
+    n = len(highs)  # == lookback
+
+    left_end = max(1, n * 3 // 10)
+    left_rim_idx = max(range(left_end), key=lambda k: highs[k])
+    left_rim = highs[left_rim_idx]
+    bottom_idx = min(range(n), key=lambda k: lows[k])
+    bottom = lows[bottom_idx]
+    if bottom_idx <= left_rim_idx or not (0.3 <= bottom_idx / (n - 1) <= 0.7):
+        return None  # 저점이 좌측 rim 이후·중앙부여야 컵 모양
+
+    right_end = n - CUP_HANDLE_MIN_HANDLE_BARS  # 우측 rim 뒤 핸들 최소 확보
+    if right_end <= bottom_idx + 1:
+        return None
+    right_rim_idx = max(range(bottom_idx + 1, right_end), key=lambda k: highs[k])
+    right_rim = highs[right_rim_idx]
+    handle_bars = (n - 1) - right_rim_idx
+    if not (CUP_HANDLE_MIN_HANDLE_BARS <= handle_bars <= CUP_HANDLE_MAX_HANDLE_BARS):
+        return None
+    if left_rim <= 0 or abs(left_rim - right_rim) / left_rim > CUP_HANDLE_RIM_TOLERANCE_PCT:
+        return None  # 좌/우 rim 회복(가격 차 tolerance)
+
+    rim = min(left_rim, right_rim)
+    if rim <= 0:
+        return None
+    depth = (rim - bottom) / rim
+    if not (CUP_HANDLE_MIN_DEPTH_PCT <= depth <= CUP_HANDLE_MAX_DEPTH_PCT):
+        return None
+
+    handle_low = min(lows[right_rim_idx + 1:])
+    handle_pullback = (right_rim - handle_low) / right_rim
+    if handle_pullback > CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT:
+        return None
+    if handle_low <= bottom + (rim - bottom) * 0.5:
+        return None  # 핸들 저점이 컵 저점보다 충분히 위(핸들이 컵만큼 깊으면 무효)
+    if not (handle_low <= last_close <= right_rim * (1 + CUP_HANDLE_RIM_TOLERANCE_PCT)):
+        return None  # 최신 close가 handle 안쪽~rim 근처(돌파 미요구)
+
+    vol_ratio = None
+    avg = vol_avg[end_i] if end_i < len(vol_avg) else None
+    if avg:
+        vol_ratio = round(float(source[end_i].volume) / avg, 2)
+    return _ann("cup_handle_candidate", source[end_i].date, right_rim, "medium", {
+        "lookback_bars": lookback,
+        "left_rim_price": left_rim,
+        "right_rim_price": right_rim,
+        "bottom_price": bottom,
+        "cup_depth_pct": round(depth, 4),
+        "rim_tolerance_pct": round(abs(left_rim - right_rim) / left_rim, 4),
+        "handle_pullback_pct": round(handle_pullback, 4),
+        "handle_bars": handle_bars,
+        "candidate_stage": "handle_forming",
+        # 거래량은 생성 조건이 아니라 confirmation 정보. 기존 VOLUME_SPIKE_MULTIPLIER 재사용.
+        "volume_confirmed": bool(vol_ratio is not None and vol_ratio >= VOLUME_SPIKE_MULTIPLIER),
+        "volume_ratio": vol_ratio,
+    })
+
+
+def _cup_handle_annotations(
+    source: Sequence[OHLCV], start: int, *, candle_unit: str, vol_avg: list,
+) -> list[dict]:
+    """visible range의 각 봉을 창 끝점으로 **rolling** 컵앤핸들 후보를 생성한다(look-ahead 없음).
+
+    lookback은 timeframe별 BARS: 일봉=`CUP_HANDLE_DAILY_LOOKBACK_BARS`, 주봉=`..._WEEKLY_...`.
+    호출은 1y(일봉)·5y(주봉)에서만 한다(3m 제외 — 창이 너무 짧음). 창 부족 초기 구간은 skip,
+    연속 유사 후보는 dedup이 정리한다. annotation-only(signal 미반영).
+    """
+    lookback = CUP_HANDLE_WEEKLY_LOOKBACK_BARS if candle_unit == "W" else CUP_HANDLE_DAILY_LOOKBACK_BARS
+    anns: list[dict] = []
+    first = max(start, lookback - 1)  # 초기 lookback 부족 구간 skip
+    for i in range(first, len(source)):
+        ann = _cup_handle_at(source, i, lookback=lookback, vol_avg=vol_avg)
+        if ann is not None:
+            anns.append(ann)
     return anns
 
 

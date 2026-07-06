@@ -53,13 +53,9 @@ def test_each_period_has_required_keys():
 
 # ── 미구현 kind 표시 ──────────────────────────────────────────────────────────
 def test_unimplemented_kinds_flagged():
+    # 전 10종 생성기 구현 완료 → 미구현 목록은 비어 있어야 한다.
     for p in _result()["periods"]:
-        missing = {m["kind"] for m in p["missing_or_unimplemented_kinds"]}
-        assert missing == {"cup_handle_candidate"}   # box_breakout은 이제 구현됨
-        for m in p["missing_or_unimplemented_kinds"]:
-            assert m["reason"] == "contract exists but generator missing"
-        # 미구현 kind는 반드시 0개
-        assert p["annotation_count_by_kind"]["cup_handle_candidate"] == 0
+        assert p["missing_or_unimplemented_kinds"] == []
 
 
 # ── count shape ───────────────────────────────────────────────────────────────
