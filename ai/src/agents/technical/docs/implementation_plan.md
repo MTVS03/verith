@@ -200,3 +200,23 @@ src/ai/
 | `api_spec.md` | API (api 모듈 기준) |
 | `prompts.md` | LLM 프롬프트 (prompts 모듈 기준) |
 | `chart_annotation_spec.md` | 차트 overlays·subcharts·annotations 구현 기준 (chart_builder) |
+
+---
+
+## 8. 개발용 수동 시각 QA 도구 (Streamlit lab)
+
+`devtools/streamlit_technical_lab.py` 는 **프론트 구현 전** chart payload·KIS 데이터가 화면에서 쓸 만한지 사람이 눈으로 확인하는 **수동 시각 QA 도구**다(자동 테스트 아님).
+
+- 데이터: **real KIS**(`services/kis_client.fetch_multi_timeframe_ohlcv`) + **fake LLM**(payload-aware, 검증 ③ 우회 없음).
+- 진입점: 공식 `agent.run_technical_agent()` 만 호출(노드 직접 호출·production 로직 수정 없음).
+- KIS 이중 호출 회피: raw D/W/M 를 먼저 조회해 `st.session_state` 에 담고, agent 실행 시 injected fetcher 로 같은 데이터를 재사용한다. **이 session_state 는 production cache(Redis/`cache_service`)가 아니라 수동 QA용 임시 상태다.**
+- 렌더링: 기본 Streamlit 차트(line/bar) 중심. plotly·candlestick 은 이번 범위 밖.
+- 저장: 디스크 미기록. `st.download_button` 으로 output JSON 만 내려받는다. secret 값은 화면에 절대 표시하지 않고 존재 여부만 OK/MISSING.
+- **pytest/CI 에 포함하지 않는다**(real KIS env 필요). streamlit 은 dev dependency.
+
+실행:
+
+```bash
+cd ai
+uv run streamlit run src/agents/technical/devtools/streamlit_technical_lab.py
+```
