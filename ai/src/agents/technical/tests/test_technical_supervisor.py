@@ -338,3 +338,60 @@ def test_regen_count_matches_config():
             fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
     # normalize + focus + (1차 interpret + REGEN_MAX_COUNT 재생성)
     assert len(client.prompts) == 2 + (1 + REGEN_MAX_COUNT)
+
+
+def _fetcher(t, *, end_date=None):
+    return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+
+
+# ── 미세 갭 1: REGEN_MAX_COUNT=0이면 regenerate 호출이 없어야 한다 ───────────
+def test_regen_max_count_zero_skips_regenerate(monkeypatch):
+    monkeypatch.setattr(sup, "REGEN_MAX_COUNT", 0)
+    # 1차 interpret 검증 실패(INTERP_BAD). 응답을 3개만 준다 — regenerate가 호출되면 pop 실패로 드러남.
+    client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD])
+    out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
+    assert len(client.prompts) == 3  # normalize + focus + interpret 1회 (regenerate 없음)
+    assert out.interpretation.source == GenerationSource.TEMPLATE_FALLBACK
+    assert out.verification.outcome == out.verification.outcome.TEMPLATE_FALLBACK
+    assert out.verification.regen_count == 0
+
+
+def test_regen_max_count_one_regenerates_once(monkeypatch):
+    monkeypatch.setattr(sup, "REGEN_MAX_COUNT", 1)
+    client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
+    assert len(client.prompts) == 4  # normalize + focus + interpret + regenerate 1회
+    assert out.verification.regen_count == 1
+
+
+# ── 미세 갭 2: analysis_focus가 바뀌어도 코드 확정값은 불변 ──────────────────
+def test_focus_change_does_not_alter_confirmed_values():
+    focus_a = json.dumps({"analysis_focus": ["trend"], "focus_summary": "추세를 봅니다."},
+                         ensure_ascii=False)
+    focus_b = json.dumps({"analysis_focus": ["momentum", "volume"], "focus_summary": "모멘텀과 거래량을 봅니다."},
+                         ensure_ascii=False)
+
+    def _run_with_focus(focus_json):
+        client = ScriptedLlm([NORM_OK, focus_json, INTERP_BAD, INTERP_BAD])
+        out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
+        return out, client.prompts[2]  # prompts[2] = interpret payload
+
+    out_a, interp_prompt_a = _run_with_focus(focus_a)
+    out_b, interp_prompt_b = _run_with_focus(focus_b)
+
+    # focus hint는 interpret payload에 반영되고 서로 다르다
+    assert "trend" in interp_prompt_a and "momentum" in interp_prompt_b
+    assert interp_prompt_a != interp_prompt_b
+
+    # 하지만 코드 확정값(regime·signal·technical_signals value/metrics/weight·risk·chart)은 불변
+    assert out_a.regime == out_b.regime
+    assert out_a.signal == out_b.signal
+    assert out_a.risk == out_b.risk
+    assert out_a.charts == out_b.charts
+    a_by = {ts.indicator: ts for ts in out_a.technical_signals}
+    b_by = {ts.indicator: ts for ts in out_b.technical_signals}
+    assert a_by.keys() == b_by.keys()
+    for ind, ts_a in a_by.items():
+        ts_b = b_by[ind]
+        assert (ts_a.signal, ts_a.value, ts_a.metrics, ts_a.weight) == \
+               (ts_b.signal, ts_b.value, ts_b.metrics, ts_b.weight)
