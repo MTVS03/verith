@@ -383,7 +383,7 @@ D/W/M 일·주·월봉과 **1D 분봉은 완전히 다른 API**다. 일/주/월 
 
 ### 12.9 실측 결과 (manual smoke)
 
-`scripts/smoke_intraday_minute.py`로 실 KIS 응답을 확인했다. **핵심 매핑·페이징 가정은 모두 실측 확인됨**(red flag 없음).
+`src/agents/technical/scripts/smoke_intraday_minute.py`로 실 KIS 응답을 확인했다. **핵심 매핑·페이징 가정은 모두 실측 확인됨**(red flag 없음).
 
 **실행:** ticker `373220`(LG에너지솔루션), executed_at `2026-07-06T19:47`(after-hours), rt_cd `0`·msg_cd `MCA00000`.
 

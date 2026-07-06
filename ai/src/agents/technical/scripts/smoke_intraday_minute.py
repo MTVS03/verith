@@ -212,7 +212,14 @@ def main() -> int:
         return 1
 
     as_of = datetime.fromisoformat(args.as_of) if args.as_of else None
-    input_hour = kc._resolve_input_hour(as_of, args.input_hour)
+    # input_hour는 네트워크 호출 전에 검증한다(6자리 + 실제 시각). 잘못되면 KIS 호출 없이 즉시 실패.
+    try:
+        input_hour = kc._resolve_input_hour(as_of, args.input_hour)
+    except kc.KisFieldError as exc:
+        print(f"[smoke] --input-hour 값이 유효하지 않습니다: {exc} "
+              "(HHMMSS 6자리 실제 시각, 예: 093000). KIS 호출을 하지 않고 종료합니다.",
+              file=sys.stderr)
+        return 1
     rate_n = max(3, min(5, args.rate_n))  # 3~5로 clamp (과도 금지)
     executed_at = datetime.now().isoformat(timespec="seconds")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")

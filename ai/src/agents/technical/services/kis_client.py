@@ -511,16 +511,26 @@ def fetch_multi_timeframe_ohlcv(
 # ─────────────────────────────────────────────────────────────────────────────
 # 주식당일분봉조회 (kis_mapping §12) — output2 → IntradayCandle, output1 → 메타데이터
 # ─────────────────────────────────────────────────────────────────────────────
+def _validate_hhmmss(value: object, *, field: str) -> str:
+    """'HHMMSS' 6자리 + 실제 시각(00:00:00–23:59:59) 검증. 통과 시 정규화 문자열 반환, 아니면 KisFieldError.
+
+    6자리 형식만으로는 '256000'(25시)·'126099'(60분/99초) 같은 비시각을 걸러내지 못하므로
+    strptime으로 실제 시각인지 확인한다(입력·응답 파싱 공통). 네트워크 호출 전에 fail-fast하는 데 쓴다.
+    """
+    text = str(value).strip()
+    if not _HHMMSS_RE.match(text):
+        raise KisFieldError(f"{field} 형식 오류 ({value!r}), 'HHMMSS' 6자리 기대")
+    try:
+        datetime.strptime(text, "%H%M%S")  # 실제 시각 검증(240000·256000·126099 등 거부)
+    except ValueError as exc:
+        raise KisFieldError(f"존재하지 않는 시각 ({field}={value!r})") from exc
+    return text
+
+
 def _to_intraday_timestamp(bsop_date: object, cntg_hour: object) -> str:
     """KIS 'YYYYMMDD' + 'HHMMSS' → IntradayCandle.timestamp 'YYYY-MM-DDTHH:MM:SS'."""
     iso_date = _to_iso_date(bsop_date, KIS_MIN_FIELD_DATE)  # 8자리·달력 검증 재사용
-    hh = str(cntg_hour).strip()
-    if not _HHMMSS_RE.match(hh):
-        raise KisFieldError(f"체결시각 형식 오류 ({KIS_MIN_FIELD_HOUR}={cntg_hour!r}), 'HHMMSS' 6자리 기대")
-    try:
-        datetime.strptime(hh, "%H%M%S")  # 실제 시각 검증(256000 등 거부)
-    except ValueError as exc:
-        raise KisFieldError(f"존재하지 않는 체결시각 ({KIS_MIN_FIELD_HOUR}={cntg_hour!r})") from exc
+    hh = _validate_hhmmss(cntg_hour, field=KIS_MIN_FIELD_HOUR)  # 6자리 + 실제 시각 검증
     return f"{iso_date}T{hh[0:2]}:{hh[2:4]}:{hh[4:6]}"
 
 
@@ -601,9 +611,8 @@ class IntradayFetchResult:
 def _resolve_input_hour(as_of: date | datetime | None, input_hour: str | None) -> str:
     """FID_INPUT_HOUR_1(HHMMSS). input_hour 우선, 없으면 as_of 시각, 그것도 없으면 현재 시각."""
     if input_hour is not None:
-        if not _HHMMSS_RE.match(input_hour):
-            raise ValueError(f"input_hour는 'HHMMSS' 6자리여야 합니다: {input_hour!r}")
-        return input_hour
+        # 6자리 형식뿐 아니라 실제 시각까지 검증해 네트워크 호출 전에 fail-fast(256000 등 거부).
+        return _validate_hhmmss(input_hour, field="input_hour")
     if isinstance(as_of, datetime):
         return as_of.strftime("%H%M%S")
     return datetime.now().strftime("%H%M%S")
