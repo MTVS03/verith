@@ -163,6 +163,7 @@ def _build_chart_data(period: ChartPeriod, candle_unit: str, source: Sequence[OH
     )
     date_to_index = {bar.date: i for i, bar in enumerate(source)}
     annotations = _finalize_annotations(annotations, ANNOTATION_DEDUP_BARS[period.value], date_to_index)
+    annotations = _apply_period_importance_policy(annotations, period=period)
 
     return {"candle_unit": candle_unit, "candles": candles,
             "overlays": overlays, "subcharts": subcharts, "annotations": annotations}
@@ -506,6 +507,33 @@ def _cup_handle_annotations(
         if ann is not None:
             anns.append(ann)
     return anns
+
+
+# 5y period-aware importance 승격 정책 (chart_annotation_spec §4.1·§14).
+# 5y는 프론트 기본 표시가 high 중심이라 medium이 대부분이면 대부분 숨겨진다(실측: 5개 종목 공통).
+# frontend를 바꾸지 않는 대신 backend에서 **장기·구조적 패턴 후보만** high로 선별 승격한다.
+# tactical/보조 이벤트(S/R touch·volume·RSI·cross)는 medium 유지(과밀 방지) — 전체 승격 금지.
+_FIVE_YEAR_IMPORTANCE_PROMOTION = {
+    "cup_handle_candidate": "high",       # 장기 패턴 후보(사용자 핵심 기대) — annotation-only 유지
+    "box_breakout_candidate": "high",     # 박스권 이탈은 장기 차트에서 중요 이벤트(매수/확정 아님)
+    "box_range_candidate": "medium",      # setup 성격 — breakout보다 낮게(low→medium)
+}
+
+
+def _apply_period_importance_policy(annotations: list[dict], *, period: ChartPeriod) -> list[dict]:
+    """period별 importance 승격. **5y에서만** 장기 패턴 후보를 선별 승격하고 3m/1y는 그대로 둔다.
+
+    dedup 이후 최종 리스트에 적용한다(생성 로직·dedup 무영향, importance는 dedup 기준이 아님).
+    annotation kind/label/meta/date/price는 절대 바꾸지 않고 importance만 조정한다. signal_score·
+    final_regime·top-level 값과 무관하다(chart annotation 표시 정책 전용).
+    """
+    if period is not ChartPeriod.FIVE_YEARS:
+        return annotations
+    for ann in annotations:
+        promoted = _FIVE_YEAR_IMPORTANCE_PROMOTION.get(ann["kind"])
+        if promoted is not None:
+            ann["importance"] = promoted
+    return annotations
 
 
 def _finalize_annotations(annotations: list[dict], dedup_bars: int, date_to_index: dict[str, int]) -> list[dict]:

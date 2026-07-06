@@ -106,15 +106,26 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 **실측(diagnostics, 373220 · `scripts/diagnose_chart_annotations.py`)**: `5y`에서 annotation 29개 중 **high=4, medium=25**였다. **`5y`를 high 중심으로만 표시하면 대부분의 annotation이 숨겨진다**(29개 중 4개만 표시 = 86% 숨김). 반면 `1y`는 35개(high=5, medium=30)라 high+medium이면 전부 보인다. 즉 "전략이 안 보인다"의 큰 축은 봉 부족이 아니라 **표시 정책(importance 필터)** 이다.
 
-**권장 표시 정책 초안** (importance 정본은 §14):
+**표시 정책** (importance 정본은 §14):
 
 | 기간 | 권장 기본 표시 | 비고 |
 | --- | --- | --- |
-| `3m` | high + medium 중심 | low는 UI 옵션/보조 토글 대상 |
-| `1y` | high + medium 기본 | box/cup 후보가 low면 기본 표시에서 빠질 수 있어 **importance 재검토 대상** |
-| `5y` | **high + selected medium** | high-only는 annotation을 지나치게 숨김(실측). 장기 패턴 후보(`cup_handle_candidate`·`box_breakout_candidate`)는 **조건부 medium 이상 승격** 검토 |
+| `3m` | high + medium 중심 | low는 UI 옵션/보조 토글 대상. **importance 코드값 미변경** |
+| `1y` | high + medium 기본 | high+medium이면 실측상 전부 표시됨. **importance 코드값 미변경** |
+| `5y` | **high + selected medium** | high-only는 annotation을 지나치게 숨김(실측 5종 종목: high 3~4 / medium 37~56). backend에서 **장기·구조 패턴 후보만 high 승격**(아래 §4.2)으로 대응 |
 
-> **이번 커밋 범위**: 위는 **문서 정책 정리**다. 코드의 importance 값·프론트 렌더링은 **바꾸지 않는다**. 실제 조정은 후속 `feat(technical): retier annotation importance`(+ 프론트 정책)에서 분리해 진행한다.
+### 4.2 5y period-aware importance 승격 (구현됨)
+
+frontend를 바꾸지 않는 현실적 조치로, **5y에서만** backend가 장기·구조 패턴 후보의 importance를 선별 승격한다(`chart_builder._apply_period_importance_policy`, dedup 이후 최종 리스트에 적용 — 생성 로직·dedup 무영향). **3m/1y는 완전 불변**이며 importance 코드값을 바꾸지 않는다.
+
+| kind | 3m/1y | **5y 승격** | 근거 |
+| --- | --- | --- | --- |
+| `cup_handle_candidate` | medium | **high** | 장기 패턴 후보(사용자 핵심 기대) |
+| `box_breakout_candidate` | medium | **high** | 박스권 이탈은 장기 차트에서 중요 이벤트(매수/확정 아님) |
+| `box_range_candidate` | low | **medium** | setup 성격 — breakout보다 낮게 |
+| `support_touch`·`resistance_touch`·`volume_spike`·`rsi_overbought`·`rsi_oversold`·크로스 | (유지) | **유지** | tactical/보조 이벤트 — 전체 승격 시 5y 과밀 |
+
+**전체 medium→high 일괄 승격은 하지 않는다**(과밀 방지). fetch lookback 확대는 이 문제와 무관하므로 **보류**한다(§19.1 — 실측상 병목은 buffer가 아니라 표시 정책). annotation kind/label/meta는 바꾸지 않고 importance만 조정하며, signal_score·final_regime·top-level 값과 무관하다(annotation-only).
 
 ---
 
@@ -375,7 +386,7 @@ importance=`medium`(장기 패턴 후보 — 5y high-only 필터에서 숨겨지
 
 기간별 기본 표시: `3m`=high+medium+일부 low, `1y`=high+medium, `5y`=high 중심. 프론트는 토글로 low도 표시할 수 있다.
 
-> **주의(§4.1 diagnostics)**: `5y`=high 중심은 실측상 annotation 대부분(medium)을 숨긴다(373220: 29개 중 4개만 high). 권장 조정안은 §4.1의 **`5y`=high + selected medium**이며, 장기 패턴 후보는 조건부 medium 이상 승격을 검토한다. **코드 importance 값 변경은 후속 커밋**(`retier annotation importance`)에서 다룬다.
+> **주의(§4.1·§4.2 diagnostics)**: `5y`=high 중심은 실측상 annotation 대부분(medium)을 숨긴다(5종 종목 공통: high 3~4 / medium 37~56). 이에 대응해 **backend가 5y에서만 장기 패턴 후보(`cup_handle_candidate`·`box_breakout_candidate`→high, `box_range_candidate`→medium)를 선별 승격**한다(§4.2, 구현됨). tactical 이벤트(S/R·volume·RSI·cross)는 5y에서도 medium 유지. 3m/1y importance 코드값은 불변.
 
 ---
 

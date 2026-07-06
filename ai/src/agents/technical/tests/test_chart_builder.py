@@ -644,3 +644,99 @@ def test_cup_handle_schema_and_meta():
     assert {"lookback_bars", "left_rim_price", "right_rim_price", "bottom_price",
             "cup_depth_pct", "rim_tolerance_pct", "handle_pullback_pct", "handle_bars",
             "candidate_stage", "volume_confirmed", "volume_ratio"} <= set(a["meta"])
+
+
+# ── 5y period-aware importance retier (feat/technical-chart-patterns) ───────────
+import copy as _copy  # noqa: E402
+
+from src.agents.technical.charts.chart_builder import _apply_period_importance_policy  # noqa: E402
+
+
+def _anns_5y(weekly) -> list[dict]:
+    return cdata(payload_of(build_chart_payloads([], weekly, []), ChartPeriod.FIVE_YEARS))["annotations"]
+
+
+def _imp_of(anns, kind) -> set[str]:
+    return {a["importance"] for a in anns if a["kind"] == kind}
+
+
+def _weekly_box(n, *, breakout=False):
+    closes, highs, lows = [], [], []
+    for i in range(n):
+        top = i % 2 == 0
+        closes.append(107.0 if top else 101.0)
+        highs.append(108.0 if top else 102.0)
+        lows.append(106.0 if top else 100.0)
+    if breakout:
+        closes.append(115.0)
+        highs.append(116.0)
+        lows.append(114.0)
+    return series(closes, highs=highs, lows=lows, step_days=7, start=date(2018, 1, 1))
+
+
+# ── policy helper 단위(3m/1y 불변, 5y만 승격) ─────────────────────────────────
+def test_policy_only_affects_5y():
+    base = [
+        {"kind": "cup_handle_candidate", "importance": "medium"},
+        {"kind": "box_breakout_candidate", "importance": "medium"},
+        {"kind": "box_range_candidate", "importance": "low"},
+        {"kind": "support_touch", "importance": "medium"},
+        {"kind": "golden_cross", "importance": "high"},
+    ]
+    for p in (ChartPeriod.THREE_MONTHS, ChartPeriod.ONE_YEAR):
+        r = _apply_period_importance_policy(_copy.deepcopy(base), period=p)
+        assert [a["importance"] for a in r] == ["medium", "medium", "low", "medium", "high"]  # 불변
+    r5 = _apply_period_importance_policy(_copy.deepcopy(base), period=ChartPeriod.FIVE_YEARS)
+    assert [a["importance"] for a in r5] == ["high", "high", "medium", "medium", "high"]
+
+
+# ── 통합: 5y 승격 ──────────────────────────────────────────────────────────────
+def test_5y_cup_promoted_to_high():
+    assert _imp_of(_anns_5y(_cup_series(78, step_days=7)), "cup_handle_candidate") == {"high"}
+
+
+def test_5y_box_breakout_promoted_to_high():
+    assert _imp_of(_anns_5y(_weekly_box(41, breakout=True)), "box_breakout_candidate") == {"high"}
+
+
+def test_5y_box_range_promoted_to_medium():
+    imp = _imp_of(_anns_5y(_weekly_box(45)), "box_range_candidate")
+    assert imp == {"medium"}
+
+
+# ── 통합: 5y tactical은 medium 유지(전체 승격 아님) ──────────────────────────
+def test_5y_support_resistance_stay_medium():
+    anns = _anns_5y(_weekly_box(45))
+    assert _imp_of(anns, "support_touch") <= {"medium"}
+    assert _imp_of(anns, "resistance_touch") <= {"medium"}
+    assert _imp_of(anns, "support_touch")  # 실제 생성됨(공집합 아님)
+
+
+def test_5y_rsi_volume_stay_medium():
+    weekly = series([100.0 + 3.0 * i for i in range(80)], volumes=[1000] * 79 + [6000],
+                    step_days=7, start=date(2018, 1, 1))
+    anns = _anns_5y(weekly)
+    assert _imp_of(anns, "volume_spike") == {"medium"}
+    assert _imp_of(anns, "rsi_overbought") <= {"medium"}
+
+
+# ── 1y는 기존 유지(3m/1y 불변) ────────────────────────────────────────────────
+def test_1y_cup_and_breakout_stay_medium():
+    assert _cup_anns_1y(_cup_series(120))[0]["importance"] == "medium"
+    box = _box_series(41)
+    up = series([115.0], highs=[116.0], lows=[114.0], start=date(2025, 1, 1) + timedelta(days=41))
+    assert _breakout_anns(box + up)[0]["importance"] == "medium"
+
+
+def test_1y_box_range_stays_low():
+    daily = _box_series(45)
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    assert _imp_of(anns, "box_range_candidate") == {"low"}
+
+
+# ── schema/label/meta 불변(importance만 바뀜) ─────────────────────────────────
+def test_5y_retier_keeps_kind_label_meta():
+    a = next(x for x in _anns_5y(_cup_series(78, step_days=7)) if x["kind"] == "cup_handle_candidate")
+    assert a["kind"] == "cup_handle_candidate" and a["label"] == "컵앤핸들 후보"
+    assert a["importance"] == "high"                 # 승격
+    assert a["source"] == "code" and "cup_depth_pct" in a["meta"]  # meta 불변
