@@ -96,6 +96,18 @@
           font-weight:800; font-variant-numeric:tabular-nums; }
   .pverdict { margin-top:12px; font-size:13px; color:#4E5968; line-height:1.6; }
 
+  /* 심화 블록 (기관 세부 + 보유율) */
+  .deepgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+  @media (max-width: 720px) { .deepgrid { grid-template-columns:1fr; } }
+  .deept { font-size:12.5px; font-weight:700; color:#8B95A1; margin-bottom:10px; }
+  .drow { display:flex; align-items:center; gap:10px; padding:5px 0; }
+  .dname { width:96px; flex-shrink:0; font-size:12.5px; font-weight:700; color:#4E5968; }
+  .dtrackh { flex:1; height:14px; background:#F2F4F6; border-radius:5px; overflow:hidden; }
+  .dbarh { height:100%; border-radius:5px; }
+  .dbarh.buy { background:#F04452; } .dbarh.sell { background:#3182F6; }
+  .dval { width:84px; flex-shrink:0; text-align:right; font-size:12.5px;
+          font-weight:800; font-variant-numeric:tabular-nums; }
+
   /* 해석 신호 3카드 */
   .sigrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
   @media (max-width: 720px) { .sigrid { grid-template-columns:1fr; } }
@@ -283,11 +295,30 @@
       </div>
     </section>
 
-    {# ── [B] 심화 — M2 ── #}
+    {# ── 심화: [A] 기관 세부(게이트2 규칙6 검증분) + [B] 보유율(placeholder) ── #}
     <section class="card" id="deep">
       <h2>심화 · 기관 세부와 외국인 보유율</h2>
-      <div class="cap">연기금·투신·사모 세부 · 외국인 보유율 추이</div>
-      <div class="placeholder">데이터 준비 중 (M2) — 기관 세부 순매수와 외국인 보유율 추이가 이 자리에 들어갑니다.</div>
+      <div class="cap">기관 세부 순매수(최근 5거래일 누적·단위 백만원) · 외국인 보유율 추이</div>
+      <div class="deepgrid">
+        <div>
+          <div class="deept">기관 세부 순매수{% if inst_detail %} · {{ inst_detail.leader }}{% endif %}</div>
+          {% if inst_detail %}
+          {% for r in inst_detail.rows %}
+          <div class="drow">
+            <span class="dname">{{ r.label }}</span>
+            <div class="dtrackh"><div class="dbarh {{ r.cls }}" style="width:{{ r.w }}%"></div></div>
+            <span class="dval {{ r.cls }}">{{ r.val }}</span>
+          </div>
+          {% endfor %}
+          {% else %}
+          <div class="placeholder">데이터 준비 중 — 기관 세부가 아직 없습니다.</div>
+          {% endif %}
+        </div>
+        <div>
+          <div class="deept">외국인 보유율 추이</div>
+          <div class="placeholder">데이터 준비 중 (M2) — 외국인 보유율 추이가 이 자리에 들어갑니다.</div>
+        </div>
+      </div>
     </section>
 
     {# ── [A] 검증 · 원본 대조 (게이트2) ── #}

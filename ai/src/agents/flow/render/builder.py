@@ -22,7 +22,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .. import config
-from ..core.signals import COL_FORE, COL_INST, SUBJECTS
+from ..core.signals import COL_FORE, COL_INST, INST_DETAIL, SUBJECTS
 from ..schemas import GateResult
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -171,6 +171,38 @@ def _persistence_view(signals: dict) -> dict | None:
     return {"rows": rows, "verdict": " · ".join(parts)}
 
 
+# 표시용 라벨: KIS 공식명 기본 + 통칭 병기(확인 가능성 — 원본과 같은 이름).
+_DETAIL_LABELS = {"기금": "기금(연기금)", "증권": "증권(금융투자)"}
+# 목업이 보여주는 5개(검증은 7개 전체, 표시는 이 5개만).
+_DETAIL_DISPLAY = ("기금", "증권", "투자신탁", "사모펀드", "보험")
+
+
+def _inst_detail_view(signals: dict) -> dict | None:
+    """기관 세부 팩트 → 표시용 뷰. 값 변형 없음 — 정렬·스케일·라벨만.
+
+    5일 합(검증된 값) 내림차순 정렬로 '주도 주체'를 맨 위에. 막대 폭은 표시
+    스케일, leader 문구는 최대값의 재표현일 뿐 새 판정이 아니다.
+    """
+    detail = signals.get("inst_detail")
+    if not detail:
+        return None
+    shown = [(name, detail.get(name)) for name in _DETAIL_DISPLAY
+             if detail.get(name) is not None]
+    if not shown:
+        return None
+    shown.sort(key=lambda kv: kv[1], reverse=True)          # 5일 합 내림차순
+    max_abs = max(abs(v) for _, v in shown) or 0.0
+    rows = [{
+        "label": _DETAIL_LABELS.get(name, name),
+        "val": f"{v:+,.0f}",
+        "cls": "buy" if v > 0 else "sell" if v < 0 else "mut",
+        "w": round(abs(v) / max_abs * 100.0, 1) if max_abs else 0.0,
+    } for name, v in shown]
+    top_name, top_val = shown[0]
+    leader = f"{_DETAIL_LABELS.get(top_name, top_name)} 주도" if top_val > 0 else "세부 전반 순매도"
+    return {"rows": rows, "leader": leader}
+
+
 def _headline(rows: list[dict]) -> str:
     """요약 헤드라인 — 각 주체 direction(이미 확정된 부호의 단어)을 문구로 조립.
 
@@ -210,6 +242,7 @@ def build_report(
         "interpretation": interpretation,   # None이면 템플릿이 placeholder로 후퇴
         "daily": _daily_view(signals),      # None이면 템플릿이 placeholder로 후퇴
         "persistence": _persistence_view(signals),  # None이면 placeholder로 후퇴
+        "inst_detail": _inst_detail_view(signals),  # None이면 placeholder로 후퇴
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",

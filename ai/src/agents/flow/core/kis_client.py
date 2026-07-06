@@ -30,7 +30,7 @@ import pandas as pd
 from dotenv import find_dotenv, load_dotenv
 
 from .. import config
-from .signals import COL_FORE, COL_INDI, COL_INST, COL_VALUE
+from .signals import COL_FORE, COL_INDI, COL_INST, COL_VALUE, INST_DETAIL
 
 # ── KIS 엔드포인트 상수 (이 경계에서만 안다) ──────────────────
 _OAUTH_PATH = "/oauth2/tokenP"
@@ -45,6 +45,18 @@ _FIELD_MAP: dict[str, str] = {
     "orgn_ntby_tr_pbmn": COL_INST,   # 기관계 순매수 거래대금 (백만원)
     "acml_tr_pbmn": COL_VALUE,       # 누적(총) 거래대금 (원! ← ÷1e6 필요)
 }
+# 기관계 세부 7주체 (전부 백만원 — 세부 합 ≈ 기관계 항등식 실물 확인됨).
+# 한글명은 KIS 공식 필드 사전(공식 GitHub) 그대로. signals.INST_DETAIL 과 일치.
+_DETAIL_FIELD_MAP: dict[str, str] = {
+    "scrt_ntby_tr_pbmn": "증권",
+    "ivtr_ntby_tr_pbmn": "투자신탁",
+    "pe_fund_ntby_tr_pbmn": "사모펀드",
+    "bank_ntby_tr_pbmn": "은행",
+    "insu_ntby_tr_pbmn": "보험",
+    "mrbn_ntby_tr_pbmn": "종금",
+    "fund_ntby_tr_pbmn": "기금",
+}
+assert set(_DETAIL_FIELD_MAP.values()) == set(INST_DETAIL)  # 이름 단일 출처 보장
 _DATE_FIELD = "stck_bsop_date"       # "20260703"
 
 
@@ -193,8 +205,9 @@ def fetch_supply_demand(
 
 def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
     """KIS output2(내림차순 원본) → signals 스키마 DataFrame(오름차순, 백만원)."""
-    # (1) 필드 매핑: KIS 필드명을 signals 컬럼명으로 갈아끼운다.
-    records = [{col: row[kis] for kis, col in _FIELD_MAP.items()} for row in rows]
+    # (1) 필드 매핑: KIS 필드명을 signals 컬럼명으로 갈아끼운다(세부 7주체 포함).
+    full_map = {**_FIELD_MAP, **_DETAIL_FIELD_MAP}
+    records = [{col: row[kis] for kis, col in full_map.items()} for row in rows]
     dates = [row[_DATE_FIELD] for row in rows]
 
     df = pd.DataFrame.from_records(records)
@@ -213,5 +226,5 @@ def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
     #     tail(5)·reversed 순회 전제와 정확히 맞춘다.
     df = df.sort_index()
 
-    # (4) 컬럼 순서를 signals 스키마와 정확히 일치시켜 반환.
-    return df[[COL_INDI, COL_FORE, COL_INST, COL_VALUE]]
+    # (4) 컬럼 순서를 signals 스키마와 정확히 일치시켜 반환 (+ 기관 세부 7주체).
+    return df[[COL_INDI, COL_FORE, COL_INST, COL_VALUE, *INST_DETAIL]]

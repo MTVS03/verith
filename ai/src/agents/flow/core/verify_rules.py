@@ -23,6 +23,9 @@ from . import signals as sig
 from .. import config
 from ..schemas import GateResult
 
+# 규칙 6a 항등식 허용오차(백만원). KIS 필드별 반올림 관측치 ±1 → 여유 5.
+_DETAIL_IDENTITY_TOL = 5.0
+
 
 def _alignment_from_df(df: pd.DataFrame) -> str:
     """원본 df 에서 구도를 독립 판정(대조용). signals.calc_alignment 와
@@ -188,6 +191,57 @@ def verify_signals(df: pd.DataFrame, signals: dict) -> GateResult:
                 )
             else:
                 checks.append(f"지속성 정합: {subject} 5일·20일 합과 일관 판정이 원본과 일치")
+
+    # ── 규칙 6: 기관 세부 정합 ────────────────────────────
+    # 6a 항등식: 세부 7주체 합 ≈ 기관계 — "우리가 만든 기준"이 아니라 데이터가
+    #    스스로 보증하는 관계(실물 확인). KIS 가 필드별 반올림하므로 정확 일치가
+    #    아니라 허용오차로 흡수한다(관측 ±1백만원 → 여유 있게 ±5백만원).
+    # 6b 값 정합: 주장된 세부 5일 합을 df 에서 독립 합산해 대조(재계산 아닌 대조,
+    #    calc_inst_detail 재호출 없음).
+    inst_detail = signals.get("inst_detail")
+    has_detail_cols = all(name in df.columns for name in sig.INST_DETAIL)
+    if not has_detail_cols:
+        if inst_detail is None:
+            checks.append("기관 세부: 원본에 세부 컬럼 없음 → 주장 없음(정합, 표시도 없음)")
+        else:
+            failures.append("기관 세부 정합: 원본에 세부 컬럼이 없는데 신호가 세부를 주장")
+    elif inst_detail is None:
+        failures.append("기관 세부 정합: 원본에 세부가 있는데 inst_detail 이 신호에 없음")
+    else:
+        window = df.tail(config.RECENT_DAYS)
+        # 6a: 일별 항등식 (표시 창과 같은 최근 RECENT_DAYS일)
+        bad_days = [
+            idx.date().isoformat()
+            for idx, row in window.iterrows()
+            if not math.isclose(
+                sum(float(row[name]) for name in sig.INST_DETAIL),
+                float(row[sig.COL_INST]),
+                abs_tol=_DETAIL_IDENTITY_TOL,
+            )
+        ]
+        if bad_days:
+            failures.append(
+                f"기관 세부 항등식: {len(bad_days)}일에서 세부 합≠기관계 (첫 건 {bad_days[0]})"
+            )
+        else:
+            checks.append(
+                f"기관 세부 항등식: {len(window)}일 모두 세부 7주체 합 ≈ 기관계"
+                f"(±{_DETAIL_IDENTITY_TOL:.0f}백만원, 반올림 흡수)"
+            )
+        # 6b: 값 정합
+        bad_names = [
+            name for name in sig.INST_DETAIL
+            if inst_detail.get(name) is None or not math.isclose(
+                inst_detail[name], float(window[name].sum()),
+                rel_tol=1e-9, abs_tol=1e-6,
+            )
+        ]
+        if bad_names:
+            failures.append(
+                f"기관 세부 정합: {', '.join(bad_names)} 의 5일 합이 원본과 불일치"
+            )
+        else:
+            checks.append(f"기관 세부 정합: 7주체 {len(window)}일 합이 원본과 일치")
 
     return GateResult(
         gate=2,
