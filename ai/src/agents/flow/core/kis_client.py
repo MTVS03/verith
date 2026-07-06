@@ -30,7 +30,6 @@ import httpx
 import pandas as pd
 from dotenv import find_dotenv, load_dotenv
 
-from .. import config
 from .signals import COL_FORE, COL_INDI, COL_INST, COL_OWNERSHIP, COL_VALUE, INST_DETAIL
 
 # ── KIS 엔드포인트 상수 (이 경계에서만 안다) ──────────────────
@@ -197,18 +196,24 @@ def _get_json(client: httpx.Client, path: str, headers: dict, params: dict, what
 
 def fetch_supply_demand(
     base_date: date | str,
-    ticker: str = config.TARGET_TICKER,
-) -> pd.DataFrame:
+    ticker: str,
+) -> tuple[pd.DataFrame, str | None]:
     """기준일(base_date)까지의 일별 투자자매매동향을 signals 스키마로 반환한다.
 
     Args:
         base_date: 조회 기준일. date 또는 "YYYYMMDD" 문자열. (오늘=장중 미확정이라
                    TIME LIMIT 에러가 나므로, 호출부가 확정된 거래일을 넘겨야 한다.)
-        ticker:    6자리 종목코드. 기본값은 M1 대상(삼성전자 005930).
+        ticker:    6자리 종목코드. 기본값 없음 — 경계 번역기는 "선호 종목"을
+                   모른다. 호출부(그래프)가 반드시 지정한다(조각2).
 
     Returns:
-        index=날짜(오름차순), columns=[개인, 외국인, 기관, 거래대금]의 DataFrame.
-        모든 값 단위는 백만원.
+        (df, market) 튜플:
+          df     : index=날짜(오름차순), columns=[개인, 외국인, 기관, 거래대금
+                   (+기관 세부 7주체)]. 모든 값 단위는 백만원.
+          market : output1.rprs_mrkt_kor_name 원본 그대로(실측: 'KOSPI200',
+                   'KSQ150'). 없으면 None. 표시 전용 문자열이라 게이트2 검증
+                   대상이 아니며(숫자 아님·대조할 제2 출처 없음), 매핑·가공도
+                   하지 않는다(우리 해석 금지 — 원본 이름 그대로).
     """
     app_key, app_secret, base_url = _load_credentials()
     date_str = base_date.strftime("%Y%m%d") if isinstance(base_date, date) else str(base_date)
@@ -238,7 +243,8 @@ def fetch_supply_demand(
     if not rows:
         raise KisError(f"KIS output2가 비어있습니다 (ticker={ticker}, date={date_str}).")
 
-    return _to_signals_frame(rows)
+    market = (body.get("output1") or {}).get("rprs_mrkt_kor_name") or None
+    return _to_signals_frame(rows), market
 
 
 def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
@@ -270,7 +276,7 @@ def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
 
 def fetch_foreign_ownership(
     base_date: date | str,
-    ticker: str = config.TARGET_TICKER,
+    ticker: str,
 ) -> pd.Series:
     """base_date까지의 일별 외국인 한도소진율(%)을 오름차순 Series로 반환한다.
 

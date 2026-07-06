@@ -267,7 +267,7 @@ def build_report(
     rows = _fact_rows(signals)
     context = {
         "meta": meta,
-        "market": "KOSPI",                  # M1 고정(삼성전자). 일반화는 M2.
+        "market": meta.get("market"),       # KIS 대표 시장명 원본. None → 템플릿이 칩 생략
         "gate2": gate2,
         "rows": rows,
         "alignment": signals.get("alignment"),
