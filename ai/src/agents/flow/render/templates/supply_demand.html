@@ -107,6 +107,21 @@
   .dbarh.buy { background:#F04452; } .dbarh.sell { background:#3182F6; }
   .dval { width:84px; flex-shrink:0; text-align:right; font-size:12.5px;
           font-weight:800; font-variant-numeric:tabular-nums; }
+  .ownhead { display:flex; align-items:baseline; gap:10px; margin:2px 0 0; }
+  .ownbig { font-size:30px; font-weight:800; line-height:1; letter-spacing:-0.03em;
+            font-variant-numeric:tabular-nums; }
+  .owndelta { font-size:13px; font-weight:700; }
+  .owndelta.buy { color:#F04452; } .owndelta.sell { color:#3182F6; }
+  .owndelta.mut { color:#8B95A1; }
+  .ownchart { display:flex; align-items:flex-end; gap:18px; height:110px;
+              margin-top:14px; padding:0 4px; border-bottom:1.5px solid #E5E8EB; }
+  .ownday { flex:1; display:flex; flex-direction:column; align-items:center;
+            justify-content:flex-end; gap:7px; height:100%; }
+  .ownnum { font-size:11px; color:#B0B8C1; font-variant-numeric:tabular-nums; }
+  .ownbar { width:100%; max-width:30px; background:#FBCBD0; border-radius:5px 5px 0 0; }
+  .ownlabs { display:flex; gap:18px; padding:6px 4px 0; }
+  .ownlabs span { flex:1; text-align:center; font-size:11px; color:#B0B8C1; }
+  .ownnote { margin-top:10px; font-size:11.5px; color:#B0B8C1; }
 
   /* 해석 신호 3카드 */
   .sigrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
@@ -295,7 +310,7 @@
       </div>
     </section>
 
-    {# ── 심화: [A] 기관 세부(게이트2 규칙6 검증분) + [B] 보유율(placeholder) ── #}
+    {# ── 심화: 기관 세부(게이트2 규칙6 검증분) + 외국인 보유율(게이트2 규칙7 검증분) ── #}
     <section class="card" id="deep">
       <h2>심화 · 기관 세부와 외국인 보유율</h2>
       <div class="cap">기관 세부 순매수(최근 5거래일 누적·단위 백만원) · 외국인 보유율 추이</div>
@@ -316,7 +331,24 @@
         </div>
         <div>
           <div class="deept">외국인 보유율 추이</div>
-          <div class="placeholder">데이터 준비 중 (M2) — 외국인 보유율 추이가 이 자리에 들어갑니다.</div>
+          {% if ownership %}
+          <div class="ownhead">
+            <span class="ownbig">{{ ownership.latest }}</span>
+            <span class="owndelta {{ ownership.delta_cls }}">{{ ownership.delta_arrow }} {{ ownership.delta }}</span>
+          </div>
+          <div class="ownchart">
+            {% for b in ownership.bars %}
+            <div class="ownday" title="{{ b.iso }} · 외국인 보유율 {{ b.num }}%">
+              <span class="ownnum">{{ b.num }}</span>
+              <div class="ownbar" style="height:{{ b.h }}px"></div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="ownlabs">{% for b in ownership.bars %}<span>{{ b.label }}</span>{% endfor %}</div>
+          <div class="ownnote">{{ recent_days }}거래일 · 상장주식 대비 · 단위 %</div>
+          {% else %}
+          <div class="placeholder">데이터 준비 중 — 외국인 보유율이 아직 없습니다.</div>
+          {% endif %}
         </div>
       </div>
     </section>

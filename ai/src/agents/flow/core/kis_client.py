@@ -31,12 +31,15 @@ import pandas as pd
 from dotenv import find_dotenv, load_dotenv
 
 from .. import config
-from .signals import COL_FORE, COL_INDI, COL_INST, COL_VALUE, INST_DETAIL
+from .signals import COL_FORE, COL_INDI, COL_INST, COL_OWNERSHIP, COL_VALUE, INST_DETAIL
 
 # ── KIS 엔드포인트 상수 (이 경계에서만 안다) ──────────────────
 _OAUTH_PATH = "/oauth2/tokenP"
 _QUOTATIONS_PATH = "/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily"
 _TR_ID = "FHPTJ04160001"  # 종목별 투자자매매동향(일별). 실전전용.
+_DAILY_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-price"
+_DAILY_PRICE_TR_ID = "FHKST01010400"  # 주식현재가 일자별. 조회 전용.
+_EHRT_FIELD = "hts_frgn_ehrt"         # HTS 외국인 소진율(%)
 _TIMEOUT = 15.0
 
 # KIS 유량 제어: 짧은 창에 조회가 겹치면 HTTP 500 + EGW00201 로 선차단된다
@@ -264,3 +267,60 @@ def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
     # (4) 컬럼 순서를 signals 스키마와 정확히 일치시켜 반환 (+ 기관 세부 7주체).
     return df[[COL_INDI, COL_FORE, COL_INST, COL_VALUE, *INST_DETAIL]]
 
+
+def fetch_foreign_ownership(
+    base_date: date | str,
+    ticker: str = config.TARGET_TICKER,
+) -> pd.Series:
+    """base_date까지의 일별 외국인 보유율(%)을 오름차순 Series로 반환한다.
+
+    실물로 확인된 변환 3가지(scratch_kis_ehrt.py로 검증):
+      (1) 필드: hts_frgn_ehrt — %, 소수 2자리 (삼성전자 46%대 실측 확인)
+      (2) 정렬: KIS 내림차순 → 오름차순으로 뒤집는다
+      (3) 절단: 이 API는 오늘(장중 미확정) 행을 포함한다(매매동향 API와 다름!)
+          → base_date 이후 행을 잘라내 리포트 기준일과 정합시킨다.
+
+    의미 주의: KIS 필드는 정확히는 '소진율'(외국인 한도 대비 소진 비율).
+    한도 100% 종목(삼성전자 보통주)은 보유율과 동일하다. 한도 제한 종목
+    (통신·항공 등)으로 일반화할 때 재검토 필요.
+    """
+    app_key, app_secret, base_url = _load_credentials()
+    date_str = base_date.strftime("%Y%m%d") if isinstance(base_date, date) else str(base_date)
+
+    with httpx.Client(base_url=base_url, timeout=_TIMEOUT) as client:
+        token = _get_token(client, app_key, app_secret)
+        body = _get_json(
+            client, _DAILY_PRICE_PATH,
+            headers=_auth_headers(app_key, app_secret, token, _DAILY_PRICE_TR_ID),
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": ticker,
+                "FID_PERIOD_DIV_CODE": "D",   # 일별
+                "FID_ORG_ADJ_PRC": "0",       # 수정주가 반영
+            },
+            what="일자별 시세",
+        )
+
+    if body.get("rt_cd") != "0":
+        raise KisError(
+            f"KIS 일자별 시세 에러 rt_cd={body.get('rt_cd')} "
+            f"msg_cd={body.get('msg_cd')} msg1={body.get('msg1')}"
+        )
+    rows = body.get("output") or []          # 주의: 이 API는 output2가 아니라 output
+    if not rows:
+        raise KisError(f"KIS output이 비어있습니다 (ticker={ticker}, date={date_str}).")
+
+    series = pd.Series(
+        [row[_EHRT_FIELD] for row in rows],
+        index=pd.to_datetime([row[_DATE_FIELD] for row in rows], format="%Y%m%d"),
+        name=COL_OWNERSHIP,
+    )
+    series = pd.to_numeric(series, errors="raise")   # 예상 밖 값이면 멈춤(실패는 정보)
+    series.index.name = "날짜"
+    series = series.sort_index()                     # (2) 오름차순
+
+    # (3) base_date 이후 절단 — 장중(미확정) 행이 리포트에 섞이는 것을 구조로 차단.
+    series = series.loc[: pd.to_datetime(date_str, format="%Y%m%d")]
+    if series.empty:
+        raise KisError(f"base_date({date_str}) 이전 보유율 데이터가 없습니다.")
+    return series

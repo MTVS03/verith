@@ -26,6 +26,10 @@ from ..schemas import GateResult
 # 규칙 6a 항등식 허용오차(백만원). KIS 필드별 반올림 관측치 ±1 → 여유 5.
 _DETAIL_IDENTITY_TOL = 5.0
 
+# 규칙 7c 반올림 허용(%p). KIS 보유율은 소수 2자리 반올림이라
+# 참값 변화가 0 근처일 때 표시값 Δ가 ±0.01 로 흔들릴 수 있다.
+_EHRT_ROUND_TOL = 0.01
+
 
 def _alignment_from_df(df: pd.DataFrame) -> str:
     """원본 df 에서 구도를 독립 판정(대조용). signals.calc_alignment 와
@@ -41,8 +45,12 @@ def _alignment_from_df(df: pd.DataFrame) -> str:
     return "엇갈림"
 
 
-def verify_signals(df: pd.DataFrame, signals: dict) -> GateResult:
-    """신호 dict 의 팩트가 원본 df 와 정합한지 대조한다."""
+def verify_signals(
+    df: pd.DataFrame,
+    signals: dict,
+    ownership: pd.Series | None = None,   # M2: 보유율 원본(별도 API) — 없으면 규칙7은 "주장 없음" 검사만
+) -> GateResult:
+    """신호 dict 의 팩트가 원본 df(+보유율 Series)와 정합한지 대조한다."""
     checks: list[str] = []
     failures: list[str] = []
 
@@ -242,6 +250,71 @@ def verify_signals(df: pd.DataFrame, signals: dict) -> GateResult:
             )
         else:
             checks.append(f"기관 세부 정합: 7주체 {len(window)}일 합이 원본과 일치")
+
+    # ── 규칙 7: 외국인 보유율 정합 ────────────────────────
+    # 원본이 별도 API(Series)라 df 가 아닌 ownership 과 대조한다.
+    # 비대칭 처리(규칙 6과 동일한 사다리): 원본 없음×주장 없음=정합 /
+    # 한쪽만 있으면 실패 / 둘 다 있으면 7a~7c 본검사.
+    claimed_own = signals.get("ownership")
+    if ownership is None or ownership.empty:
+        if claimed_own is None:
+            checks.append("보유율: 원본 없음 → 주장 없음(정합, 표시도 없음)")
+        else:
+            failures.append("보유율 정합: 원본이 없는데 신호가 보유율을 주장")
+    elif claimed_own is None:
+        failures.append("보유율 정합: 원본이 있는데 ownership 이 신호에 없음")
+    else:
+        # 7a 범위: 보유율은 지분 비율 — 0~100% 밖이면 데이터 자체가 손상.
+        out_of_range = ownership[(ownership < 0) | (ownership > 100)]
+        if len(out_of_range):
+            failures.append(
+                f"보유율 범위: {len(out_of_range)}일이 0~100% 밖"
+                f" (첫 건 {out_of_range.index[0].date().isoformat()})"
+            )
+        else:
+            checks.append(f"보유율 범위: {len(ownership)}일 모두 0~100% 이내")
+
+        # 7b 직렬화 정합: 주장 배열 ↔ 원본 tail(RECENT_DAYS).
+        # extract_ownership 을 재호출하지 않는다(재계산이 아니라 대조).
+        recent_own = ownership.tail(config.RECENT_DAYS)
+        expected_dates = [idx.date().isoformat() for idx in recent_own.index]
+        claimed_dates = [row.get("date") for row in claimed_own]
+        claimed_vals = [row.get("ratio") for row in claimed_own]
+        if claimed_dates != expected_dates:
+            failures.append("보유율 직렬화 정합: 날짜열이 원본과 불일치")
+        elif any(
+            v is None or not math.isclose(v, float(o), rel_tol=1e-9, abs_tol=1e-6)
+            for v, o in zip(claimed_vals, recent_own)
+        ):
+            failures.append("보유율 직렬화 정합: 값이 원본과 불일치")
+        else:
+            checks.append(f"보유율 직렬화 정합: {len(recent_own)}일 날짜·값이 원본과 일치")
+
+        # 7c 교차(출처가 다른 두 API 대조): 외국인이 순매수한 날 보유율이
+        # 내려가면(또는 그 반대) 두 소스가 모순 — 검증 못 한 숫자는 안 올린다.
+        # Δ는 원본 Series 에서 직접 계산(7b 로 주장==원본 이 이미 확인됨).
+        # Δ=0 및 ±반올림 허용: 소량 매매는 소수 2자리에서 변화 없음이 정상.
+        cross_bad: list[str] = []
+        for idx in recent_own.index:
+            pos = ownership.index.get_loc(idx)
+            if pos == 0:
+                continue                      # 전일 값 없음 → Δ 계산 불능(검사 생략)
+            if idx not in df.index:
+                cross_bad.append(f"{idx.date().isoformat()} (매매동향에 없는 거래일)")
+                continue
+            delta = float(ownership.iloc[pos]) - float(ownership.iloc[pos - 1])
+            fore = float(df.loc[idx, sig.COL_FORE])
+            if (fore > 0 and delta < -_EHRT_ROUND_TOL) or \
+               (fore < 0 and delta > _EHRT_ROUND_TOL):
+                cross_bad.append(
+                    f"{idx.date().isoformat()} (순매수 {fore:+.0f}백만원인데 Δ{delta:+.2f}%p)"
+                )
+        if cross_bad:
+            failures.append(
+                f"보유율-순매수 교차 정합: {len(cross_bad)}일 모순 (첫 건: {cross_bad[0]})"
+            )
+        else:
+            checks.append("보유율-순매수 교차 정합: 표시 창 전일에서 방향 모순 없음")
 
     return GateResult(
         gate=2,
