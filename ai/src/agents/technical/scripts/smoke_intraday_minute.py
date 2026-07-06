@@ -46,15 +46,18 @@ _OUT1_KEYS = ("stck_prdy_clpr", "stck_prpr", "acml_vol", "acml_tr_pbmn", "hts_ko
 # ─────────────────────────────────────────────────────────────────────────────
 def _check_env() -> bool:
     import os
+    # load_kis_settings가 .env를 os.environ에 로드(load_dotenv)하므로 먼저 호출한 뒤 존재를 표시한다.
+    try:
+        kc.load_kis_settings()
+        error = None
+    except RuntimeError as exc:
+        error = str(exc)  # 누락 키 이름만 (secret 없음)
     print("── env (KIS) ─────────────────────────────────")
     for key in REQUIRED_ENV_KEYS:
         print(f"  {key:15s}: {'OK' if os.getenv(key) else 'MISSING'}")
-    try:
-        kc.load_kis_settings()
-        return True
-    except RuntimeError as exc:
-        print(f"  [env] {exc}")  # 누락 키 이름만 (secret 없음)
-        return False
+    if error:
+        print(f"  [env] {error}")
+    return error is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
