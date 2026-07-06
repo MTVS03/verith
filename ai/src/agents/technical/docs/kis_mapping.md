@@ -272,7 +272,86 @@ per, eps, pbr, itewhol_loan_rmnd_ratem
 
 ---
 
-## 12. 관련 문서
+## 12. 1D Intraday (분봉) API 매핑 — ⚠ 미확정 (확인 필요)
+
+> **상태: 이 절은 아직 공식 KIS 문서로 확정되지 않았다.** 아래 TR ID·endpoint·요청/응답
+> 필드명·페이징·interval 지원 범위는 **모두 "확인 필요(TBD)"** 이며, 확정되기 전까지
+> `services/kis_client.py`에 분봉 fetcher(`fetch_minute_ohlcv`)를 **구현하지 않는다**(fail-fast).
+> §11(D/W/M 실측)과 동일하게, 실제 값은 공식 KIS 문서·실제 호출로 채운 뒤 "검증 완료"로 승격한다.
+
+### 12.1 범위·용어
+
+- **1D intraday = 당일 장중 분봉**(요청 시점까지 쌓인 봉)이다. **KIS Daily(`D`, 일봉)와 다르다**(§4).
+- 조회 방식은 **on-demand intraday snapshot** — 사용자 요청 시점에 **REST로 1회** 조회한다.
+  WebSocket 틱 스트리밍·자동 polling은 범위 밖(`chart_annotation_spec.md §3.1`, `technical_coding_guidelines.md`).
+- 정식 위치: `charts[].period == "1d"`(조건부 포함), `candle_unit == "1min"`. 판단(`final_regime` 등)에는
+  직접 반영하지 않고 보조로만 쓴다(`chart_annotation_spec.md §3.1`).
+
+### 12.2 D/W/M과의 관계 (중요)
+
+- D/W/M은 `inquire-daily-itemchartprice`(TR `FHKST03010100`, §4)를 `FID_PERIOD_DIV_CODE`만 바꿔 호출한다.
+- **분봉은 이 TR이 아니라 별도 TR**이다(§4의 일/주/월 TR로는 분봉을 얻지 못한다). → 아래 TR/endpoint는 **확인 필요**.
+
+### 12.3 요청 파라미터 (확인 필요)
+
+| 항목 | 내부 의미 | KIS 파라미터명 | 값/규칙 |
+| --- | --- | --- | --- |
+| TR ID | 분봉 조회 TR | (확인 필요) | 당일/과거일이 **다른 TR인지** 확인 |
+| endpoint path | REST 경로 | (확인 필요) | `/uapi/domestic-stock/v1/quotations/...` 계열로 추정되나 **확인 필요** |
+| 종목코드 | ticker(6자리) | (확인 필요, `FID_INPUT_ISCD` 계열?) | §5와 동일 형식일 것으로 보이나 확인 필요 |
+| 기준 시각 | 조회 기준 HHMMSS | (확인 필요, `FID_INPUT_HOUR_1` 계열?) | 페이징 기준 시각인지 확인 |
+| 조회일자 | 당일/특정일 | (확인 필요) | 당일만 되는지, 과거일 가능한지 |
+| interval | 분봉 간격 | (확인 필요) | **1분 지원 우선**(v1). 3/5분은 응답 확인 후 확장 |
+| 수정주가 | 수정주가 여부 | (확인 필요) | §5의 `FID_ORG_ADJ_PRC` 대응 존재 여부 |
+
+### 12.4 응답 필드 → 내부 `IntradayCandle` 매핑 (확인 필요)
+
+내부 스키마는 `schemas/intraday.py`의 `IntradayCandle`(별도 스키마, `OHLCV` 무변경)로 정규화한다.
+`OHLCV.date`(`YYYY-MM-DD`)는 건드리지 않고, intraday는 **`timestamp`(`YYYY-MM-DDTHH:MM:SS`)** 를 쓴다.
+
+| 내부 `IntradayCandle` | 의미 | KIS 원본 필드 | 비고 |
+| --- | --- | --- | --- |
+| `timestamp` | 체결 봉 시각 | (확인 필요: 일자 + 체결시각 HHMMSS 결합) | 예: `stck_bsop_date`+`stck_cntg_hour` 형태로 추정되나 **확인 필요** |
+| `open` / `high` / `low` / `close` | 분봉 OHLC | (확인 필요) | 유한·비음수, `high >= low` |
+| `volume` | 분봉 거래량 | (확인 필요) | `>= 0` |
+| `trading_value` | 분봉 거래대금 | (확인 필요, **존재하지 않을 수 있음**) | 없으면 `optional`(None) |
+| `interval` | 봉 간격 | (요청값 기준 세팅) | `1min` 우선 |
+
+### 12.5 페이징·건수·시간 범위 (확인 필요)
+
+- **회당 최대 건수** (확인 필요, §11.4의 100건 제한과 같은/다른 규칙인지).
+- **페이징 방식** (확인 필요): 당일 전체를 보려면 기준 시각을 역방향으로 이동하며 반복하는지.
+  → 확정되면 §8.1 구간 분할 루프 패턴을 응용한다(무한 루프 상한 `KIS_MAX_CHUNKS` 재사용).
+- **조회 가능 시간 범위** (확인 필요): 당일만인지, 과거일 분봉이 별도 TR·별도 제한인지.
+
+### 12.6 기존 `kis_client` 재사용 (확정)
+
+분봉 fetcher는 **KIS 호출 인프라를 새로 만들지 않고** 기존 것을 재사용한다:
+
+- 접근토큰 발급·캐시, 공통 헤더(`tr_id`/`custtype`), `hashkey` 불필요(시세 조회),
+- retry/backoff(`KIS_MAX_RETRIES`/`KIS_BACKOFF_SECONDS`), 유량 제한 에러(`EGW00201`) 대응,
+- `normalize_end_date`(as_of → 조회 기준일, 미래 거부),
+- 구간 분할 루프 골격(§8.1).
+
+### 12.7 세션/휴장 상태 (확인 필요 + v1 휴리스틱)
+
+`IntradayContext.status`(`normal`/`data_limited`/`unavailable`/`market_closed`/`not_trading_day`/`api_error`)
+판정 근거:
+
+- 정식 **거래일 달력(휴장일) 소스는 repo에 없음** → v1은 **주말 + 분봉 0건 + KIS 응답**으로 휴리스틱 판정.
+- 정식 거래시간(09:00–15:30 KST)·휴장일 캘린더 통합은 **후속(Future Work)**.
+
+### 12.8 구현 정지선 (Blocker)
+
+**아래가 공식 KIS 문서로 확정되기 전에는 `fetch_minute_ohlcv` 구현으로 넘어가지 않는다:**
+분봉 TR ID · endpoint path · 요청 필드 · 응답 필드명 · 회당 최대 건수 · 페이징 방식 ·
+당일/과거일 조회 가능 여부 · interval 지원 범위 · rate limit · 주요 에러 코드.
+
+임의 추측 금지. 이 절의 (확인 필요) 항목이 채워지면 §11처럼 "검증 완료"로 승격하고 fetcher를 구현한다.
+
+---
+
+## 13. 관련 문서
 
 | 문서 | 역할 |
 | --- | --- |
@@ -282,3 +361,4 @@ per, eps, pbr, itewhol_loan_rmnd_ratem
 | `trace_schema.md` | KIS 호출 trace(retry/fallback) |
 | `contracts.md` | 내부 OHLCV가 지표 계산 거쳐 산출로 이어짐 |
 | `api_spec.md` | OUT_OF_SCOPE_TICKER 처리 |
+| `chart_annotation_spec.md` | 1d 장중 차트 정책(§3.1) — 판단 미반영·보조 화면 |
