@@ -356,6 +356,7 @@ D/W/M 일·주·월봉과 **1D 분봉은 완전히 다른 API**다. 일/주/월 
 - **`acml_tr_pbmn`은 누적 거래대금** → 개별 분봉 `trading_value`로 매핑하지 않는다(§12.4).
 - **실제 응답 정렬 방향**(과거→최신 vs 역순)은 **fixture 또는 수동 smoke로 확인**한다(정규화 시 오름차순 timestamp로 통일).
 - 반복 조회에는 기존 `KIS_MAX_CHUNKS`(무한 루프 상한) 골격(§8.1)을 응용한다.
+- **단일 거래일 보장(실측 §12.9 반영):** 역방향 페이징이 09:00 이전 구간에서 **직전 영업일 봉**을 반환할 수 있다. 그 봉의 `HHMMSS`(예 `15xxxx`)는 여전히 `INTRADAY_MARKET_OPEN_HHMMSS="090000"`보다 커서 장시작 컷오프가 걸리지 않으므로, 이대로 두면 normalized 결과에 **여러 날짜가 섞인다**(smoke 재현: `--input-hour 153000`이 2026-07-03~2026-07-06 혼입). 따라서 `fetch_minute_ohlcv`는 **첫 non-empty batch의 거래일을 target date로 고정**하고, 이후(또는 같은 batch 안에서) 다른 날짜 candle이 나오면 **same-day subset만 유지하고 페이징을 중단**한다 → 반환 candles는 **항상 단일 거래일**. `as_of`로는 거르지 않는다(fetcher는 single-date만 보장). **`as_of.date()` 일치 여부는 supervisor `_intraday_matches_as_of`가 최종 가드**로 검사해 mismatch면 1d를 생략한다(2계층 방어).
 
 ### 12.7 env 재사용 (확정 — 신규 key 없음)
 

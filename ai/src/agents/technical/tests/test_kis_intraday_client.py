@@ -21,9 +21,9 @@ from src.agents.technical.services.kis_client import (
 
 # kis_mapping §12.4 output2 원소(필드명 확정). 부가 필드가 있어도 무시한다.
 def _out2(hour: str, close: str = "100000", *, high: str = "100500", low: str = "099500",
-          vol: str = "120") -> dict:
+          vol: str = "120", date: str = "20260706") -> dict:
     return {
-        "stck_bsop_date": "20260706", "stck_cntg_hour": hour,
+        "stck_bsop_date": date, "stck_cntg_hour": hour,
         "stck_oprc": "099900", "stck_hgpr": high, "stck_lwpr": low,
         "stck_prpr": close, "cntg_vol": vol,
         "acml_tr_pbmn": "123456789",  # 누적 — candle에 매핑되면 안 됨
@@ -155,6 +155,69 @@ def test_fetch_limit_zero_short_circuits(monkeypatch):
     result = fetch_minute_ohlcv("373220", input_hour="093000", limit=0)
     assert result.candles == []
     assert calls["hours"] == []  # 호출 자체를 하지 않음
+
+
+# ── 단일 거래일 가드 (역방향 페이징이 직전 영업일로 넘어가지 않게) ────────────────
+def test_fetch_same_date_multi_batch_all_returned(monkeypatch):
+    # 모든 batch가 같은 날(20260706) → 전부 반환·오름차순·dup 없음(기존 동작 유지)
+    b1 = _resp([_out2("093000", close="101"), _out2("092900", close="100")])
+    b2 = _resp([_out2("092800", close="99"), _out2("092700", close="98")])
+    _patch(monkeypatch, [b1, b2])
+    result = fetch_minute_ohlcv("373220", input_hour="093000")
+    ts = [c.timestamp for c in result.candles]
+    assert {t[:10] for t in ts} == {"2026-07-06"}
+    assert ts == sorted(ts) and len(ts) == len(set(ts))
+    assert ts[0] == "2026-07-06T09:27:00" and ts[-1] == "2026-07-06T09:30:00"
+
+
+def test_fetch_stops_when_batch_crosses_to_prev_date(monkeypatch):
+    # batch3이 통째로 직전 영업일(20260703) → 07-03 버리고 페이징 중단(추가 호출 없음)
+    b1 = _resp([_out2("153000", close="102"), _out2("152900", close="101")])   # 20260706
+    b2 = _resp([_out2("152800", close="100"), _out2("152700", close="99")])    # 20260706
+    b3 = _resp([_out2("153000", close="90", date="20260703"),                  # 직전 영업일
+                _out2("152900", close="89", date="20260703")])
+    extra = _resp([_out2("151000", date="20260703")])  # 절대 소비되면 안 됨
+    calls = _patch(monkeypatch, [b1, b2, b3, extra])
+    result = fetch_minute_ohlcv("373220", input_hour="153000")
+    assert {c.timestamp[:10] for c in result.candles} == {"2026-07-06"}  # 07-03 없음
+    assert len(calls["hours"]) == 3  # b1·b2·b3까지만 호출(extra 미소비 = paging stop)
+
+
+def test_fetch_mixed_date_within_batch_keeps_target_only(monkeypatch):
+    # 한 batch에 07-06·07-03이 섞임 → 07-06만 keep, 07-03 drop, stop(fail-safe)
+    b1 = _resp([_out2("091000", close="100")])                    # 07-06 → target 확정
+    b2 = _resp([_out2("090100", close="99"),                      # 07-06
+                _out2("153000", close="80", date="20260703")])    # 07-03 섞임
+    extra = _resp([_out2("152900", date="20260703")])  # 소비 금지
+    calls = _patch(monkeypatch, [b1, b2, extra])
+    result = fetch_minute_ohlcv("373220", input_hour="091000")
+    assert [c.timestamp for c in result.candles] == ["2026-07-06T09:01:00", "2026-07-06T09:10:00"]
+    assert len(calls["hours"]) == 2  # b2에서 stop, extra 미소비
+
+
+def test_fetch_first_batch_prev_date_returns_single_date(monkeypatch):
+    # 첫 non-empty batch가 직전 영업일만 → 그 날짜를 target으로 단일 날짜 결과 허용
+    # (fetcher는 single-date만 보장; as_of.date() 불일치 생략은 supervisor 몫)
+    b1 = _resp([_out2("153000", close="100", date="20260703"),
+                _out2("152900", close="99", date="20260703")])
+    _patch(monkeypatch, [b1])  # 이후 empty
+    result = fetch_minute_ohlcv("373220", input_hour="153000")
+    assert {c.timestamp[:10] for c in result.candles} == {"2026-07-03"}  # 단일 날짜(허용)
+    assert len(result.candles) == 2
+
+
+def test_fetch_input_hour_153000_smoke_single_date(monkeypatch):
+    # 실측 smoke 재현: 07-06 15:30 시작 → 페이징이 07-03으로 넘어가려 하면 07-06만 남김.
+    # normalized first/last timestamp가 모두 07-06이어야 한다(날짜 혼입 회귀).
+    b1 = _resp([_out2("153000", close="102"), _out2("150100", close="101")])   # 07-06
+    b2 = _resp([_out2("150000", close="100"), _out2("143100", close="99")])    # 07-06
+    b3 = _resp([_out2("153000", close="90", date="20260703")])                 # 07-03 진입 시도
+    _patch(monkeypatch, [b1, b2, b3])
+    result = fetch_minute_ohlcv("373220", input_hour="153000")
+    ts = [c.timestamp for c in result.candles]
+    assert ts, "07-06 candles present"
+    assert ts[0][:10] == "2026-07-06" and ts[-1][:10] == "2026-07-06"  # first·last 모두 07-06
+    assert all(t[:10] == "2026-07-06" for t in ts)
 
 
 # ── input_hour 검증 (네트워크 호출 전 fail-fast) ──────────────────────────────

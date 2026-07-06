@@ -687,6 +687,10 @@ def fetch_minute_ohlcv(
     `as_of` 시각(또는 현재 시각) 기준으로 시작한다. 미래 시각은 공식 샘플상 현재 기준으로 조회되며,
     코드에서 과하게 보정하지 않는다. `limit`이 있으면 최신 `limit`개만 반환한다.
     빈 output2는 빈 candles로 반환하고, **status(휴장·장전 등) 판정은 하지 않는다**(supervisor 몫).
+
+    **단일 거래일 보장:** 역방향 페이징이 09:00 이전 구간에서 직전 영업일 봉을 반환할 수 있으므로,
+    반환 candles는 **첫 non-empty batch의 거래일 하루로 제한**한다(다른 날짜가 나오면 same-day subset만
+    확보하고 중단). `as_of`로는 거르지 않는다 — `as_of.date()` 일치 여부는 supervisor 최종 가드가 본다.
     """
     validate_ticker(ticker)
     if limit is not None and limit <= 0:
@@ -701,6 +705,7 @@ def fetch_minute_ohlcv(
         by_ts: dict[str, IntradayCandle] = {}
         metadata: dict | None = None
         oldest_hour: str | None = None
+        target_date: str | None = None  # 첫 non-empty batch의 거래일(YYYY-MM-DD). 결과를 이 하루로 제한.
         for _ in range(INTRADAY_MINUTE_MAX_CALLS):
             data = _call_minute_chart(settings, token, ticker, cursor, client)
             if metadata is None:
@@ -708,10 +713,19 @@ def fetch_minute_ohlcv(
             candles = parse_kis_intraday_output(_extract_output2(data))
             if not candles:  # 자연 종료: 더 과거(또는 데이터) 없음
                 break
-            for candle in candles:
+            # 날짜 경계 가드: KIS 역방향 페이징이 09:00 이전에서 직전 영업일 봉을 내줄 수 있다
+            # (그 봉의 HHMMSS는 여전히 090000보다 커서 아래 장시작 컷오프가 안 걸린다). 결과를 첫
+            # non-empty batch의 거래일 하루로 제한해 여러 날짜가 섞이지 않게 한다(kis_mapping §12.6).
+            if target_date is None:
+                target_date = max(c.timestamp for c in candles)[:10]  # 커서에 가장 가까운 세션
+            same_day = [c for c in candles if c.timestamp[:10] == target_date]
+            crossed_date = len(same_day) != len(candles)  # 직전 영업일 등 다른 날짜 candle 포함
+            for candle in same_day:
                 by_ts[candle.timestamp] = candle
+            if crossed_date:  # 날짜 경계 넘어감 → same-day subset만 확보하고 페이징 중단(추가 호출 없음)
+                break
 
-            batch_oldest_hour = min(c.timestamp[11:].replace(":", "") for c in candles)  # HHMMSS
+            batch_oldest_hour = min(c.timestamp[11:].replace(":", "") for c in same_day)  # HHMMSS
             if batch_oldest_hour <= INTRADAY_MARKET_OPEN_HHMMSS:  # 장 시작 이전까지 확보
                 break
             if oldest_hour is not None and batch_oldest_hour >= oldest_hour:  # 정체
