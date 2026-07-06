@@ -140,6 +140,7 @@ def report_node(state: FundamentalAgentState) -> dict[str, Any]:
         insights=state.get("insights", {}),
         score_breakdown=state["score_breakdown"],
         analyst_plan=state.get("analyst_plan", {}),
+        evidence_graph=state.get("evidence_graph", {}),
         meta=meta,
     )
     response = FundamentalResponse(
