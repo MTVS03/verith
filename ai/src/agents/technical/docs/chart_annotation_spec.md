@@ -16,6 +16,20 @@
 4. Backend/AI가 반환할 `chart_data` 구조를 명확히 한다.
 5. 프론트가 임의로 신호를 만들지 않고, 코드가 계산한 annotation만 렌더링하게 한다.
 
+### 1.1 indicators / chart annotations / technical_signals 역할 분리
+
+"신호(signal)"라는 단어가 세 레이어에 혼용되기 쉬워 경계를 여기서 못박는다. 셋은 **목적·시점·소비처가 다르다**.
+
+| 레이어 | 무엇 | 시점 | 소비처 |
+| --- | --- | --- | --- |
+| **indicators/** | MA·RSI·volume average·support/resistance 등 **계산 재료**(배열). 사용자에게 직접 보이는 전략 레이어가 **아니다**. | 전 봉(per-index) | annotations·technical_signals가 읽어 씀 |
+| **chart annotations** | 차트 위에 표시되는 **시각 이벤트·전략·패턴 후보**. 과거 구간까지 rolling/historical로 표시될 수 있다. **UX/시각화 중심 데이터**. 예: `golden_cross`·`dead_cross`·`volume_spike`·`support_touch`·`resistance_touch`·`rsi_overbought`·`rsi_oversold`·`box_range_candidate`·`box_breakout_candidate`·`cup_handle_candidate` | visible 구간 rolling | 프론트 차트 렌더링(§16) |
+| **technical_signals** | 최신 스냅샷 기반의 **요약/점수화 신호**. `signal_score`·`confidence`·`final_regime` 판단에 쓰인다. 현재는 주로 **최신 일봉 기준** 성격이 강하다. | 최신 일봉 1개 | signal_score·confidence·regime |
+
+**핵심 불변식:**
+- chart annotations는 **시각화 레이어**이고, 그 자체로 `signal_score`·`final_regime`·top-level `confidence`/`risk`를 바꾸지 않는다.
+- `technical_signals`(최신 스냅샷)와 chart annotations(historical 이벤트)는 **의도적으로 다른 시점**을 가리킨다 — 5y 주봉 차트의 annotation과 화면 요약 `technical_signals`가 서로 다른 timeframe을 가리킬 수 있다.
+
 ---
 
 ## 2. 기본 원칙
@@ -86,7 +100,21 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 | `1y` | 중간 | 주요 크로스, 강한 거래량 신호, 의미 있는 지지·저항 |
 | `5y` | 요약 | 장기 추세, 핵심 지지·저항, 주요 패턴 후보만 |
 
-표시 개수가 너무 많으면 최신 신호와 중요도가 높은 신호를 우선한다.
+표시 개수가 너무 많으면 최신 신호와 중요도가 높은 신호를 우선한다. 위 표시 수준은 **§14 importance 레벨과 매핑**해 구현한다(아래 §4.1).
+
+### 4.1 표시 정책 ↔ importance 매핑 (diagnostics 근거)
+
+**실측(diagnostics, 373220 · `scripts/diagnose_chart_annotations.py`)**: `5y`에서 annotation 29개 중 **high=4, medium=25**였다. **`5y`를 high 중심으로만 표시하면 대부분의 annotation이 숨겨진다**(29개 중 4개만 표시 = 86% 숨김). 반면 `1y`는 35개(high=5, medium=30)라 high+medium이면 전부 보인다. 즉 "전략이 안 보인다"의 큰 축은 봉 부족이 아니라 **표시 정책(importance 필터)** 이다.
+
+**권장 표시 정책 초안** (importance 정본은 §14):
+
+| 기간 | 권장 기본 표시 | 비고 |
+| --- | --- | --- |
+| `3m` | high + medium 중심 | low는 UI 옵션/보조 토글 대상 |
+| `1y` | high + medium 기본 | box/cup 후보가 low면 기본 표시에서 빠질 수 있어 **importance 재검토 대상** |
+| `5y` | **high + selected medium** | high-only는 annotation을 지나치게 숨김(실측). 장기 패턴 후보(`cup_handle_candidate`·`box_breakout_candidate`)는 **조건부 medium 이상 승격** 검토 |
+
+> **이번 커밋 범위**: 위는 **문서 정책 정리**다. 코드의 importance 값·프론트 렌더링은 **바꾸지 않는다**. 실제 조정은 후속 `feat(technical): retier annotation importance`(+ 프론트 정책)에서 분리해 진행한다.
 
 ---
 
@@ -171,6 +199,15 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 패턴 관련 annotation은 확정이 아니라 **후보(candidate)**로 표기한다. 패턴 탐지는 오탐 가능성이 높으므로 "확정" 표현을 쓰지 않는다(honest scoping).
 
 `annotation.kind`의 허용값 정본은 이 문서다. 전역 enum(`enums.md`)에는 넣지 않고, 차트 렌더링 전용 값으로 이 문서에서 관리한다.
+
+### 7.1 패턴 후보는 annotation-only (signal 미반영)
+
+`cup_handle_candidate`·`box_breakout_candidate`는 v1에서 **chart annotation으로만** 표현한다:
+- `signal_score`·`final_regime`·top-level `confidence`/`risk`에 **직접 반영하지 않는다**.
+- `technical_signals.pattern`에 **바로 섞지 않는다**(아래 참조).
+- 즉 이들은 §1.1의 **chart annotations 레이어에만** 속하고 technical_signals·regime 계산과 분리된다.
+
+**`technical_signals.pattern` 오해 방지**: 현재 `technical_signals.pattern`은 컵앤핸들/박스권/다중 캔들 패턴 **탐지기가 아니다**. v1에서는 **최신 candle의 bullish/bearish/neutral 성격을 요약하는 단순 신호**에 가깝다(`synthesis/signal_score.py`). 위 패턴 후보(cup/box)와는 별개다. `pattern`이라는 이름 변경은 **계약 변경**이므로 이번 단계에서 하지 않고 **별도 phase에서 검토**한다.
 
 ---
 
@@ -321,6 +358,8 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 
 기간별 기본 표시: `3m`=high+medium+일부 low, `1y`=high+medium, `5y`=high 중심. 프론트는 토글로 low도 표시할 수 있다.
 
+> **주의(§4.1 diagnostics)**: `5y`=high 중심은 실측상 annotation 대부분(medium)을 숨긴다(373220: 29개 중 4개만 high). 권장 조정안은 §4.1의 **`5y`=high + selected medium**이며, 장기 패턴 후보는 조건부 medium 이상 승격을 검토한다. **코드 importance 값 변경은 후속 커밋**(`retier annotation importance`)에서 다룬다.
+
 ---
 
 ## 15. 중복 annotation 제한
@@ -405,6 +444,25 @@ annotation 생성 과정은 trace(`chart_generate` 노드)에 남긴다: `period
 | CHART-08 | 박스권 조건 충족 | box_range_candidate 생성 |
 | CHART-09 | 데이터 부족 | 해당 annotation 생성하지 않음 |
 | CHART-10 | 같은 kind가 가까운 기간 내 반복 | 중복 제거 규칙 적용 |
+
+---
+
+## 19.1 구현 로드맵 (`feat/technical-chart-patterns`) · fetch 보류
+
+annotation 개선은 아래 순서로 진행한다(진단 근거는 §4.1).
+
+1. annotation diagnostics (`scripts/diagnose_chart_annotations.py`)
+2. annotation / technical_signals 역할 분리 (§1.1·§7.1 — 본 커밋)
+3. period별 display / importance 정책 (§4.1 — 정책 문서화, 코드 미변경)
+4. rolling support/resistance annotations
+5. rolling `box_range_candidate`
+6. `box_breakout_candidate`
+7. `cup_handle_candidate`
+8. 필요 시 fetch lookback 재검토
+
+**fetch lookback 확대는 지금 하지 않는다(보류).** rolling box/cup 탐지를 구현한 뒤 diagnostics에서 **pre-buffer 부족이 historical 후보 누락의 실제 원인으로 확인될 때만** 재검토한다.
+*(EN: Fetch lookback expansion is deferred. Revisit only after rolling box/cup detection is implemented and diagnostics show historical rolling candidates are missing due to insufficient pre-buffer.)*
+참고: 최신(latest) 패턴 후보 탐지는 현재 capacity로 충분하며(1y·5y 실측), 5y는 종목 상장이력 자체가 짧으면(예: 373220 ≈4.5년) fetch를 늘려도 historical rolling이 원천적으로 제한된다.
 
 ---
 

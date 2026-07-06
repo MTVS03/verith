@@ -183,6 +183,10 @@ src/ai/
 | report_id 별도 짧은 ID | `technical_reports.id` UUID를 그대로 사용(`api_spec.md` §4.3) |
 | 행동 패턴 기반 종목 발견(개인화 ③) | 실사용 로그 필요 → Future Work |
 
+**`feat/technical-chart-patterns` 브랜치 우선순위** (chart annotation·패턴 개선, 정본: `chart_annotation_spec.md §19.1`):
+diagnostics → role clarification(§1.1·§7.1) → display/importance policy(§4.1) → rolling S/R → rolling box_range → box_breakout → cup_handle → fetch lookback 재검토.
+**fetch lookback 확대는 즉시 진행하지 않는다** — rolling box/cup 탐지 후 diagnostics에서 historical pre-buffer 부족이 실제 원인으로 확인될 때만 재검토한다(최신 패턴 탐지는 현재 capacity로 충분). `cup_handle_candidate`·`box_breakout_candidate`는 **annotation-only**이며 `signal_score`/`final_regime`/top-level `confidence`/`risk`에 반영하지 않는다.
+
 `kis_mapping.md`는 KIS 응답 필드 구조가 공식 저장소로 검증되어 **1차 문서를 작성했다**(문서번호 17). 단, 실제 응답 JSON 값·건수·날짜 정렬 방향은 KIS 접근토큰 발급 후 실제 호출 결과로 채운다(kis_mapping §11 TODO).
 
 ---
