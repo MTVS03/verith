@@ -865,7 +865,7 @@ def test_res_redis_down_kis_fail_no_stale_propagates():
 
 # ── TRACE: trace_sink 주입 관측 (feat/technical-trace-logger) ──────────────────
 from src.agents.technical.nodes._llm_utils import LlmCallError  # noqa: E402
-from src.agents.technical.services.trace_logger import InMemoryTraceSink  # noqa: E402
+from src.agents.technical.observability.trace_logger import InMemoryTraceSink  # noqa: E402
 
 
 def _types(events):
@@ -963,6 +963,37 @@ def test_trace_llm_call_failure_preprocess_fallback():
     _out, events = _run_trace([LlmCallError("boom"), FOCUS_OK, INTERP_BAD, INTERP_BAD])
     fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "normalize_question"]
     assert fb and fb[0]["output_summary"]["fallback_type"] == "template_fallback"
+
+
+def test_trace_validation_event_per_attempt():
+    # INTERP_BAD 반복 → attempt마다 validation 이벤트(검증③ 결과)가 기록됨
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    vals = [e for e in events if e["event_type"] == "validation" and e["node"] == "interpret_report"]
+    assert len(vals) == REGEN_MAX_COUNT + 1               # 1차 + 재생성 각각 검증
+    v0 = vals[0]["output_summary"]
+    assert v0["attempt"] == 0 and v0["validation_result"] == "failed"
+    assert "label_matched" in v0 and "failed_indicators" in v0
+    assert vals[0]["status"] == "failed"
+
+
+def test_trace_validation_pass_on_good_interpretation():
+    good = _good_interp_response(DAILY, WEEKLY, MONTHLY)
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, good])
+    vals = [e for e in events if e["event_type"] == "validation"]
+    assert len(vals) == 1 and vals[0]["status"] == "success"
+    assert vals[0]["output_summary"]["validation_result"] == "passed"
+    # interpret_report node_end에 최종 source·regen·fallback 요약이 실린다
+    end = next(e for e in events if e["node"] == "interpret_report" and e["event_type"] == "node_end")
+    s = end["output_summary"]
+    assert "interpretation_source" in s and "detail_source_count" in s
+    assert s["template_fallback_used"] is False
+
+
+def test_trace_validation_has_no_raw_llm_response():
+    # INTERP_BAD의 raw 응답 문구가 validation/trace 어디에도 남지 않는다
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    dumped = json.dumps(events, ensure_ascii=False)
+    assert "흥미롭습니다" not in dumped                    # raw interpretation_text 미기록
 
 
 def test_trace_sink_failure_does_not_break_run():

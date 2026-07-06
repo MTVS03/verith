@@ -5,7 +5,11 @@
 KIS/cache/LLM 등 세부는 `node` + event_type + summary 조합으로 표현한다(§7·§9·§12).
 
 **secret-safe(§10·§13):** 원본 query는 `original_query_hash`(salt 없는 sha256)만, LLM prompt/response·
-OHLCV 배열·API key/token은 절대 기록하지 않는다. error message는 type + 안전 truncate만 남긴다.
+OHLCV 배열·API key/token은 절대 기록하지 않는다. 방어는 2겹이다 — ① key 이름 기반 redaction
+(`_sanitize`), ② **값-패턴 스크럽(`_scrub_secrets`)** 으로 key가 무해해도 값 자체가 secret 형태
+(sk-·Bearer·URL credential·JWT·`k=v` secret·긴 고엔트로피 토큰)면 가린다. 단 trace_id·event_id·
+`*_hash`는 긴 토큰 redaction에서 면제해 식별자 정합성을 지킨다. error(예외/dict/str)는 모두
+`_sanitize_error`를 거쳐 raw로 sink에 들어가지 못한다.
 trace 실패는 호출자(agent 실행)로 전파하지 않는다 — `TraceLogger`가 sink.emit을 try/except로 격리한다.
 
 sink는 주입식이다: `NoopTraceSink`(기본·아무것도 안 함)·`InMemoryTraceSink`(테스트)·`JsonlTraceSink`(운영,
@@ -16,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -32,9 +37,26 @@ EventType = Literal[
 ]
 EventStatus = Literal["success", "failed", "skipped"]
 
-# metadata/summary에 절대 넣으면 안 되는 secret 키워드(방어적 redaction — allowlist 실패 대비).
+# metadata/summary에 절대 넣으면 안 되는 secret 키워드(key 이름 기반 방어적 redaction).
 _SECRET_HINTS = ("key", "secret", "token", "password", "authorization", "prompt", "query")
 _REDACTED = "***redacted***"
+_MAX_SUMMARY_STR = 500  # summary string 값 최대 길이(원문 박제 방지)
+
+# 값-패턴 기반 secret redaction — key 이름이 무해해도 값 자체가 secret이면 가린다(§10·§13).
+# 실제 운영 secret은 문자열 안에 "secret/token" 같은 키워드를 항상 담지 않으므로 형태로 잡는다.
+_URL_CRED = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://)[^\s:/@]+:[^\s:/@]+@")  # scheme://user:pass@
+_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")     # JWT (eyJ...)
+_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]+")                       # Bearer <token>
+_SK_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{6,}")                                # OpenAI sk-.../sk-proj-...
+_KV_SECRET = re.compile(  # api_key= / appsecret: / token= / password= / credential= / authorization=
+    r"(?i)([A-Za-z]*(?:api[_-]?key|app[_-]?key|app[_-]?secret|secret|token|password|credential"
+    r"|authorization))\s*[=:]\s*\S+")  # KIS appkey/appsecret 포함(secret이 복합어 접미어여도 매칭)
+# 긴 고엔트로피 토큰(letter+digit 혼합 20자+ base64/hex) — trace_id/*_hash 등 식별자에는 적용 안 함.
+_LONG_TOKEN = re.compile(
+    r"(?=[A-Za-z0-9+/_=\-]*[A-Za-z])(?=[A-Za-z0-9+/_=\-]*[0-9])[A-Za-z0-9+/_=\-]{20,}")
+
+# 값-스크럽 중 "긴 토큰" 패턴을 면제할 key(식별자·해시는 긴 hex/base64처럼 보여도 유지해야 trace 정합성 유지).
+_LONG_TOKEN_EXEMPT_KEYS = ("trace_id", "event_id", "node_run_id", "original_query_hash")
 
 
 def hash_query(query: str) -> str:
@@ -42,21 +64,59 @@ def hash_query(query: str) -> str:
     return "sha256:" + hashlib.sha256(query.encode("utf-8")).hexdigest()
 
 
-def safe_error(exc: BaseException) -> dict[str, str] | None:
-    """예외 → {error_type, message} 안전 요약. message는 truncate하고 secret 키워드는 통째 redact."""
+def _allow_long_token(key: str) -> bool:
+    """이 key의 값은 긴 토큰 redaction에서 면제한다(trace_id·event_id·node_run_id·*_hash)."""
+    k = key.lower()
+    return k in _LONG_TOKEN_EXEMPT_KEYS or k.endswith("_hash")
+
+
+def _scrub_secrets(text: str, *, allow_long_tokens: bool = False) -> str:
+    """문자열 값에서 secret 형태를 redact. key 이름과 무관하게 값 패턴으로 잡는다.
+
+    URL credential·JWT·Bearer·sk-키·`k=v` secret은 항상 가리고, 긴 고엔트로피 토큰은
+    `allow_long_tokens`(식별자/해시 필드)일 때만 예외로 남긴다."""
+    if not isinstance(text, str) or not text:
+        return text
+    text = _URL_CRED.sub(r"\1" + _REDACTED + "@", text)
+    text = _JWT.sub(_REDACTED, text)
+    text = _BEARER.sub("Bearer " + _REDACTED, text)
+    text = _SK_KEY.sub(_REDACTED, text)
+    text = _KV_SECRET.sub(lambda m: f"{m.group(1)}={_REDACTED}", text)
+    if not allow_long_tokens:
+        text = _LONG_TOKEN.sub(_REDACTED, text)
+    return text
+
+
+def safe_error(exc: BaseException | None) -> dict[str, str] | None:
+    """예외 → {error_type, message} 안전 요약. message는 **값-스크럽 후 truncate**(§13).
+
+    순서: error_type 추출 → 문자열화 → value-pattern scrub → truncate. 원문 secret이 섞여도
+    형태 기반으로 가린 뒤 길이를 자른다."""
     if exc is None:
         return None
-    text = str(exc)
-    lowered = text.lower()
-    if any(h in lowered for h in ("key", "secret", "token", "password", "authorization")):
-        message = _REDACTED  # secret이 섞였을 가능성 → 통째로 가림
-    else:
-        message = text[:TRACE_MAX_ERROR_MESSAGE_LENGTH]
+    message = _scrub_secrets(str(exc))[:TRACE_MAX_ERROR_MESSAGE_LENGTH]  # scrub → truncate
     return {"error_type": type(exc).__name__, "message": message}
 
 
-def _sanitize(value: Any) -> Any:
-    """summary/metadata를 재귀 정화 — secret 힌트 key는 redact, 과대 배열/문자열은 축약."""
+def _sanitize_error(error: BaseException | dict[str, Any] | str | None) -> dict[str, Any] | None:
+    """emit error 인자 정화. raw dict/str이 sink로 바로 흘러가는 경로를 막는다.
+
+    BaseException → safe_error / dict → _sanitize(+값 스크럽) / str·기타 → 값 스크럽 + truncate."""
+    if error is None:
+        return None
+    if isinstance(error, BaseException):
+        return safe_error(error)
+    if isinstance(error, dict):
+        return _sanitize(error)  # key redaction + string 값 스크럽
+    message = _scrub_secrets(str(error))[:TRACE_MAX_ERROR_MESSAGE_LENGTH]
+    return {"message": message}
+
+
+def _sanitize(value: Any, *, allow_long_tokens: bool = False) -> Any:
+    """summary/metadata를 재귀 정화 — secret 힌트 key는 redact, 값은 스크럽, 과대 배열/문자열은 축약.
+
+    dict key가 secret 힌트면 값 통째 redact(단 `*_hash`는 예외). 무해한 key 밑의 문자열 값도
+    `_scrub_secrets`로 값-패턴 스크럽한다. 식별자/해시 필드는 긴 토큰 redaction에서 면제한다."""
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for k, v in value.items():
@@ -66,14 +126,15 @@ def _sanitize(value: Any) -> Any:
             if "hash" not in key and any(h in key for h in _SECRET_HINTS):
                 out[k] = _REDACTED
             else:
-                out[k] = _sanitize(v)
+                out[k] = _sanitize(v, allow_long_tokens=_allow_long_token(key))
         return out
     if isinstance(value, (list, tuple)):
         if len(value) > 20:  # 원천 배열 통째 저장 금지 — count로 축약
             return {"_omitted_list_len": len(value)}
-        return [_sanitize(v) for v in value]
-    if isinstance(value, str) and len(value) > 500:
-        return value[:500] + "…"
+        return [_sanitize(v, allow_long_tokens=allow_long_tokens) for v in value]
+    if isinstance(value, str):
+        scrubbed = _scrub_secrets(value, allow_long_tokens=allow_long_tokens)
+        return scrubbed[:_MAX_SUMMARY_STR] + "…" if len(scrubbed) > _MAX_SUMMARY_STR else scrubbed
     return value
 
 
@@ -195,12 +256,12 @@ class TraceLogger:
         duration_ms: int | None = None,
         input_summary: dict[str, Any] | None = None,
         output_summary: dict[str, Any] | None = None,
-        error: BaseException | dict[str, str] | None = None,
+        error: BaseException | dict[str, Any] | str | None = None,
     ) -> None:
         try:
             self._seq += 1
             ts = started_at or self.now_iso()
-            err = safe_error(error) if isinstance(error, BaseException) else error
+            err = _sanitize_error(error)  # dict/str도 반드시 정화 — raw 우회 경로 없음
             event = TraceEvent(
                 trace_id=self._trace_id,
                 event_type=event_type,

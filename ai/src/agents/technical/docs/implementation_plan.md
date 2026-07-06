@@ -68,13 +68,13 @@ src/ai/
         │   ├── focus_analysis.md
         │   ├── interpret_report.md      # Prompt 10 (종합 해석 + 지표별 detail, 단일 호출)
         │   └── regenerate_report.md     # Prompt 10-R (검증 ③ 실패 시 확정 라벨 강제 주입 재생성)
-        ├── observability/
+        ├── observability/            # 관측 가능성 계층(coding_guidelines 정본 위치)
+        │   ├── trace_logger.py       # trace event 기록(sink 주입: Noop/InMemory/JSONL, secret-safe)
         │   ├── trajectory_eval.py    # 검증 ③ (LLM 라벨 왜곡) 판정 로직
         │   └── keyword_rules.py      # 검증 ③ 키워드 사전(대표어·충돌어·금지어)
         ├── services/                 # IO/인프라 어댑터(주입식)
         │   ├── kis_client.py         # KIS REST 클라이언트
-        │   ├── cache_service.py      # OHLCV 캐시(Redis-like 주입)
-        │   └── trace_logger.py       # trace event 기록(sink 주입: Noop/InMemory/JSONL)
+        │   └── cache_service.py      # OHLCV 캐시(Redis-like 주입)
         ├── nodes/                    # LangGraph 노드 = 얇은 어댑터(state→모듈 호출→state)
         │   ├── normalize_question.py    # 1. 질문 안전 정규화 (LLM)
         │   ├── focus_analysis.py        # 2. 분석 포커스 정리 (LLM)
@@ -129,7 +129,7 @@ src/ai/
 | `synthesis/risk.py` | risk_flags, risk note 생성 | `enums.md`, `contracts.md` |
 | `charts/chart_builder.py` | charts[].period, chart_data(overlays·subcharts·annotations) 생성 | `contracts.md`, `frontend_mapping.md`, `chart_annotation_spec.md` |
 | `prompts/*.md` | 질문 정규화·포커스 정리·리포트 문장·재생성 프롬프트 **텍스트 자원**(interpret_report.md·regenerate_report.md 분리) | `prompts.md` |
-| `services/trace_logger.py` | trace event 기록(sink 주입: Noop/InMemory/JSONL). supervisor·agent에 `trace_sink` 주입식 배선(미주입=Noop, 기존 동작 불변). secret-safe: 원문 query는 `original_query_hash`만·prompt/response·OHLCV 배열·API key/token 미기록. **운영 sink 생성·JSONL 경로·config 결선은 AI endpoint 통합 단계로 이연** | `trace_schema.md` |
+| `observability/trace_logger.py` | **MVP trace 로거** — trace event 기록(sink 주입: Noop/InMemory/JSONL). supervisor·agent에 `trace_sink` 주입식 배선(미주입=Noop → 출력 불변, timestamp/hash/wrapper 생성 등 경미한 오버헤드만). secret-safe 2겹: ① key 이름 redaction ② 값-패턴 스크럽(sk-·Bearer·URL credential·JWT·`k=v`·긴 토큰; trace_id·`*_hash`는 면제). 원문 query는 `original_query_hash`만·prompt/response·OHLCV 배열·API key/token 미기록. run/node/cache/KIS/LLM validation/retry/fallback 핵심 이벤트 우선, **trace_schema 전체 상세 필드·운영 sink 생성·JSONL 경로·config 결선은 후속 AI endpoint/production 통합으로 이연** | `trace_schema.md` |
 | `observability/trajectory_eval.py` | 검증 ③ LLM 라벨 왜곡 판정 | `test_plan.md`, `trace_schema.md` |
 | `observability/keyword_rules.py` | 검증 ③ 키워드 사전(금지어·라벨 충돌) | `test_plan.md`, `prompts.md` |
 | `nodes/*.py` | LangGraph 노드 어댑터(state 받아 모듈·프롬프트 호출 → state에 결과 얹음). 계산 로직은 옆 모듈, 순서 조율은 supervisor. `nodes/interpret_report.py`가 **10번 노드**(prompts/*.md·trajectory_eval 사용, 재생성 루프는 supervisor) | `architecture.md`, `prompts.md`, `contracts.md` |
@@ -154,7 +154,7 @@ src/ai/
 7. `regime/multiframe.py` (alignment_flag 보정)
 8. `synthesis/` signal_score → confidence → risk
 9. `charts/chart_builder.py`
-10. `services/trace_logger.py`(sink 주입식·secret-safe·구현 완료). supervisor·agent에 `trace_sink` 배선(미주입=Noop, 기존 동작 불변). 운영 sink 생성·JSONL 경로·config 결선은 AI endpoint 통합으로 이연.
+10. `observability/trace_logger.py`(sink 주입식·secret-safe·**MVP**). supervisor·agent에 `trace_sink` 배선(미주입=Noop → 출력 불변, 경미한 오버헤드만). trace_schema 전체 상세 필드·운영 sink 생성·JSONL 경로·config 결선은 후속 AI endpoint/production 통합으로 이연.
 11. `prompts/*.md`(interpret_report.md·regenerate_report.md 등 텍스트 자원) + `nodes/*.py`(LLM 노드 어댑터) 연결
 12. `observability/trajectory_eval.py` + `keyword_rules.py` (검증 ③). 노드 10(`nodes/interpret_report.py`)의 문장 검증이 이걸 호출한다
 13. `supervisor/technical_supervisor.py` — 노드 1~10 실행 순서 조율, trace_id 생성(주입 없으면 uuid4), 예외 분기, **검증 ③ 재생성 루프(1회)→template fallback**, 그리고 **로컬 dataclass → `contracts.*` 최종 조립**(여기서 처음으로 `TechnicalAgentOutput`을 만든다). 조립 규약:
@@ -164,7 +164,7 @@ src/ai/
     - `normalize_question` 결과는 노드 2 입력으로만 쓰고 출력에 싣지 않는다. **`focus_analysis`의 `analysis_focus`·`focus_summary`는 노드 10 payload에 "설명 강조 힌트"로 전달**한다(interpret가 이 관점을 문장에 반영, 확정값은 불변 — prompts.md §4). `schemas/state.py`는 만들지 않고 supervisor 내부 로컬 흐름으로 둔다.
     - **재생성/부분 폴백:** 1차 interpret 후 `REGEN_MAX_COUNT`(config.py)만큼 재생성한다. 소진 후에도 실패하면 **granular fallback** — `interpretation.text`가 통과하면 유지하고 실패한 지표의 `detail`만 template로 대체한다(REGEN-04). 구조 자체를 못 믿으면(파싱 실패·details 개수/코드값 불일치·확정값 재생성 필드) 전체 폴백. 재생성 횟수는 코드 하드코딩이 아니라 `config.py REGEN_MAX_COUNT`(정본 `config.md §9`)에서 가져온다.
     - **LLM 호출 실패 경계(typed):** `nodes/_llm_utils.LlmCallError`로 `client.complete` 실패만 감싼다. supervisor는 이 타입만 잡아 fallback하고, 프롬프트 파일 로딩·타입·프로그래밍 오류는 전파한다.
-    - **trace 관측(완료 — `feat/technical-trace-logger`):** `run(..., trace_sink=None)` 주입식. sink가 있으면 `TraceLogger`가 `trace_start`/`trace_end`(요약)로 실행을 감싸고, 각 노드를 `node()` 컨텍스트로 `node_start`/`node_end`(duration·요약)로 기록한다. event_type은 `trace_schema.md` 정본 8개만 쓰고 세부는 `node`+summary로 표현한다: cache_hit(`data_collect` node_end `cache_hit_by_period`)·stale 폴백(`fallback` `fallback_type=stale_cache`)·regime_unavailable 시 노드 6·7·8 `status=skipped`(§9.1)·LLM 재생성(`retry`)·template fallback(`fallback` `fallback_type=template_fallback`)·chart annotation 개수(`chart_generate` node_end). **secret-safe(§10·§13):** 원문 query는 `original_query_hash`(salt 없는 sha256)만, LLM prompt/response·OHLCV/annotation 배열·API key/token은 미기록(count/enum/hash만). **trace emit 실패는 흡수**해 계산·판단 로직에 영향을 주지 않으며 sink 미주입이면 출력·성능이 불변이다. 운영 sink 생성·JSONL 경로·config 결선은 AI endpoint 통합으로 이연.
+    - **trace 관측(MVP — `feat/technical-trace-logger`, `observability/trace_logger.py`):** `run(..., trace_sink=None)` 주입식. sink가 있으면 `TraceLogger`가 `trace_start`/`trace_end`(요약)로 실행을 감싸고, 각 노드를 `node()` 컨텍스트로 `node_start`/`node_end`(duration·요약)로 기록한다. **허용 event_type enum은 8개**(`trace_schema.md` 정본)이며 **현재 MVP에서 실제 emit하는 이벤트는 7종**(`trace_start·trace_end·node_start·node_end·validation·retry·fallback`)이다. `error`는 독립 이벤트로도 허용되지만 지금은 `node_end`/`trace_end`의 `status=failed` + `error` 필드 중심으로 기록한다. 세부는 `node`+summary로 표현한다: cache_hit(`data_collect` node_end `cache_hit_by_period`)·stale 폴백(`fallback` `fallback_type=stale_cache`)·regime_unavailable 시 노드 6·7·8 `status=skipped`(§9.1)·검증③ 결과(`validation`: attempt·label_matched·interpretation_failed·details_structure_failed·failed_indicators)·LLM 재생성(`retry`)·template fallback(`fallback`)·chart annotation 개수(`chart_generate` node_end)·최종 interpret source/재생성/폴백 여부(`interpret_report` node_end). **secret-safe(§10·§13) 2겹:** ① key 이름 redaction ② 값-패턴 스크럽(sk-·Bearer·URL credential·JWT·`k=v` secret·긴 고엔트로피 토큰; `trace_id`·`event_id`·`*_hash`는 식별자 정합성 위해 긴 토큰 redaction 면제). 원문 query는 `original_query_hash`(salt 없는 sha256)만, LLM prompt/response·OHLCV/annotation 배열·API key/token은 미기록(count/enum/hash만). error(예외/dict/str)는 모두 정화 경로를 거쳐 raw로 sink에 못 들어간다. **trace emit 실패는 흡수**해 계산·판단 로직에 영향이 없다. **sink 미주입이면 출력 결과는 불변**이고, timestamp/hash/event wrapper 생성 등 경미한 관측 오버헤드만 있다. **trace_schema 전체 상세 필드**(지표별 값·date range·confidence components 등)·운영 sink 생성·JSONL 경로·config 결선은 후속 AI endpoint/production 통합으로 이연한다.
     - **as_of → KIS 조회 종료일(완료 — `refactor/technical-as-of-data-fetch`):** supervisor가 `as_of`를 `run_data_collect(as_of=…)`로 넘기고, `data_collect`가 `kis_client.normalize_end_date`로 `end_date`(date)로 정규화해 `fetch_multi_timeframe_ohlcv(end_date=…)`→`fetch_ohlcv(end_date=…)`→`FID_INPUT_DATE_2`까지 스레딩한다(D/W/M 동일 기준일). 생략 시 오늘 기준(하위 호환). **미래 `as_of`는 ValueError**(tz-안전 비교). `fetch_ohlcv_range`·pagination은 무변경 재사용. 상세: `kis_mapping.md §8.2`.
 14. `agent.py` (얇은 wrapper) + 상위 `src/ai/api/internal.py` 라우터 연결 — router→agent→supervisor 흐름 완성
 15. `test_plan.md` 기준 단위테스트 작성 (검증 ①②③ 케이스). `technical_supervisor.run()`을 mock 입력으로 직접 호출해 HTTP 없이 end-to-end 검증

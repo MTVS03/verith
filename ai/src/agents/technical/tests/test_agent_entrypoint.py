@@ -125,7 +125,7 @@ def test_agent08_returns_supervisor_result(monkeypatch):
 _ALLOWED_IMPORT_MODULES = frozenset({
     "__future__", "typing",
     "schemas.contracts",
-    "services.trace_logger",  # TraceSink 타입만(주입 통과용) — sink 생성/경로는 agent가 모른다
+    "observability.trace_logger",  # TraceSink 타입만(주입 통과용) — sink 생성/경로는 agent가 모른다
     "supervisor", "supervisor.technical_supervisor",
 })
 

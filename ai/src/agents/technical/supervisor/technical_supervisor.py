@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -60,7 +61,7 @@ from ..schemas.enums import (
 from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
 from ..services.cache_service import OhlcvCache, as_of_identity
-from ..services.trace_logger import TraceLogger, TraceSink, hash_query
+from ..observability.trace_logger import TraceLogger, TraceSink, hash_query
 from ..services.kis_client import (
     IntradayFetchResult,
     KisApiError,
@@ -544,6 +545,7 @@ def _interpret(
                     "fallback_type": "template_fallback", "reason": "llm_call_failed"})
                 result = _full_fallback(regime, signal, signals, risks, regen_count=i)
                 break
+            _emit_validation(trace, attempt, i)  # 검증③ 결과 요약(원문 미포함)
             last = attempt
             if attempt.passed:
                 source = GenerationSource.LLM if i == 0 else GenerationSource.LLM_REGENERATED
@@ -554,11 +556,40 @@ def _interpret(
             trace.emit("fallback", node="interpret_report", output_summary={
                 "fallback_type": "template_fallback", "reason": "regen_exhausted"})
             result = _granular_fallback(last, regime, signal, signals, risks, regen_count=REGEN_MAX_COUNT)
-        span.output_summary = {
-            "outcome": result.verification.outcome.value,
-            "regen_count": result.verification.regen_count,
-        }
+        span.output_summary = _interpret_summary(result)
         return result
+
+
+def _emit_validation(trace: TraceLogger, attempt: _Attempt, attempt_idx: int) -> None:
+    """검증③(LLM 라벨 왜곡) 결과를 validation 이벤트로 남긴다 — raw LLM 응답이 아닌 요약만(§9·§12)."""
+    ev = attempt.result
+    if ev is None:  # 파싱 실패 → 검증 자체 불가
+        trace.emit("validation", "failed", node="interpret_report",
+                   output_summary={"attempt": attempt_idx, "validation_result": "parse_failed"})
+        return
+    trace.emit(
+        "validation", "success" if ev.passed else "failed", node="interpret_report",
+        output_summary={
+            "attempt": attempt_idx,
+            "validation_result": "passed" if ev.passed else "failed",
+            "label_matched": not ev.interpretation_failed,
+            "interpretation_failed": ev.interpretation_failed,
+            "details_structure_failed": ev.details_structure_failed,
+            "failed_indicators": sorted(ev.failed_indicators),  # 지표명만(원문 없음)
+        },
+    )
+
+
+def _interpret_summary(result: _Interpretation) -> dict[str, object]:
+    """interpret_report node_end 요약 — 최종 source·detail source 분포·재생성/폴백 여부(원문 없음)."""
+    detail_source_count = Counter(d.detail_source.value for d in result.details)
+    return {
+        "interpretation_source": result.interpretation.source.value,
+        "detail_source_count": dict(detail_source_count),
+        "regen_count": result.verification.regen_count,
+        "template_fallback_used": result.verification.outcome == VerificationOutcome.TEMPLATE_FALLBACK,
+        "outcome": result.verification.outcome.value,
+    }
 
 
 def _success(
