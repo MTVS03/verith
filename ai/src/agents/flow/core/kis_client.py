@@ -9,6 +9,7 @@
   - .env의 KIS_API_KEY/KIS_API_SECRET/KIS_BASE_URL로 토큰 발급 후 호출.
   - 비밀·토큰은 로그/예외 메시지에 넣지 않는다.
   - 실패 시 다른 방법을 연쇄 시도하지 않고 명확한 예외로 멈춘다.
+    (단 하나의 예외: 유량 제어 EGW00201 은 0.6초 후 1회 재시도 — _get_json 참고.)
 
 실물로 확인된 변환 4가지(scratch_kis.py로 검증):
   (1) 필드 매핑: *_ntby_tr_pbmn → 개인/외국인/기관, acml_tr_pbmn → 거래대금
@@ -37,6 +38,11 @@ _OAUTH_PATH = "/oauth2/tokenP"
 _QUOTATIONS_PATH = "/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily"
 _TR_ID = "FHPTJ04160001"  # 종목별 투자자매매동향(일별). 실전전용.
 _TIMEOUT = 15.0
+
+# KIS 유량 제어: 짧은 창에 조회가 겹치면 HTTP 500 + EGW00201 로 선차단된다
+# (scratch_kis_ratelimit.py 로 실물 확인 — 간헐적, 11ms 게이트웨이 즉답).
+_RATE_LIMIT_MSG_CD = "EGW00201"       # "초당 거래건수를 초과하였습니다."
+_RATE_LIMIT_RETRY_WAIT_SEC = 0.6      # 유량 창 하나를 넘기는 대기
 
 # (1) KIS 원본 필드 → signals 컬럼. 매핑의 단일 출처(매직 스트링 금지).
 _FIELD_MAP: dict[str, str] = {
@@ -148,6 +154,44 @@ def _get_token(client: httpx.Client, app_key: str, app_secret: str) -> str:
     return token
 
 
+def _auth_headers(app_key: str, app_secret: str, token: str, tr_id: str) -> dict:
+    """KIS 조회 공통 헤더. TR마다 tr_id만 다르다."""
+    return {
+        "content-type": "application/json",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": tr_id,
+        "custtype": "P",
+    }
+
+
+def _get_json(client: httpx.Client, path: str, headers: dict, params: dict, what: str) -> dict:
+    """조회 GET 의 HTTP 층 공통 경로 — 실패 처리를 한 곳에 모은다.
+
+    유일한 재시도: KIS 유량 제어 신호(HTTP 500 + EGW00201)에 한해 0.6초 대기 후
+    딱 1회. 문서화된 흐름 제어에 대한 규정된 대응이지, 원인 불명 실패의 연쇄
+    시도가 아니다 — 그 외 모든 실패는 즉시 KisError(규약 유지). 에러 메시지에
+    msg_cd·msg1 을 담아 원인이 바로 보이게 한다(상태코드만으론 진단 불가 교훈).
+    """
+    for attempt in (1, 2):
+        resp = client.get(path, headers=headers, params=params)
+        if resp.status_code == 200:
+            return resp.json()
+        try:
+            body = resp.json()
+            msg_cd, msg1 = body.get("msg_cd"), body.get("msg1")
+        except ValueError:
+            msg_cd, msg1 = None, None
+        if attempt == 1 and resp.status_code == 500 and msg_cd == _RATE_LIMIT_MSG_CD:
+            time.sleep(_RATE_LIMIT_RETRY_WAIT_SEC)
+            continue
+        raise KisError(
+            f"KIS {what} 조회 실패 (HTTP {resp.status_code}, msg_cd={msg_cd}, msg1={msg1})."
+        )
+    raise AssertionError("unreachable")
+
+
 def fetch_supply_demand(
     base_date: date | str,
     ticker: str = config.TARGET_TICKER,
@@ -168,16 +212,9 @@ def fetch_supply_demand(
 
     with httpx.Client(base_url=base_url, timeout=_TIMEOUT) as client:
         token = _get_token(client, app_key, app_secret)
-        resp = client.get(
-            _QUOTATIONS_PATH,
-            headers={
-                "content-type": "application/json",
-                "authorization": f"Bearer {token}",
-                "appkey": app_key,
-                "appsecret": app_secret,
-                "tr_id": _TR_ID,
-                "custtype": "P",
-            },
+        body = _get_json(
+            client, _QUOTATIONS_PATH,
+            headers=_auth_headers(app_key, app_secret, token, _TR_ID),
             params={  # KIS 공식 예제 기준 파라미터 세트(scratch_kis.py로 확인)
                 "FID_COND_MRKT_DIV_CODE": "J",
                 "FID_INPUT_ISCD": ticker,
@@ -185,11 +222,9 @@ def fetch_supply_demand(
                 "FID_ORG_ADJ_PRC": "",
                 "FID_ETC_CLS_CODE": "",
             },
+            what="투자자매매동향",
         )
 
-    if resp.status_code != 200:
-        raise KisError(f"KIS 조회 실패 (HTTP {resp.status_code}).")
-    body = resp.json()
     if body.get("rt_cd") != "0":
         # KIS 업무 에러: 코드/메시지 그대로 보여주고 멈춘다(임의 재시도 금지).
         raise KisError(
@@ -228,3 +263,4 @@ def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
 
     # (4) 컬럼 순서를 signals 스키마와 정확히 일치시켜 반환 (+ 기관 세부 7주체).
     return df[[COL_INDI, COL_FORE, COL_INST, COL_VALUE, *INST_DETAIL]]
+
