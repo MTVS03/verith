@@ -180,6 +180,38 @@ GRAPH_ENABLE_RELATED_TO: bool = False   # (Company)-[:RELATED_TO]->(Company) —
 # 두어 향후 다른 키(예: content hash)로 교체할 여지를 남긴다 — 현재 지원 값은 "url" 뿐.
 GRAPH_NEWSREF_KEY: str = "url"
 
+# ---------------------------------------------------------------------------
+# backend(:8000) HTTP 접속 설정 — TASK 08. 이 에이전트가 PostgreSQL·Neo4j 에 닿는 유일 경로는
+# services/backend/ 의 클라이언트이며, 그마저도 backend HTTP 다(절대규칙 1). 접속·타임아웃·재시도·
+# 엔드포인트 경로는 배포 환경에 따라 바뀌므로 코드에 하드코딩하지 않고 여기(env/config)서 읽는다
+# (CLAUDE.md §7). ⚠️ 실제 경로·요청/응답 스키마 확정은 verith/docs/api_contract.md(미확정, §8) —
+# 아래 경로는 SCHEMA_SPEC §7.2 초안을 따른 '잠정값'이다(확정값처럼 굳히지 않는다).
+# ---------------------------------------------------------------------------
+BACKEND_BASE_URL: str = (os.getenv("BACKEND_BASE_URL") or "").strip() or "http://localhost:8000"
+BACKEND_TIMEOUT: float = float(os.getenv("BACKEND_TIMEOUT") or 10.0)      # backend 호출 타임아웃(초)
+BACKEND_MAX_RETRIES: int = int(os.getenv("BACKEND_MAX_RETRIES") or 2)     # 재시도 횟수(총 시도 = 1 + N)
+BACKEND_RETRY_BACKOFF: float = float(os.getenv("BACKEND_RETRY_BACKOFF") or 1.0)  # 재시도 간 대기(초, 지수 backoff 기준)
+# 인증: 잠정 "내부망 전용" 전제라 기본 비어 있음(SCHEMA_SPEC §7.1, CLAUDE.md 미확정). 쓰기·삭제
+# 엔드포인트가 있어 외부 노출 시 내부 토큰 필수 → 토큰 도입 시 이 값만 채우면 client._request 가
+# Authorization 헤더를 붙인다(하드코딩 금지 → env). 확정 전에는 None(무인증 내부망).
+BACKEND_AUTH_TOKEN: str | None = (os.getenv("BACKEND_AUTH_TOKEN") or "").strip() or None
+# (선택) 저장 payload 가 지나치게 클 때의 상한. 단, articles·graph_batch 는 원자적 한 배치로 함께
+# 보내야 하고(§3.3 원자성 계약: url→news_id 해소가 같은 요청 안에서 이뤄짐), 기사만 분할하면 다른
+# 청크의 NewsRef(url)가 해소되지 않으므로 '무해한 분할' 방식 확정은 api_contract 로 미룬다. 현재는
+# None(한 번에 전송)만 지원하며, 값 설정 시 save_client 가 경고 후 한 번에 보낸다.
+_BACKEND_SAVE_BATCH_SIZE_ENV = (os.getenv("BACKEND_SAVE_BATCH_SIZE") or "").strip()
+BACKEND_SAVE_BATCH_SIZE: int | None = int(_BACKEND_SAVE_BATCH_SIZE_ENV) if _BACKEND_SAVE_BATCH_SIZE_ENV else None
+
+# 잠정 엔드포인트 경로 — verith/docs/api_contract.md 에서 확정(SCHEMA_SPEC §7.2 초안). 경로 문자열을
+# 코드 여기저기 흩지 않고 여기 한 곳에 모은다. {event_id} 는 query_client 가 path 로 치환한다.
+BACKEND_SAVE_PATH: str = "/news/batch/save"                       # 배치 저장(POST): {articles, graph_batch} → SaveResponse
+BACKEND_CLEANUP_PATH: str = "/news/cleanup"                       # 7일 롤링 삭제 트리거(POST) → CleanupResponse
+BACKEND_RECENT_EVENTS_PATH: str = "/news/events/recent"          # 병합 후보(GET, TASK 05) → CandidateEvent[]
+BACKEND_EVENT_STATS_PATH: str = "/news/events/stats"             # 중요도 통계(GET, TASK 06) → EventArticleStats | null
+BACKEND_QUERY_SUBJECT_PATH: str = "/news/query/subject"         # 종목 single-hop(GET) → SubjectQueryResponse
+BACKEND_QUERY_SHARED_PATH: str = "/news/query/shared"          # 공유 이벤트 multi-hop(GET) → SubjectQueryResponse
+BACKEND_EVENT_ARTICLES_PATH: str = "/news/events/{event_id}/articles"  # 이벤트별 기사 on-demand(GET, ?limit=N) → ArticleRef[]
+
 # 추출 지시 + 출력 스키마. 감성·영향도를 요청하지 않는다(§2-4). 본문/제목은 신뢰 불가 외부 입력이므로
 # 구획(delimiter)으로 감싸 '데이터'로만 취급하고, 구획 내부의 어떤 지시·명령·URL 요청도 따르지 않는다(§3.1-6).
 EXTRACT_SYSTEM_PROMPT: str = """당신은 한국어 경제 뉴스에서 구조화된 정보를 추출하는 도구다.
