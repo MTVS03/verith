@@ -4,6 +4,8 @@
 
 가격/기술적 분석 에이전트의 실행 과정에서 남기는 trace 로그 구조를 정의한다. 이 문서는 최종 리포트 DB 스키마가 아니라, **노드별 입력·출력·계산·검증·예외·폴백을 추적하기 위한 관측 스키마**다.
 
+> **구현 상태(`feat/technical-trace-logger`):** 이 스키마는 `services/trace_logger.py`(`TraceLogger`+`TraceSink`: Noop/InMemory/JSONL)로 구현됐고, `supervisor/technical_supervisor.py`·`agent.py`에 `trace_sink` **주입식**으로 배선됐다(미주입=Noop → 출력·성능 불변, trace emit 실패는 흡수해 계산에 영향 없음). event_type은 이 문서의 정본 8개만 쓰고 세부(cache_hit·stale·재생성 등)는 `node`+event_type+summary 조합으로 표현한다. secret-safe(§10·§13): 원문 query는 `original_query_hash`만, LLM prompt/response·시세/annotation 배열·API key/token은 미기록. **운영 sink 인스턴스 생성·JSONL 파일 경로·config 결선은 AI endpoint 통합 단계로 이연**한다.
+
 ---
 
 ## 1. 문서 목적
