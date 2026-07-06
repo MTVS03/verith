@@ -348,3 +348,12 @@ CLEANUP_MISFIRE_GRACE_SEC: int = int(os.getenv("CLEANUP_MISFIRE_GRACE_SEC") or 3
 BATCH_RUN_ON_START: bool = (os.getenv("BATCH_RUN_ON_START") or "").strip().lower() in ("1", "true", "yes")
 # 시작 시각 분산(초) — 여러 인스턴스의 동시 부하 완화(선택). 0이면 분산 없음.
 SCHEDULER_JITTER_SEC: int = int(os.getenv("SCHEDULER_JITTER_SEC") or 0)
+
+# ---------------------------------------------------------------------------
+# LangGraph 배선 옵션 — TASK 11. graph.py 가 두 흐름(배치·질의)을 조립·실행할 때의 실행 옵션만 둔다.
+# 도메인 값(임계값·경로·프롬프트·가중치)은 각 TASK config 를 재사용하고 여기서 다시 정의하지 않는다(§3.3).
+# 배선 라이브러리(LangGraph) import 는 graph.py 에만 격리한다(교체 가능, CLAUDE.md §7).
+# ---------------------------------------------------------------------------
+# 그래프 스텝 상한(무한루프 방어). 배치·질의는 선형이라 라이브러리 기본으로 충분하나, 하드코딩 대신
+# 여기서 읽어 배포별로 조정 가능하게 둔다(CLAUDE.md §7).
+GRAPH_RECURSION_LIMIT: int = int(os.getenv("GRAPH_RECURSION_LIMIT") or 25)
