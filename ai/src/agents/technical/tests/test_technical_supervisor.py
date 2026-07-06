@@ -616,3 +616,51 @@ def test_flag_on_final_regime_and_signal_unchanged(monkeypatch):
     assert with_flag.regime == without.regime      # final_regime 등 불변
     assert with_flag.signal == without.signal       # top-level confidence/signal_score 불변
     assert with_flag.intraday_context.signal_score_adjustment == 0.0
+
+
+# ── SUP intraday: as_of 날짜 정합성 가드 ─────────────────────────────────────
+# AS_OF = 2026-06-30. INTRADAY_CANDLES 는 2026-06-30(일치), 아래는 다른 날짜(2026-07-06, 불일치).
+_INTRADAY_OTHER_DATE = [
+    IntradayCandle(
+        timestamp=f"2026-07-06T09:{i:02d}:00",
+        open=100.0 + i * 0.1, high=100.0 + i * 0.1 + 0.3,
+        low=100.0 + i * 0.1 - 0.3, close=100.0 + i * 0.1,
+        volume=120, interval="1min",
+    )
+    for i in range(10)
+]
+
+
+def test_intraday_matches_as_of_helper():
+    d = date(2026, 6, 30)
+    assert sup._intraday_matches_as_of(INTRADAY_CANDLES, d) is True         # 같은 날짜
+    assert sup._intraday_matches_as_of(_INTRADAY_OTHER_DATE, d) is False    # 다른 날짜
+    assert sup._intraday_matches_as_of(_INTRADAY_OTHER_DATE, None) is True  # as_of None → 기존 동작
+    assert sup._intraday_matches_as_of([], d) is True                       # empty → True(상위 처리)
+    assert sup._intraday_matches_as_of(INTRADAY_CANDLES + _INTRADAY_OTHER_DATE, d) is False  # 일부만 다름
+
+
+def test_intraday_date_match_included():
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)  # 2026-06-30 == as_of.date()
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
+    assert out.intraday_context is not None
+
+
+def test_intraday_date_mismatch_omitted_direct():
+    out = _run(_INTRA, intraday_candles=_INTRADAY_OTHER_DATE)  # 2026-07-06 != as_of 2026-06-30
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+    assert out.intraday_context is None
+
+
+def test_intraday_date_mismatch_omitted_fetcher():
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher(candles=_INTRADAY_OTHER_DATE))
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+    assert out.intraday_context is None
+
+
+def test_intraday_date_mismatch_keeps_dwm_and_regime():
+    base = _run(_INTRA)
+    mm = _run(_INTRA, intraday_candles=_INTRADAY_OTHER_DATE)
+    assert {p.period.value for p in mm.charts} == {"3m", "1y", "5y"}
+    assert mm.regime == base.regime      # final_regime 등 불변
+    assert mm.signal == base.signal       # top-level confidence/signal_score 불변

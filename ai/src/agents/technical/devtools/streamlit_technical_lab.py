@@ -409,6 +409,10 @@ def _render_query_section(company: str) -> tuple[str, date, datetime]:
         as_of_date: date = st.date_input("as_of (기준일)", value=date.today(), max_value=date.today())
     as_of_dt = datetime.combine(as_of_date, time(15, 30))  # naive — smoke 와 동일 계열
     st.caption(f"기준일 {as_of_date.isoformat()} → as_of={as_of_dt.isoformat()} (KIS end_date 동일 기준)")
+    if as_of_date != date.today():
+        st.warning(
+            "KIS 분봉은 당일 데이터만 제공됩니다. as_of 가 오늘이 아니면 1d intraday chart 는 생략될 수 있습니다."
+        )
     return query, as_of_date, as_of_dt
 
 
