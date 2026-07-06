@@ -18,6 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .chart import ChartData
+from .intraday import IntradayChartData, IntradayContext
 from .enums import (
     AlignmentFlag,
     ChartPeriod,
@@ -103,16 +104,18 @@ class RiskSummary(_StrictModel):
 
 class ChartPayload(_StrictModel):
     """기간별 차트. → REPORT_CHARTS. chart_data는 자유 dict가 아니라 chart_annotation_spec.md 정본
-    구조를 따르는 ChartData 계약으로 검증한다(schemas/chart.py). chart_builder가 만든 dict가 여기서
-    ChartData로 파싱·검증된다."""
+    구조를 따르는 계약으로 검증한다. D/W/M은 ChartData(schemas/chart.py), 1d 장중 분봉은
+    IntradayChartData(schemas/intraday.py)로, `candle_unit`을 discriminator로 하는 판별 유니온이다.
+    chart_builder가 만든 dict가 여기서 candle_unit에 따라 해당 타입으로 파싱·검증된다."""
     period: ChartPeriod
-    chart_data: ChartData
+    # D/W/M → ChartData(candle_unit D/W/M), 1d → IntradayChartData(candle_unit "1min").
+    chart_data: ChartData | IntradayChartData = Field(discriminator="candle_unit")
 
-    # period ↔ candle_unit 정합 (chart_annotation_spec §3): 3m·1y=D, 5y=W.
+    # period ↔ candle_unit 정합 (chart_annotation_spec §3·§3.1): 3m·1y=D, 5y=W, 1d=1min.
     @model_validator(mode="after")
     def _period_matches_candle_unit(self) -> ChartPayload:
         expected = {ChartPeriod.THREE_MONTHS: "D", ChartPeriod.ONE_YEAR: "D",
-                    ChartPeriod.FIVE_YEARS: "W"}[self.period]
+                    ChartPeriod.FIVE_YEARS: "W", ChartPeriod.ONE_DAY: "1min"}[self.period]
         if self.chart_data.candle_unit != expected:
             raise ValueError(
                 f"period={self.period.value}의 candle_unit은 {expected}여야 합니다: "
@@ -159,3 +162,6 @@ class TechnicalAgentOutput(_StrictModel):
     # interpretation 은 항상 존재(null 아님) — 불가 시 template_fallback 문장으로 안전 착지.
     interpretation: InterpretationResult
     verification: VerificationResult
+    # 1D 장중 분봉 보조 컨텍스트(Beta). 없으면 None — 기존 D/W/M 분석은 그대로 통과한다.
+    # final_regime 을 바꾸지 않는 보조 근거이며, 생성·보정 로직은 후속(Phase 2)에서 붙는다.
+    intraday_context: IntradayContext | None = None

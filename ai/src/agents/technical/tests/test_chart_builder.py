@@ -53,8 +53,10 @@ def rich_daily(n=80) -> list[OHLCV]:
 # ── payload / source / candle_unit ────────────────────────────────────────────
 def test_three_payloads_for_each_period():
     payloads = build_chart_payloads(rich_daily(), rich_daily(), rich_daily())
-    assert len(payloads) == 3
-    assert {p.period for p in payloads} == set(ChartPeriod)
+    # D/W/M 3종만 생성(1d 장중 분봉은 별도 경로라 여기서 미생성). ChartPeriod 전량과 같지 않다.
+    assert {p.period for p in payloads} == {
+        ChartPeriod.THREE_MONTHS, ChartPeriod.ONE_YEAR, ChartPeriod.FIVE_YEARS,
+    }
 
 
 def test_source_and_candle_unit_mapping():

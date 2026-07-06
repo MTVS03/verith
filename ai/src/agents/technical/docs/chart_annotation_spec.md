@@ -70,6 +70,8 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 `1d`를 정식 지원하려면 다음이 필요하다: KIS **분봉 전용 API**(`inquire-daily-itemchartprice`의 D/W/M과 다른 TR), 분봉 캐시(`ohlcv:minute:{ticker}`, TTL 1분), 장중 갱신 주기, `enums.md`·`config.md`의 `period` 확장, 별도 테스트. MVP는 이 확장을 열어두되 스코프에 넣지 않는다.
 
+**현재 구현 상태(Beta):** `ChartPeriod`에 `1d` 추가, `charts[].chart_data`의 `ChartData | IntradayChartData` 판별 유니온(`candle_unit` 기준, 1d=`1min`), `IntradayCandle.timestamp`(날짜+시각) 스키마, 1d chart payload·`intraday_context`(hint·alignment·confidence_adjustment·risk_notes) 조립이 코드에 반영되어 있다(계약은 `contracts.md` "1D intraday" 참조). **KIS 분봉 매핑은 공식 샘플로 확정됐고(`kis_mapping.md §12`), `kis_client.fetch_minute_ohlcv`는 구현 완료**다. supervisor에는 optional `intraday_fetcher` 주입 경로가 있으나 **production default-on은 아니다** — 기본 agent path는 D/W/M과 동일하고, fetcher를 주입한 경우에만 1d가 생성된다(fetch 실패·빈 응답은 D/W/M을 깨지 않음). 위 표의 "장중 거래량 급증 표시"·"분봉 RSI 표시" 및 **캔들 위 마커 annotation은 여전히 Future Work(Phase 3)**이며 현재 구현된 것처럼 기술하지 않는다. `final_regime`은 intraday로 바꾸지 않고, top-level `confidence`/`signal_score`/`risk`도 이 단계에서 변경하지 않는다.
+
 용어 주의: "실시간"이 아니라 **"장중/분봉/준실시간 참고 차트"**로 표기한다. WebSocket 틱 스트리밍은 별개 기능이며 MVP·Beta 범위 밖이다. 분봉 REST 조회(1~5분 갱신)까지가 Beta 후보다.
 
 ---

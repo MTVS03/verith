@@ -41,7 +41,7 @@ _AI_ROOT = Path(__file__).resolve().parents[4]
 if str(_AI_ROOT) not in sys.path:
     sys.path.insert(0, str(_AI_ROOT))
 
-from src.agents.technical.agent import run_technical_agent  # noqa: E402
+from src.agents.technical.supervisor import technical_supervisor  # noqa: E402
 from src.agents.technical.config import (  # noqa: E402
     BATTERY_TICKERS,
     REQUIRED_ENV_KEYS,
@@ -70,8 +70,26 @@ from src.agents.technical.schemas.enums import (  # noqa: E402
     RiskFlag,
     Signal,
 )
+from src.agents.technical.schemas.intraday import (  # noqa: E402
+    IntradayCandle,
+    IntradayChartData,
+    IntradayContext,
+)
 from src.agents.technical.schemas.ohlcv import OHLCV  # noqa: E402
+from src.agents.technical.charts.intraday_chart_builder import (  # noqa: E402
+    build_intraday_chart_payload,
+)
+from src.agents.technical.charts.intraday_context_builder import (  # noqa: E402
+    build_intraday_context,
+)
+from src.agents.technical.synthesis.intraday_alignment import (  # noqa: E402
+    apply_intraday_hint_to_context,
+)
+from src.agents.technical.synthesis.intraday_adjustment import (  # noqa: E402
+    apply_intraday_adjustments,
+)
 from src.agents.technical.services.kis_client import (  # noqa: E402
+    fetch_minute_ohlcv,
     fetch_multi_timeframe_ohlcv,
 )
 
@@ -395,26 +413,32 @@ def _render_query_section(company: str) -> tuple[str, date, datetime]:
 
 
 def _render_kis_raw_section(
-    ticker: str, as_of_date: date, env_ok: bool,
+    ticker: str, as_of_date: date, as_of_dt: datetime, env_ok: bool,
 ) -> dict[str, list[OHLCV]] | None:
-    """4. Raw KIS D/W/M. 버튼 클릭 시에만 real KIS 호출. 현재 조건과 일치하는 raw 만 반환."""
-    st.header("4. Raw KIS D/W/M 데이터 확인")
+    """4. Raw KIS D/W/M + 1d intraday. 버튼 클릭 시에만 real KIS 호출. 현재 조건 D/W/M raw 반환."""
+    st.header("4. Raw KIS 데이터 확인 (D/W/M + 1d intraday)")
     st.caption(
-        "[KIS 데이터 가져오기] 버튼을 눌렀을 때만 real KIS 를 호출합니다. "
-        "Streamlit rerun(기간 변경·tab·JSON 확인)에서는 재호출하지 않고 session_state 를 재사용합니다."
+        "[KIS 데이터 가져오기] 한 번으로 D/W/M(필수)과 1d 장중 분봉(best-effort)을 함께 가져옵니다. "
+        "1d 실패/빈 응답은 D/W/M 을 막지 않습니다. rerun(기간·tab·JSON)에서는 재호출하지 않고 session_state 재사용."
     )
     if st.button("KIS 데이터 가져오기 (real KIS)", disabled=not env_ok, type="primary"):
-        with st.spinner("real KIS 호출 중 (D/W/M)..."):
+        with st.spinner("real KIS 호출 중 (D/W/M + 1d)..."):
             try:
                 raw = fetch_multi_timeframe_ohlcv(ticker, end_date=as_of_date)
                 st.session_state["kis_data"] = raw
                 st.session_state["kis_data_sig"] = _kis_sig(ticker, as_of_date)
-                # 조건이 바뀌었으니 이전 agent 출력·서명 무효화
-                st.session_state.pop("agent_output", None)
+                st.session_state.pop("agent_output", None)  # 조건 변경 → 이전 출력 무효화
                 st.session_state.pop("agent_sig", None)
-                st.success("KIS 데이터 가져오기 완료 — session_state 에 저장했습니다.")
+                st.success("D/W/M 가져오기 완료.")
             except Exception as exc:  # noqa: BLE001 - QA 도구: 원인 메시지를 화면에 그대로 노출
                 st.exception(exc)
+            # 1d intraday는 best-effort — 실패/빈 응답이어도 D/W/M 을 막지 않는다.
+            try:
+                st.session_state["kis_intraday"] = fetch_minute_ohlcv(ticker, as_of=as_of_dt)
+                st.success("1d intraday 가져오기 완료(best-effort).")
+            except Exception as exc:  # noqa: BLE001 - intraday 실패는 경고만
+                st.session_state["kis_intraday"] = None
+                st.warning(f"1d intraday 조회 실패(무시하고 D/W/M 진행): {exc}")
 
     raw_cached: dict[str, list[OHLCV]] | None = st.session_state.get("kis_data")
     raw_sig = st.session_state.get("kis_data_sig")
@@ -429,6 +453,7 @@ def _render_kis_raw_section(
             f"저장된 KIS 데이터는 다른 조건({raw_sig})입니다. "
             f"현재 조건({current_sig})으로 [KIS 데이터 가져오기]를 다시 눌러 주세요."
         )
+    st.markdown("**D/W/M raw**")
     st.dataframe(pd.DataFrame(_raw_summary_rows(raw_cached)), use_container_width=True, hide_index=True)
     with st.expander("타임프레임별 최근 봉 미리보기"):
         for unit, bars in raw_cached.items():
@@ -436,7 +461,29 @@ def _render_kis_raw_section(
             tail = [b.model_dump() for b in bars[-10:]]
             st.dataframe(pd.DataFrame(tail), use_container_width=True, hide_index=True)
 
+    _render_intraday_raw_summary(st.session_state.get("kis_intraday"))
     return raw_cached if matched else None  # agent 는 현재 조건과 일치할 때만 사용
+
+
+def _render_intraday_raw_summary(fetched: object) -> None:
+    """4. 1d intraday raw 요약(IntradayFetchResult). 없으면 안내만."""
+    st.markdown("**1d intraday raw** (best-effort)")
+    if fetched is None:
+        st.caption("1d intraday 없음(미조회·실패·빈 응답) — Agent 실행 시 D/W/M 만 나옵니다.")
+        return
+    candles = fetched.candles
+    if not candles:
+        st.caption("1d intraday candles 빈 응답(장전/장후/휴장 가능) — Agent 실행 시 1d 생략.")
+        return
+    ts = [c.timestamp for c in candles]
+    st.dataframe(
+        pd.DataFrame([{
+            "candles": len(ts), "from": ts[0], "to": ts[-1],
+            "previous_close": fetched.previous_close, "latest_price": fetched.latest_price,
+            "cumulative_volume": fetched.cumulative_volume,
+        }]),
+        use_container_width=True, hide_index=True,
+    )
 
 
 def _render_agent_summary_section(
@@ -446,8 +493,9 @@ def _render_agent_summary_section(
     """5. Agent Output Summary. 실행 + stale 가드 + 요약. 현재 조건 출력만 반환."""
     st.header("5. Agent Output Summary")
     st.caption(
-        "run_technical_agent() 을 fake LLM + injected fetcher(§4 캐시 재사용)로 실행합니다. "
-        "→ KIS 이중 호출 없음."
+        "supervisor.run() 을 fake LLM + §4 캐시(D/W/M + 1d) 재사용으로 실행합니다 → KIS 이중 호출 없음. "
+        "1d intraday 가 있으면 charts 에 1d 가 함께 포함됩니다(best-effort). "
+        "(run_technical_agent 는 intraday_fetcher 를 받지 않아 lab 에서만 supervisor.run 직접 호출)"
     )
     current_sig = _agent_sig(ticker, as_of_dt, query)
     can_run = usable_raw is not None
@@ -458,8 +506,15 @@ def _render_agent_summary_section(
         cached = usable_raw
 
         def cached_fetcher(_ticker: str, *, end_date: object = None) -> dict[str, list[OHLCV]]:
-            """§4 에서 받은 raw 를 그대로 반환 — 파이프라인이 KIS 를 다시 부르지 않게 한다."""
+            """§4 에서 받은 D/W/M raw 를 그대로 반환 — 파이프라인이 KIS 를 다시 부르지 않게 한다."""
             return cached
+
+        # §4 에서 캐시한 1d intraday 를 재사용해 supervisor 에 주입(있고 candles 가 있을 때만).
+        fetched_intraday = st.session_state.get("kis_intraday")
+        intraday_fetcher = None
+        if fetched_intraday is not None and fetched_intraday.candles:
+            def intraday_fetcher(_ticker: str, *, as_of: object = None, **_kw: object) -> object:
+                return fetched_intraday
 
         agent_input = TechnicalAgentInput(
             ticker=ticker,
@@ -467,12 +522,13 @@ def _render_agent_summary_section(
             request_id=f"lab_{uuid.uuid4().hex[:12]}",
             as_of=as_of_dt,
         )
-        with st.spinner("run_technical_agent 실행 중..."):
+        with st.spinner("supervisor.run 실행 중..."):
             try:
-                output = run_technical_agent(
+                output = technical_supervisor.run(
                     agent_input,
                     llm_client=LabFakeLlm(company_name=company),
                     fetcher=cached_fetcher,
+                    intraday_fetcher=intraday_fetcher,
                 )
                 st.session_state["agent_output"] = output
                 st.session_state["agent_sig"] = current_sig  # 이 출력이 어떤 조건 결과인지 기록
@@ -539,10 +595,18 @@ def _render_summary_metrics(output: TechnicalAgentOutput) -> None:
     m6.metric("source", output.source)
     m7.metric("verification", output.verification.outcome.value)
     m8.metric("regen_count", output.verification.regen_count)
+    periods = [p.period.value for p in output.charts]
+    ictx = output.intraday_context
     st.caption(
         f"technical_signals={len(output.technical_signals)} · risk_flags={risk_count} · "
-        f"charts={len(output.charts)} · interpretation.source={output.interpretation.source.value}"
+        f"charts={len(output.charts)} {periods} · intraday_context={'있음' if ictx else '없음'} · "
+        f"interpretation.source={output.interpretation.source.value}"
     )
+    if ictx is not None:
+        st.caption(
+            f"↳ intraday: hint={ictx.intraday_regime_hint} · alignment={ictx.regime_alignment} · "
+            f"confidence_adj={ictx.confidence_adjustment} · risk_notes={len(ictx.risk_notes)}건"
+        )
     st.markdown("**interpretation.text**")
     st.write(output.interpretation.text)
 
@@ -567,18 +631,54 @@ def _render_price_chart(cd: ChartData, view_mode: str) -> None:
     st.line_chart(_price_ma_df(cd))
 
 
+def _render_intraday_chart_view(cd: IntradayChartData, output: TechnicalAgentOutput) -> None:
+    """6~9(1d 선택 시): IntradayChartData + intraday_context 를 intraday 헬퍼로 렌더(재사용)."""
+    st.caption(
+        f"period=1d · candle_unit={cd.candle_unit} · candles={len(cd.candles)} · short_ma={len(cd.short_ma)}"
+    )
+    st.header("7. Price / Short MA (1min)")
+    view_mode = st.radio("Price chart view", ["Candlestick", "Close line"], horizontal=True,
+                         key="price_view_mode_1d")
+    _render_intraday_price(cd, view_mode)
+    st.caption(f"previous_close={cd.previous_close} · day_high={cd.day_high} · day_low={cd.day_low}")
+
+    st.header("8. Volume / VWAP")
+    st.bar_chart(_intraday_volume_df(cd))
+    ctx = output.intraday_context
+    if ctx is not None and ctx.vwap:
+        st.markdown("**VWAP** (intraday_context 계산값)")
+        st.line_chart(_intraday_vwap_df(ctx.vwap))
+    else:
+        st.caption("vwap 없음")
+
+    st.header("9. IntradayContext")
+    if ctx is not None:
+        _render_intraday_context_metrics(ctx)
+    else:
+        st.caption("intraday_context 없음")
+
+
 def _render_chart_section(output: TechnicalAgentOutput) -> tuple[str, ChartPayload] | None:
-    """6~9. 기간 선택 + Price/MA + Volume/RSI + Annotation. (period_key, payload) 반환."""
+    """6~9. 기간 선택 + Price/MA + Volume/RSI + Annotation. (period_key, payload) 반환. 1d 는 분기."""
     if not output.charts:
         st.warning("charts 가 비어 있어 §6~9 차트 검수를 건너뜁니다(data_limited 등).")
         return None
 
     # 6. Chart Period Selector
     st.header("6. Chart Period Selector")
+    st.caption(
+        "§4에서 1d intraday를 함께 가져왔으면(또는 INTRADAY_FETCH_ENABLED=True) charts에 `1d`가 포함됩니다. "
+        "1d가 없으면 intraday fetch 실패/빈 응답/flag off 중 하나입니다(D/W/M은 정상)."
+    )
     period_map = {p.period.value: p for p in output.charts}
     period_key = st.radio("기간", options=list(period_map.keys()), horizontal=True)
     payload = period_map[period_key]
     cd = payload.chart_data
+
+    if period_key == "1d":  # IntradayChartData — D/W/M 헬퍼가 아니라 intraday 헬퍼로 분기
+        _render_intraday_chart_view(cd, output)
+        return period_key, payload
+
     st.caption(
         f"period={payload.period.value} · candle_unit={cd.candle_unit} · candles={len(cd.candles)} · "
         f"MA={len(cd.overlays.moving_average)} · SR={len(cd.overlays.support_resistance)} · "
@@ -658,6 +758,221 @@ def _render_raw_json_section(
 # ─────────────────────────────────────────────────────────────────────────────
 # 오케스트레이션
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. 1D Intraday QA (fixture/manual 기반 — KIS 무관, production 재구현 없음)
+# ─────────────────────────────────────────────────────────────────────────────
+_SAMPLE_MANUAL_JSON = json.dumps(
+    [
+        {"timestamp": "2026-07-06T09:00:00", "open": 100, "high": 101, "low": 99.5,
+         "close": 100.5, "volume": 120, "interval": "1min"},
+        {"timestamp": "2026-07-06T09:01:00", "open": 100.5, "high": 101.2, "low": 100.1,
+         "close": 101.0, "volume": 150, "interval": "1min"},
+        {"timestamp": "2026-07-06T09:02:00", "open": 101.0, "high": 101.5, "low": 100.8,
+         "close": 101.3, "volume": 600, "interval": "1min"},
+    ],
+    ensure_ascii=False, indent=2,
+)
+
+
+def _sample_intraday_candles() -> list[IntradayCandle]:
+    """데모용 30개 1분봉(완만한 상승 + 후반 거래량 급증). 결정론적(랜덤 없음)."""
+    candles: list[IntradayCandle] = []
+    for i in range(30):
+        close = 100 + i * 0.08  # 완만한 상승(마지막 ≈+2.3% <3%) → upward_intraday 데모
+        candles.append(
+            IntradayCandle(
+                timestamp=f"2026-07-06T09:{i:02d}:00",
+                open=close - 0.1, high=close + 0.3, low=close - 0.3, close=close,
+                volume=600 if i == 25 else 120, interval="1min",
+            )
+        )
+    return candles
+
+
+def _parse_manual_candles(raw: str) -> list[IntradayCandle]:
+    data = json.loads(raw)
+    if not isinstance(data, list):
+        raise ValueError("JSON 최상위는 IntradayCandle 객체의 리스트여야 합니다")
+    return [IntradayCandle(**item) for item in data]
+
+
+def _intraday_price_df(cd: IntradayChartData) -> pd.DataFrame:
+    df = pd.DataFrame({"close": [c.close for c in cd.candles]},
+                      index=[c.timestamp for c in cd.candles])
+    if cd.short_ma:
+        df = df.join(pd.Series({p.timestamp: p.value for p in cd.short_ma}, name="short_ma"))
+    if cd.previous_close is not None:
+        df["previous_close"] = cd.previous_close
+    return df
+
+
+def _intraday_volume_df(cd: IntradayChartData) -> pd.DataFrame:
+    return pd.DataFrame({"volume": [c.volume for c in cd.candles]},
+                        index=[c.timestamp for c in cd.candles])
+
+
+def _intraday_vwap_df(points: list) -> pd.DataFrame:
+    """IntradayPoint 리스트(예: context.vwap) → line_chart용 DataFrame."""
+    return pd.DataFrame({"vwap": [p.value for p in points]},
+                        index=[p.timestamp for p in points])
+
+
+def _intraday_candlestick_chart(cd: IntradayChartData) -> "alt.LayerChart":
+    """intraday candlestick + short MA + previous_close/day_high/day_low 수평선(altair)."""
+    if not cd.candles:
+        raise ValueError("intraday candles 가 비어 candlestick 을 그릴 수 없습니다")
+    df = pd.DataFrame(
+        [{"timestamp": c.timestamp, "open": c.open, "high": c.high, "low": c.low, "close": c.close}
+         for c in cd.candles]
+    )
+    df["is_up"] = df["close"] >= df["open"]
+    up_down = alt.Color("is_up:N", scale=alt.Scale(domain=[True, False], range=["#d62728", "#1f77b4"]),
+                        legend=None)
+    base = alt.Chart(df).encode(x=alt.X("timestamp:T", title="time"))
+    wick = base.mark_rule().encode(y=alt.Y("low:Q", title="price"), y2="high:Q", color=up_down)
+    body = base.mark_bar().encode(
+        y="open:Q", y2="close:Q", color=up_down,
+        tooltip=["timestamp:T", "open:Q", "high:Q", "low:Q", "close:Q"],
+    )
+    layers = [wick, body]
+    if cd.short_ma:
+        ma_df = pd.DataFrame([{"timestamp": p.timestamp, "value": p.value} for p in cd.short_ma])
+        layers.append(alt.Chart(ma_df).mark_line(color="#ff7f0e").encode(x="timestamp:T", y="value:Q"))
+    for yval, color in ((cd.previous_close, "#888888"), (cd.day_high, "#2ca02c"), (cd.day_low, "#9467bd")):
+        if yval is not None:
+            layers.append(
+                alt.Chart(pd.DataFrame({"y": [yval]})).mark_rule(strokeDash=[4, 4], color=color).encode(y="y:Q")
+            )
+    return alt.layer(*layers).resolve_scale(color="independent").properties(height=380)
+
+
+def _render_intraday_price(cd: IntradayChartData, view_mode: str) -> None:
+    if view_mode == "Candlestick":
+        if alt is None:
+            st.warning("Candlestick view is unavailable. Showing close line fallback.")
+        else:
+            try:
+                st.altair_chart(_intraday_candlestick_chart(cd), use_container_width=True)
+                return
+            except Exception as exc:  # noqa: BLE001 - fallback + 원인은 expander
+                st.warning("Candlestick view is unavailable. Showing close line fallback.")
+                with st.expander("candlestick 렌더 오류 상세"):
+                    st.exception(exc)
+    st.line_chart(_intraday_price_df(cd))
+
+
+def _render_intraday_context_metrics(context: IntradayContext) -> None:
+    def _fmt(v: object, digits: int = 2) -> str:
+        return f"{v:.{digits}f}" if isinstance(v, float) else ("—" if v is None else str(v))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("status", context.status)
+    m2.metric("latest_price", _fmt(context.latest_price))
+    m3.metric("intraday_return_pct", _fmt(context.intraday_return_pct))
+    m4.metric("day_range_position", _fmt(context.day_range_position))
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("cumulative_volume", _fmt(context.cumulative_volume))
+    n2.metric("volume_spike", str(context.volume_spike))
+    n3.metric("intraday_regime_hint", context.intraday_regime_hint or "—")
+    n4.metric("regime_alignment", context.regime_alignment or "—")
+    st.caption(
+        f"latest_timestamp={context.latest_timestamp} · short_ma_trend={context.short_ma_trend} · "
+        f"day_high={context.day_high} · day_low={context.day_low} · previous_close={context.previous_close} · "
+        f"confidence_adj={context.confidence_adjustment} · signal_score_adj={context.signal_score_adjustment}"
+    )
+    if context.risk_notes:
+        st.caption("risk_notes: " + " · ".join(context.risk_notes))
+    else:
+        st.caption("risk_notes: (없음)")
+
+
+def _intraday_fixture_source(source: str) -> tuple[list | None, float | None]:
+    """Sample/Manual 소스 — 버튼으로 candles 로드. (candles, previous_close) 반환."""
+    previous_close = st.number_input("previous_close", value=100.0, step=1.0, key="intraday_prev_close")
+    manual_raw = None
+    if source == "Manual JSON":
+        manual_raw = st.text_area("IntradayCandle JSON 리스트", value=_SAMPLE_MANUAL_JSON,
+                                  height=180, key="intraday_manual_json")
+    if st.button("1D Intraday 생성/로드", key="intraday_build", type="primary"):
+        try:
+            candles = (_sample_intraday_candles() if source == "Sample fixture"
+                       else _parse_manual_candles(manual_raw or ""))
+            st.session_state["intraday_candles"] = candles
+            st.success(f"IntradayCandle {len(candles)}개 로드 완료.")
+        except Exception as exc:  # noqa: BLE001 - QA: 파싱 오류를 화면에 노출
+            st.exception(exc)
+    candles = st.session_state.get("intraday_candles")
+    if not candles:
+        st.info("[1D Intraday 생성/로드]를 눌러 sample 또는 manual candles 를 로드하세요.")
+        return None, None
+    return candles, previous_close
+
+
+def _render_intraday_qa_section(as_of_dt: datetime) -> None:
+    """11. 1D Intraday Builder QA — fixture/manual 합성 입력으로 intraday 순수 로직만 검수(KIS 무관).
+
+    real KIS 1d 는 §4 [KIS 데이터 가져오기] → §5 [Agent 실행] → §6 에서 D/W/M 과 함께 확인한다.
+    """
+    st.header("11. 1D Intraday Builder QA (fixture/manual only · no KIS call)")
+    st.caption(
+        "intraday 순수 로직(build_intraday_chart_payload / build_intraday_context / "
+        "apply_intraday_hint_to_context / apply_intraday_adjustments)을 합성·수동 입력으로 표시만 합니다(재구현 없음). "
+        "KIS 호출·자동 refresh·WebSocket·polling 없음. **real KIS 1d 는 §4~§6 리포트 경로에서 확인하세요.**"
+    )
+    source = st.radio("데이터 소스", ["Sample fixture", "Manual JSON"],
+                      horizontal=True, key="intraday_source")
+    regimes = [r.value for r in Regime]
+    final_regime_v = st.selectbox(
+        "final_regime (alignment 확인용 · D/W/M 판단 무관)",
+        options=regimes, index=regimes.index(Regime.UPTREND_INTACT.value), key="intraday_final_regime",
+    )
+
+    candles, previous_close = _intraday_fixture_source(source)
+    if not candles:
+        return
+
+    # 이미 만든 builder/helper 호출(재구현 없음). final_regime 은 라이브 QA 컨트롤.
+    payload = build_intraday_chart_payload(candles, previous_close=previous_close)
+    context = build_intraday_context(candles, previous_close=previous_close, as_of=as_of_dt)
+    context = apply_intraday_hint_to_context(context, Regime(final_regime_v))
+    context = apply_intraday_adjustments(context)  # confidence_adjustment·risk_notes 채움(context 내부만)
+    cd = payload.chart_data
+    st.caption(
+        f"period={payload.period.value} · candle_unit={cd.candle_unit} · candles={len(cd.candles)} · "
+        f"short_ma={len(cd.short_ma)} · vwap={len(cd.vwap)}"
+    )
+
+    st.subheader("Price / Short MA")
+    view_mode = st.radio("Price chart view", ["Candlestick", "Close line"], horizontal=True,
+                         key="intraday_view_mode")
+    _render_intraday_price(cd, view_mode)
+    st.caption(f"previous_close={cd.previous_close} · day_high={cd.day_high} · day_low={cd.day_low}")
+
+    st.subheader("Volume / VWAP")
+    st.bar_chart(_intraday_volume_df(cd))
+    if context.vwap:  # VWAP은 chart payload가 아니라 context에서 계산됨(build_intraday_context)
+        st.markdown("**VWAP** (context 계산값)")
+        st.line_chart(_intraday_vwap_df(context.vwap))
+    else:
+        st.caption("vwap 없음")
+
+    st.subheader("IntradayContext")
+    _render_intraday_context_metrics(context)
+
+    st.subheader("Raw")
+    st.download_button(
+        "1d chart payload JSON 다운로드", data=payload.model_dump_json(indent=2),
+        file_name="intraday_1d_payload.json", mime="application/json", key="intraday_dl",
+    )
+    with st.expander("1d chart payload JSON"):
+        st.json(payload.model_dump(mode="json"))
+    with st.expander("intraday_context JSON"):
+        st.json(context.model_dump(mode="json"))
+    with st.expander("candles table"):
+        st.dataframe(pd.DataFrame([c.model_dump() for c in cd.candles]),
+                     use_container_width=True, hide_index=True)
+
+
 def main() -> None:
     st.set_page_config(page_title="Technical Agent Lab", layout="wide")
     st.title("기술적 분석 에이전트 — 수동 시각 QA (Streamlit lab)")
@@ -669,16 +984,18 @@ def main() -> None:
     env_ok = _render_env_section()
     ticker, company = _render_ticker_section()
     query, as_of_date, as_of_dt = _render_query_section(company)
-    usable_raw = _render_kis_raw_section(ticker, as_of_date, env_ok)
+    usable_raw = _render_kis_raw_section(ticker, as_of_date, as_of_dt, env_ok)
     output = _render_agent_summary_section(
         ticker=ticker, company=company, query=query,
         as_of_dt=as_of_dt, usable_raw=usable_raw,
     )
-    if output is None:
-        return  # 아직 유효한 출력이 없으면 §6~10 은 렌더하지 않는다.
+    # §6~10(D/W/M 차트·JSON)은 유효한 agent 출력이 있을 때만. 없으면 건너뛴다(동작 유지).
+    if output is not None:
+        chart_selection = _render_chart_section(output)
+        _render_raw_json_section(output, chart_selection)
 
-    chart_selection = _render_chart_section(output)
-    _render_raw_json_section(output, chart_selection)
+    # §11 1D Intraday QA — 항상 렌더(agent 무관). Real KIS 소스는 버튼 클릭 시에만 호출.
+    _render_intraday_qa_section(as_of_dt)
 
 
 if __name__ == "__main__":

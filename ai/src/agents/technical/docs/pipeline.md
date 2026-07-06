@@ -112,6 +112,8 @@ regime 라벨도 confidence 점수도 전부 코드가 확정하고, 마지막 L
 
 **regime "판단 불가"는 신호 종합을 건너뛴다.** 판단불가 박스가 6~8번(종합·신뢰도·리스크)을 스킵하고 바로 차트로 빠진다. 국면을 못 정했으면 신호 종합도 하지 않는다 — "이 종목은 지금 판단 못 함"으로 정직하게 빠지는 흐름이다.
 
+**1D intraday(Beta)는 노드가 아니라 supervisor의 선택적 조립이다.** 위 10노드 흐름과 별개로, `intraday_candles`가 직접 주어지거나, 명시 `intraday_fetcher`가 주입되거나, **`config.INTRADAY_FETCH_ENABLED=True`(기본 False, `.env`/환경변수로 override)** 일 때만 당일 분봉 snapshot을 조회해 `charts`에 `1d`와 `intraday_context`를 조건부로 얹는다. 우선순위: 직접 candles > 명시 fetcher > (flag ON) 기본 `fetch_minute_ohlcv` > off. **기본(flag OFF)은 D/W/M과 동일**하고, intraday fetch 실패·빈 응답은 **D/W/M 흐름과 분리해 흡수**된다(전체 실패로 전파하지 않음). intraday는 `final_regime`을 바꾸지 않는다(상세: `contracts.md` "1D intraday", `config.md §9.1`, `chart_annotation_spec.md §3.1`).
+
 ---
 
 ## 관련 문서

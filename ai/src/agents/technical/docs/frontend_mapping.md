@@ -187,11 +187,13 @@
 | 기간 탭 | `charts[].period` | 3m/1y/5y 탭 |
 | 차트 데이터 | `charts[].chart_data` | 캔들/라인 차트 |
 
-**period 표시 라벨:** `3m`=3개월 / `1y`=1년 / `5y`=5년
+**period 표시 라벨:** `3m`=3개월 / `1y`=1년 / `5y`=5년 / `1d`=1일(장중, 조건부)
 
 차트 annotation 렌더링은 `chart_annotation_spec.md`의 `annotations[]`·`overlays`·`subcharts` 구조를 따른다. 프론트는 별도로 신호를 계산하지 않고 코드가 준 `chart_data`만 렌더링한다.
 
-**1일(`1d`) 탭 (Beta):** 장중 흐름 참고용이며 MVP 핵심 판단에 미반영이다. 최종 국면·신호·신뢰도는 일봉·주봉·월봉 기준으로 계산된 값을 그대로 표시한다. 프론트는 `1d` 탭에 안내 문구를 표시할 수 있다: "장중 차트는 현재 흐름 참고용이며, 최종 기술 국면은 일봉·주봉·월봉 기준으로 계산됩니다." (상세: `chart_annotation_spec.md` §3.1)
+**`charts`는 개수 고정이 아니다 — period 집합으로 처리:** `3m`·`1y`·`5y`는 항상 존재하고, `1d`(장중 분봉)는 **intraday 데이터가 있을 때만 조건부로** 포함된다. 프론트는 `charts.length == 3`을 가정하지 말고 `charts[].period` 집합으로 탭을 구성한다. `chart_data`는 **`candle_unit` 판별 유니온**이다: D/W/M은 `ChartData`(candle_unit `D`/`W`/`M`, 봉 시각은 `date`=`YYYY-MM-DD`), `1d`는 `IntradayChartData`(candle_unit `1min`, 봉 시각은 `timestamp`=`YYYY-MM-DDTHH:MM:SS`). 프론트는 `candle_unit`으로 두 구조를 분기해 렌더한다.
+
+**1일(`1d`) 탭 (Beta):** 장중 흐름 참고용이며 MVP 핵심 판단에 미반영이다. 최종 국면·신호·신뢰도는 일봉·주봉·월봉 기준으로 계산된 값을 그대로 표시한다. `IntradayChartData`는 `candles`(1분봉)·`previous_close`·`day_high/low`·`short_ma`를 담고(vwap·rsi는 선택), 관측·힌트 요약은 **`intraday_context`**(optional)로 온다: `intraday_regime_hint`(장중 흐름 힌트)·`regime_alignment`(D/W/M 국면과의 정합)·`confidence_adjustment`·`risk_notes`. **`confidence_adjustment`는 참고용 설명값(cap ±0.05)이며 top-level `signal.confidence`에 이미 반영된 값이 아니다** — 프론트는 최종 신뢰도를 바꾸는 값으로 표시하지 않는다. `signal_score_adjustment`는 0.0이다. `risk_notes`는 `intraday_context` 내부의 중립 표현 문자열 리스트로, 기존 `risk.items[]`와 별개다. 프론트는 `1d` 탭에 안내 문구를 표시할 수 있다: "장중 차트는 현재 흐름 참고용이며, 최종 기술 국면은 일봉·주봉·월봉 기준으로 계산됩니다." (상세: `chart_annotation_spec.md` §3.1) intraday 마커 annotation은 아직 제공하지 않는다(Phase 3). **`1d`는 리포트 응답에 함께 실려 온다 — 프론트가 1d 탭을 눌러 따로 조회하지 않는다.** 서버가 리포트 생성 시(`INTRADAY_FETCH_ENABLED=True` 또는 명시 주입일 때) D/W/M과 함께 `charts`에 `1d`와 `intraday_context`를 넣어 준다. 다만 **best-effort라 항상 오지는 않는다**(flag OFF·fetch 실패·빈 응답이면 `1d`·`intraday_context` 없음). 프론트는 `1d`/`intraday_context` **부재를 정상 상태로** 처리하고, 있으면 1d 탭을 표시한다.
 
 ---
 

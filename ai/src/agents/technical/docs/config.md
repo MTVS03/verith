@@ -255,6 +255,28 @@ REGEN_MAX_COUNT = 1             # 검증 ③ 실패 시 재생성 최대 횟수
 *연결: `supervisor/technical_supervisor.py` 재생성 루프, `observability/trajectory_eval.py`, UseCase T6*
 *금융 리포트에서 LLM 라벨 왜곡 시 무한 재시도하지 않는다. 1회 재생성 후 실패하면 템플릿으로 안전하게 폴백한다.*
 
+### 9.1 1D intraday(Beta) 활성화 플래그
+
+```python
+# 기본 False. .env/환경변수 INTRADAY_FETCH_ENABLED 로 override 가능(_env_bool 파싱).
+INTRADAY_FETCH_ENABLED = _env_bool("INTRADAY_FETCH_ENABLED", default=False)
+```
+
+```env
+# .env 예시 — 이 값일 때만 supervisor가 기본 KIS 분봉 fetcher를 켠다(기본은 미설정=꺼짐).
+INTRADAY_FETCH_ENABLED=true
+```
+
+- **의미**: "프론트 1d 탭 클릭 시 따로 가져올지"가 아니라, **technical report 생성 시 1D intraday까지 D/W/M과 함께 포함할지**를 제어하는 feature flag다.
+- **`True`일 때만** supervisor가 `intraday_fetcher` 미주입 시 **기본 KIS 분봉 fetcher(`fetch_minute_ohlcv`)** 를 써서 **리포트 생성 1회에 3m/1y/5y와 함께 `1d`·`intraday_context`를 조립**한다(best-effort). D/W/M이 supervisor 계층에서 항상 fetch되는 것과 같은 방식이되, **flag로 gate**한다.
+- **`False`(기본)** 이면 intraday 미포함 — **기존 D/W/M(3m/1y/5y)만**(현재 동작과 동일). **D/W/M은 필수, 1D는 best-effort로 실패/빈 응답 시 리포트 전체를 실패시키지 않는다.**
+- **env override**: `.env` 또는 환경변수 `INTRADAY_FETCH_ENABLED`로 환경별(dev/staging=on, prod=off 등) 제어한다. **새 KIS env key가 아니다**(기존 KIS 인증 값은 그대로). 파싱 규칙 — true: `1`/`true`/`yes`/`on`, false: 미설정/`0`/`false`/`no`/`off`/빈문자열, **인식 불가값은 경고 후 False**(운영 안전, 조용한 True 금지).
+- 우선순위: `intraday_candles` 직접 주입 > 명시 `intraday_fetcher` > (flag ON) `fetch_minute_ohlcv` > off.
+- **실험/Beta 성격.** ON 시 요청마다 분봉 조회가 추가되어 **호출량·rate limit 부담이 커진다**(1회 30건 페이징, `EGW00201` 재시도 — `kis_mapping.md §12`). 운영 default-on은 **smoke 결과·운영 정책을 보고 결정**한다.
+- intraday fetch 실패·빈 응답은 D/W/M output에 전파되지 않는다.
+
+*연결: `supervisor/technical_supervisor.py` intraday 조립, `services/kis_client.py::fetch_minute_ohlcv`, `contracts.md` "1D intraday"*
+
 ## 10. 차트 (charts)
 
 ```python
