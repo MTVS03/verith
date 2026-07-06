@@ -177,7 +177,7 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
 | 필드 | 의미 |
 | --- | --- |
-| 관측값 | `status` · `latest_price` · `intraday_return_pct` · `day_high`/`day_low` · `day_range_position` · `cumulative_volume` · `volume_spike` · `short_ma` · `vwap` 등 |
+| 관측값 | `status` · `latest_price` · `intraday_return_pct` · `day_high`/`day_low` · `day_range_position` · `cumulative_volume` · `cumulative_trading_value` · `volume_spike` · `short_ma` · `vwap` 등. `latest_price`·`cumulative_volume`·`cumulative_trading_value`는 **KIS output1 정본값(fetcher metadata) 우선**, 없으면 candle fallback(마지막 close·분봉 volume 합; `cumulative_trading_value`는 candle 합산 불가라 metadata만) — `kis_mapping.md §12.5` |
 | `intraday_regime_hint` | 장중 흐름 요약 힌트(`upward_intraday`/`downward_intraday`/`sideways_intraday`/`volatile_intraday`/`unavailable`). **판단이 아니라 힌트** |
 | `regime_alignment` | D/W/M `final_regime`과 힌트의 정합(`aligned`/`counter`/`neutral`/`unavailable`) |
 | `confidence_adjustment` | **context 내부 설명값.** cap `[-0.05, +0.05]`. aligned=+, counter=−, 그 외 0.0(volatile은 양수 금지). **현재 top-level `signal.confidence`에 직접 반영하지 않는다** |

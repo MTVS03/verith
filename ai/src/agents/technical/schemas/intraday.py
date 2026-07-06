@@ -136,6 +136,8 @@ class IntradayContext(_StrictModel):
     short_ma: list[IntradayPoint] = Field(default_factory=list)
     short_ma_trend: ShortMaTrend | None = None
     cumulative_volume: int | None = Field(default=None, ge=0)
+    # 누적 거래대금(output1.acml_tr_pbmn). 개별 분봉 값이 아니라 누적값이다(kis_mapping §12.5).
+    cumulative_trading_value: int | None = Field(default=None, ge=0)
     volume_spike: bool | None = None
     # 선택/후순위 — 빈 배열로 예약.
     vwap: list[IntradayPoint] = Field(default_factory=list)

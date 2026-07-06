@@ -154,12 +154,11 @@ def run(
     # 우선순위: intraday_candles > 명시 intraday_fetcher > (flag ON) fetch_minute_ohlcv > off.
     if intraday_fetcher is None and INTRADAY_FETCH_ENABLED:
         intraday_fetcher = fetch_minute_ohlcv
-    intra_candles, fetched_prev_close = _resolve_intraday(
+    resolved_intraday = _resolve_intraday(
         intraday_candles, intraday_fetcher, agent_input.ticker, agent_input.as_of,
     )
     intraday_charts, intraday_context = _assemble_intraday(
-        intra_candles, daily=daily, as_of=agent_input.as_of,
-        final_regime=regime.final_regime, previous_close=fetched_prev_close,
+        resolved_intraday, daily=daily, as_of=agent_input.as_of, final_regime=regime.final_regime,
     )
 
     return TechnicalAgentOutput(
@@ -259,6 +258,16 @@ def _data_status(m: MultiframeRegimeResult) -> DataStatus:
     return DataStatus.NORMAL
 
 
+@dataclass(frozen=True)
+class _ResolvedIntraday:
+    """intraday 입력 해석 결과 — candles + KIS output1 metadata(fetcher만 채움, 직접 주입은 None)."""
+    candles: Sequence[IntradayCandle]
+    previous_close: float | None
+    latest_price: float | None
+    cumulative_volume: int | None
+    cumulative_trading_value: int | None
+
+
 def _intraday_matches_as_of(
     candles: Sequence[IntradayCandle], as_of: date | datetime | None,
 ) -> bool:
@@ -279,54 +288,61 @@ def _resolve_intraday(
     intraday_fetcher: MinuteFetcher | None,
     ticker: str,
     as_of: datetime,
-) -> tuple[Sequence[IntradayCandle] | None, float | None]:
-    """intraday 입력 해석. (candles, previous_close) 반환.
+) -> _ResolvedIntraday | None:
+    """intraday 입력 해석. `_ResolvedIntraday`(candles + output1 metadata) 또는 None 반환.
 
-    직접 주입 candles(커밋 9)가 있으면 fetch하지 않고 그대로 쓴다(previous_close는 None → 일봉 fallback).
-    없고 intraday_fetcher가 주어졌을 때만 `intraday_fetcher(ticker, as_of=as_of)`로 조회한다.
-    fetch 실패는 D/W/M와 **분리**해 흡수 → `(None, None)`(intraday off). status 판정은 하지 않는다.
+    직접 주입 candles가 있으면 fetch하지 않고 그대로 쓴다(output1 metadata 없음 → candle fallback).
+    없고 intraday_fetcher가 주어졌을 때만 `intraday_fetcher(ticker, as_of=as_of)`로 조회하며,
+    IntradayFetchResult의 previous_close·latest_price·cumulative_volume·cumulative_trading_value를 보존한다.
+    fetch 실패는 D/W/M와 **분리**해 흡수 → `None`(intraday off).
     **날짜 정합성 가드**: candle 날짜가 as_of.date()와 다르면(당일분봉 today-only) intraday를 생략한다
     — 직접 주입·fetcher 두 경로 모두에 적용된다.
     """
     if intraday_candles is not None:
-        candles: Sequence[IntradayCandle] | None = intraday_candles
-        prev_close: float | None = None
+        resolved = _ResolvedIntraday(intraday_candles, None, None, None, None)  # 직접 주입: metadata 없음
     elif intraday_fetcher is None:
-        return None, None
+        return None
     else:
         try:
             result = intraday_fetcher(ticker, as_of=as_of)  # KIS REST 1회+제한 반복(fetcher 내부 정책)
         except Exception:  # noqa: BLE001 - intraday fetch 실패는 D/W/M와 분리·흡수(전체 실패 아님)
-            return None, None
-        candles, prev_close = result.candles, result.previous_close
+            return None
+        resolved = _ResolvedIntraday(
+            result.candles, result.previous_close, result.latest_price,
+            result.cumulative_volume, result.cumulative_trading_value,
+        )
 
-    if candles and not _intraday_matches_as_of(candles, as_of):
-        return None, None  # 과거 as_of 리포트에 오늘 분봉이 결합되는 것 방지
-    return candles, prev_close
+    if resolved.candles and not _intraday_matches_as_of(resolved.candles, as_of):
+        return None  # 과거 as_of 리포트에 오늘 분봉이 결합되는 것 방지
+    return resolved
 
 
 def _assemble_intraday(
-    intraday_candles: Sequence[IntradayCandle] | None,
+    resolved: _ResolvedIntraday | None,
     *,
     daily: Sequence[OHLCV],
     as_of: datetime,
     final_regime: Regime,
-    previous_close: float | None = None,
 ) -> tuple[list[ChartPayload], IntradayContext | None]:
     """선택적 1D intraday 조립. 이미 만든 builder/helper만 호출한다.
 
     candles가 없으면 `([], None)` — D/W/M 출력과 완전히 동일하게 동작한다.
     previous_close는 **fetcher가 준 값(전일 종가)을 우선**하고, 없으면 최근 일봉 종가로 fallback한다.
+    latest_price·cumulative_volume·cumulative_trading_value는 output1 metadata(있으면)를 context에 전달한다.
     intraday 조립 중 어떤 예외든 흡수해 D/W/M 출력이 통째로 실패하지 않게 한다.
     final_regime은 읽기만 하며 절대 바꾸지 않는다(보정도 하지 않음).
     """
-    if not intraday_candles:
+    if resolved is None or not resolved.candles:
         return [], None
     try:
-        prev_close = previous_close if previous_close is not None else (daily[-1].close if daily else None)
-        payload = build_intraday_chart_payload(intraday_candles, previous_close=prev_close)
+        prev_close = (resolved.previous_close if resolved.previous_close is not None
+                      else (daily[-1].close if daily else None))
+        payload = build_intraday_chart_payload(resolved.candles, previous_close=prev_close)
         context = build_intraday_context(
-            intraday_candles, previous_close=prev_close, as_of=as_of,
+            resolved.candles, previous_close=prev_close, as_of=as_of,
+            latest_price=resolved.latest_price,
+            cumulative_volume=resolved.cumulative_volume,
+            cumulative_trading_value=resolved.cumulative_trading_value,
         )
         context = apply_intraday_hint_to_context(context, final_regime)
         context = apply_intraday_adjustments(context)  # confidence_adjustment·risk_notes(context 내부만)
