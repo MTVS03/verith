@@ -34,7 +34,7 @@ def collect_node(state: SupplyDemandState) -> dict:
     """수집 + 계산 + 게이트2. df·ownership 은 이 함수 지역변수로만 존재(밖으로 안 나감).
 
     KIS/네트워크 예외는 삼키지 않고 그대로 전파한다(규약: 연쇄 시도 없이 멈춤).
-    보유율은 심화 축이라 ENABLE_ADVANCED 가 꺼져 있으면 아예 조회하지 않는다
+    한도소진율은 심화 축이라 ENABLE_ADVANCED 가 꺼져 있으면 아예 조회하지 않는다
     (추가 API 호출 절약 + 플래그 하나로 심화 전체가 꺼지는 단일 스위치).
     """
     ticker = state.input.ticker or config.TARGET_TICKER

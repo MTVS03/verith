@@ -22,7 +22,7 @@ CONSECUTIVE_THRESHOLD: int = 3
 STRENGTH_THRESHOLD: float = 0.12
 
 # ── 기능 플래그 ───────────────────────────────────────────
-# 심화 축(기관 세부·외국인 보유율) on/off. 일정이 밀리면 False로 자르고 MVP만 출고.
+# 심화 축(기관 세부·외국인 한도소진율) on/off. 일정이 밀리면 False로 자르고 MVP만 출고.
 ENABLE_ADVANCED: bool = True
 
 # ── 검증 게이트 정책 ──────────────────────────────────────
