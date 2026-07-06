@@ -498,6 +498,13 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 | CONTRACT-05 | 에이전트가 `html` 필드 반환 | 실패 (에이전트는 JSON만, HTML 안 만듦) |
 | CONTRACT-06 | DB 저장 enum이 한글 라벨 | 실패 (DB엔 코드값) |
 | CONTRACT-07 | `technical_signals[].detail_source` 존재 | 통과 (llm/llm_regenerated/template_fallback) |
+| CONTRACT-08 | intraday 입력 없음 | `charts`는 D/W/M 3종(`{3m,1y,5y}`), `intraday_context`는 `null` — 기존 output과 동일 |
+| CONTRACT-09 | intraday 입력 있음 | `charts`에 `1d` 조건부 추가(`chart_data`가 `IntradayChartData`, candle_unit `1min`), `intraday_context` 세팅 |
+| CONTRACT-10 | `charts` 개수 가정 | `len == 3`이 아니라 **period 집합**으로 검증(`{3m,1y,5y}` ⊆ periods, `1d` 조건부) |
+| CONTRACT-11 | intraday 유무 | `regime.final_regime`·top-level `confidence`/`signal_score`/`risk` 동일(intraday로 불변) |
+| CONTRACT-12 | intraday 조립 실패 | D/W/M output 정상 반환·`intraday_context=null`(전체 실패로 번지지 않음) |
+
+> **1D intraday 계약 테스트**(위 CONTRACT-08~12)는 모두 **fixture 기반**이며 real KIS 분봉을 호출하지 않는다(KIS 분봉 fetcher 미구현, `kis_mapping.md §12`). `intraday_context` 필드(hint·alignment·`confidence_adjustment` cap ±0.05·`signal_score_adjustment`=0.0·`risk_notes`) 단위 검증은 `test_intraday_*` 스위트에서 다룬다.
 
 ### enum 값 검증
 
@@ -577,3 +584,5 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 ## 11. 수동 시각 QA 도구 (자동 테스트 아님)
 
 `devtools/streamlit_technical_lab.py` 는 **pytest/CI 대상이 아니다**. real KIS + fake LLM 으로 `run_technical_agent()` 출력과 chart payload 를 화면에서 사람이 눈으로 검수하는 **수동 도구**다(real KIS env 필요). Streamlit `session_state` 는 production cache 가 아니라 수동 QA 용 임시 상태이며, secret 값은 화면에 표시하지 않는다(존재 여부만 OK/MISSING). 실행법은 `implementation_plan.md` §8 참고.
+
+이 도구의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반이다 — KIS 호출·자동 refresh·WebSocket·polling 없이 이미 만든 intraday 빌더/헬퍼(chart payload·context·hint/alignment·adjustment)를 호출해 표시만 한다. KIS 분봉 fetcher 미구현 상태에서 1d 조립·렌더를 눈으로 확인하기 위한 것이다(`implementation_plan.md` §9).
