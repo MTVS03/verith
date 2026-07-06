@@ -129,9 +129,19 @@ def _zero_filled(counts: dict[str, int], keys: list[str]) -> dict[str, int]:
     return base
 
 
-def _capacity_check(source_count: int, candle_unit: str) -> dict:
-    cup_required = (_REQUIRED_BARS["cup_handle_daily_required_bars"] if candle_unit == "D"
+def _capacity_check(source_count: int, period: ChartPeriod) -> dict:
+    unit = _PERIOD_UNIT[period]
+    cup_required = (_REQUIRED_BARS["cup_handle_daily_required_bars"] if unit == "D"
                     else _REQUIRED_BARS["cup_handle_weekly_required_bars"])
+    # cup_handle은 구현 완료. capacity_check는 "봉 수가 충분한지"만 말한다(생성 여부 아님).
+    # 3m은 period 정책상 제외라 enough=true여도 생성하지 않는다.
+    if period is ChartPeriod.THREE_MONTHS:
+        cup_note = ("cup_handle_candidate는 period 정책상 3m에서 제외된다 — "
+                    "enough_for_cup_handle은 봉 수 충분 여부만 의미(생성하지 않음).")
+    else:
+        tf = "1y(D) 일봉" if unit == "D" else "5y(W) 주봉"
+        cup_note = (f"capacity only — {tf} cup_handle은 {cup_required}봉 필요. "
+                    "annotation-only로 탐지된다(enough은 봉 수 충분 여부만).")
     return {
         **_REQUIRED_BARS,
         "enough_for_ma_cross": source_count >= _REQUIRED_BARS["ma_cross_required_bars"],
@@ -139,9 +149,8 @@ def _capacity_check(source_count: int, candle_unit: str) -> dict:
         "enough_for_volume": source_count >= _REQUIRED_BARS["volume_required_bars"],
         "enough_for_support_resistance": source_count >= _REQUIRED_BARS["support_resistance_required_bars"],
         "enough_for_box": source_count >= _REQUIRED_BARS["box_required_bars"],
-        # cup_handle은 미구현이므로 "capacity only"(계산 가능 여부만, 실제 생성 아님).
         "enough_for_cup_handle": source_count >= cup_required,
-        "cup_handle_note": "capacity only — cup_handle_candidate 생성기는 미구현(step 4).",
+        "cup_handle_note": cup_note,
     }
 
 
@@ -178,11 +187,11 @@ def _diagnose_period(period: ChartPeriod, source: list[OHLCV], post_annotations:
         "missing_or_unimplemented_kinds": [
             {"kind": k, "reason": "contract exists but generator missing"} for k in UNIMPLEMENTED_KINDS
         ],
-        "capacity_check": _capacity_check(source_count, unit),
+        "capacity_check": _capacity_check(source_count, period),
         "notes": (
             "annotation은 visible 구간 기준으로 생성됨(=visible_annotation_count=total). "
-            "box_range·support/resistance touch는 최신 구간만 검사(historical 비어 있을 수 있음). "
-            "importance가 medium/low면 프론트 기본 필터(1y=high+medium, 5y=high 중심)에서 숨겨질 수 있음."
+            "support/resistance·box_range·box_breakout·cup_handle은 rolling 또는 historical 후보로 생성될 수 있음. "
+            "box/cup이 0이면 우선 조건 불충족 여부를 확인하고, 5y에서는 importance/display 정책(chart_annotation_spec §4.2)도 함께 확인한다."
         ),
     }
 
