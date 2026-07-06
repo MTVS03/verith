@@ -51,6 +51,9 @@
 | CALC-03 | close 14개 이상 | RSI(14)가 기준 계산과 일치 |
 | CALC-04 | KIS 일봉(D)·주봉(W)·월봉(M) output2 응답 | 세 타임프레임 각각 내부 표준 OHLCV로 정확히 변환 (date/open/high/low/close/volume/trading_value 매핑) |
 | CALC-05 | 거래량 20개 | 20일 평균 거래량이 기준 계산과 일치 |
+| CALC-06 | `MA_SHORT/MID/LONG_WINDOW`를 10/30/90으로 patch | 소비 코드(`indicator_calculate`·`signal_score`·`regime/rules`·`chart_builder`)가 `mas[5]` 같은 하드코딩 키가 아니라 역할 상수로 접근해 **`KeyError` 없이 동작**. overlay `window`·MA 역할 값이 10/30/90을 반영 |
+
+*CALC-06은 MA window 역할 상수화(하드코딩 키 제거) 회귀 가드다. from-import 구조상 config 단일 patch가 이미 import된 모듈에 전파되지 않으므로, 테스트는 **소비 모듈별로 window 상수를 patch**한다(`moving_average.MA_WINDOWS`·각 소비 모듈의 `MA_SHORT/MID/LONG_WINDOW`·`regime.rules._SHORT/_MID/_LONG_MA`·`chart_builder._CROSS_PAIRS`). 기본값 5/20/60에서는 기존 CALC-01~05·regime·synthesis·chart 테스트 결과가 그대로 유지되어야 한다(상수화는 분석 의미를 바꾸지 않는다).*
 
 ### 3.1 synthesis 계산 검증 (SYN-*)
 

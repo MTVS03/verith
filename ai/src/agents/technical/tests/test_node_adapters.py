@@ -13,7 +13,13 @@ from datetime import date, timedelta
 
 import pytest
 
+import src.agents.technical.charts.chart_builder as cb_mod
+import src.agents.technical.indicators.moving_average as ma_mod
+import src.agents.technical.nodes.indicator_calculate as ic_mod
+import src.agents.technical.regime.rules as rules_mod
+import src.agents.technical.synthesis.signal_score as ss_mod
 from src.agents.technical.charts.chart_builder import build_chart_payloads
+from src.agents.technical.config import MA_LONG_WINDOW, MA_MID_WINDOW, MA_SHORT_WINDOW
 from src.agents.technical.nodes.chart_generate import run_chart_generate
 from src.agents.technical.nodes.confidence_calculate import run_confidence_calculate
 from src.agents.technical.nodes.data_collect import run_data_collect
@@ -120,7 +126,7 @@ def test_indicator_bundle_type_and_fields():
     bundle = run_indicator_calculate(DAILY)
     assert isinstance(bundle, IndicatorBundle)
     # confidence/risk가 소비하는 최소 필드 존재
-    for field in ("close", "prev_close", "ma5", "ma20", "ma60", "rsi", "volume_ratio",
+    for field in ("close", "prev_close", "ma_short", "ma_mid", "ma_long", "rsi", "volume_ratio",
                   "support", "resistance", "avg_volume", "avg_trading_value", "latest_candle"):
         assert hasattr(bundle, field)
 
@@ -141,9 +147,9 @@ def test_indicator_bundle_matches_direct_module_calls():
     sr = calculate_support_resistance(DAILY)[-1]
     assert bundle.close == float(DAILY[-1].close)
     assert bundle.prev_close == float(DAILY[-2].close)
-    assert bundle.ma5 == mas[5][-1]
-    assert bundle.ma20 == mas[20][-1]
-    assert bundle.ma60 == mas[60][-1]
+    assert bundle.ma_short == mas[MA_SHORT_WINDOW][-1]
+    assert bundle.ma_mid == mas[MA_MID_WINDOW][-1]
+    assert bundle.ma_long == mas[MA_LONG_WINDOW][-1]
     assert bundle.rsi == calculate_rsi(DAILY)[-1]
     assert bundle.volume_ratio == calculate_volume_ratio(DAILY)[-1]
     assert bundle.support == sr["support"]
@@ -233,3 +239,54 @@ def test_chart_generate_matches_direct():
 def test_chart_generate_empty_daily_raises():
     with pytest.raises(ValueError):
         run_chart_generate([], WEEKLY, MONTHLY)
+
+
+# ── MA window 상수화 회귀 가드 (CALC-06, test_plan §3) ────────────────────────
+# from-import 구조상 config 단일 patch는 이미 import된 모듈에 전파되지 않으므로,
+# 소비 모듈별 window 바인딩을 각각 patch한다(모두 같은 상수원 파생 → 키 일관, KeyError 없음).
+def _patch_windows(monkeypatch, short: int, mid: int, long: int) -> None:
+    windows = [short, mid, long]
+    monkeypatch.setattr(ma_mod, "MA_WINDOWS", windows)
+    for mod in (ss_mod, ic_mod):
+        monkeypatch.setattr(mod, "MA_SHORT_WINDOW", short)
+        monkeypatch.setattr(mod, "MA_MID_WINDOW", mid)
+        monkeypatch.setattr(mod, "MA_LONG_WINDOW", long)
+    monkeypatch.setattr(rules_mod, "_SHORT_MA", short)
+    monkeypatch.setattr(rules_mod, "_MID_MA", mid)
+    monkeypatch.setattr(rules_mod, "_LONG_MA", long)
+    monkeypatch.setattr(cb_mod, "MA_WINDOWS", windows)
+    monkeypatch.setattr(cb_mod, "_CROSS_PAIRS", ((short, mid, "medium"), (mid, long, "high")))
+
+
+def test_indicator_calculate_custom_windows_no_keyerror(monkeypatch):
+    _patch_windows(monkeypatch, 10, 30, 90)
+    mas = ma_mod.calculate_moving_averages(DAILY)
+    assert set(mas) == {10, 30, 90}  # 생산 키가 새 window를 반영
+    bundle = run_indicator_calculate(DAILY)  # mas[5] KeyError 없이 동작
+    assert bundle.ma_short == mas[10][-1]
+    assert bundle.ma_mid == mas[30][-1]
+    assert bundle.ma_long == mas[90][-1]
+
+
+def test_signal_aggregate_custom_windows_no_keyerror(monkeypatch):
+    _patch_windows(monkeypatch, 10, 30, 90)
+    result = run_signal_aggregate(DAILY)  # mas[5] KeyError 없이 동작
+    assert result.consensus is not None
+
+
+def test_regime_classify_custom_windows_no_keyerror(monkeypatch):
+    _patch_windows(monkeypatch, 10, 30, 90)
+    result = run_regime_classify(DAILY, WEEKLY, MONTHLY)  # mas[_SHORT_MA] 새 window로 접근
+    assert result.final_regime is not None
+
+
+def test_chart_generate_custom_windows_no_keyerror(monkeypatch):
+    _patch_windows(monkeypatch, 10, 30, 90)
+    charts = run_chart_generate(DAILY, WEEKLY, MONTHLY)  # overlay·cross가 새 window로 동작
+    assert len(charts) == 3
+    windows = {
+        ov["window"]
+        for p in charts
+        for ov in p.chart_data.model_dump(mode="json")["overlays"]["moving_average"]
+    }
+    assert windows and windows <= {10, 30, 90}  # overlay window가 변경된 MA window를 반영
