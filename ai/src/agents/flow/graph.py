@@ -11,7 +11,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from . import config
-from .core.kis_client import fetch_supply_demand
+from .core.kis_client import fetch_foreign_ownership, fetch_supply_demand
 from .core.signals import compute_signals
 from .core.verify_interpretation import verify_interpretation
 from .core.verify_rules import verify_signals
@@ -31,14 +31,20 @@ def _meta(state: SupplyDemandState) -> dict:
 
 # ── 노드 ──────────────────────────────────────────────────
 def collect_node(state: SupplyDemandState) -> dict:
-    """수집 + 계산 + 게이트2. df는 이 함수 지역변수로만 존재(밖으로 안 나감).
+    """수집 + 계산 + 게이트2. df·ownership 은 이 함수 지역변수로만 존재(밖으로 안 나감).
 
     KIS/네트워크 예외는 삼키지 않고 그대로 전파한다(규약: 연쇄 시도 없이 멈춤).
+    보유율은 심화 축이라 ENABLE_ADVANCED 가 꺼져 있으면 아예 조회하지 않는다
+    (추가 API 호출 절약 + 플래그 하나로 심화 전체가 꺼지는 단일 스위치).
     """
     ticker = state.input.ticker or config.TARGET_TICKER
     df = fetch_supply_demand(state.base_date, ticker)   # 검증 안 된 원재료 — 지역 한정
-    signals = compute_signals(df)
-    gate2 = verify_signals(df, signals)
+    ownership = (
+        fetch_foreign_ownership(state.base_date, ticker)
+        if config.ENABLE_ADVANCED else None
+    )
+    signals = compute_signals(df, ownership)
+    gate2 = verify_signals(df, signals, ownership)
     return {"signals": signals, "gate2": gate2}          # 검증된 것만 상태로
 
 

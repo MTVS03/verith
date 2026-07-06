@@ -44,6 +44,12 @@ def _fake_fetch(base_date, ticker):
     return df_foreign_5day_streak
 
 
+def _fake_fetch_ownership(base_date, ticker):
+    """KIS 보유율 경계 대체 — None(주장 없음 경로, 네트워크 회피).
+    규칙7 본검사(7a~7c)는 test_verify 의 전용 테스트 담당 — 스모크는 배선만."""
+    return None
+
+
 # 팩트와 무관하게 게이트3 규칙3(개인 오귀속)에 걸리는 문장 → 진짜 게이트3가 매번 실패.
 _GATE3_FAILING = "개인과 외국인 간에 엇갈린 흐름을 보였다."
 
@@ -51,10 +57,12 @@ _GATE3_FAILING = "개인과 외국인 간에 엇갈린 흐름을 보였다."
 def test_A_gate2_failure_skips_explain_and_renders_placeholder(monkeypatch):
     """게이트2 실패 → explain 건너뛰고 render, 해석 없이 placeholder."""
     monkeypatch.setattr(graph, "fetch_supply_demand", _fake_fetch)
+    monkeypatch.setattr(graph, "fetch_foreign_ownership", _fake_fetch_ownership)
     # 게이트2 판정을 강제 실패(탐지 로직은 test_verify 담당, 여기선 배선 반응만).
     monkeypatch.setattr(
         graph, "verify_signals",
-        lambda df, signals: GateResult(gate=2, passed=False, failures=["강제 실패(테스트)"]),
+        lambda df, signals, ownership=None: GateResult(
+            gate=2, passed=False, failures=["강제 실패(테스트)"]),
     )
     calls = {"explain": 0}
 
@@ -75,6 +83,7 @@ def test_A_gate2_failure_skips_explain_and_renders_placeholder(monkeypatch):
 def test_B_gate3_persistent_failure_retries_up_to_limit(monkeypatch):
     """게이트3가 계속 실패 → explain이 정확히 (1 + 상한)회만 호출되고 멈춤(무한 루프 없음)."""
     monkeypatch.setattr(graph, "fetch_supply_demand", _fake_fetch)
+    monkeypatch.setattr(graph, "fetch_foreign_ownership", _fake_fetch_ownership)
     calls = {"explain": 0}
 
     def fake_explain(signals, gate2, meta):
@@ -91,6 +100,7 @@ def test_B_gate3_persistent_failure_retries_up_to_limit(monkeypatch):
 def test_C_gate3_exhaustion_falls_back_to_placeholder(monkeypatch):
     """재시도 소진 후 → 해석 없이 render 후퇴(placeholder), 틀린 해석은 안 실림."""
     monkeypatch.setattr(graph, "fetch_supply_demand", _fake_fetch)
+    monkeypatch.setattr(graph, "fetch_foreign_ownership", _fake_fetch_ownership)
     monkeypatch.setattr(graph, "explain", lambda signals, gate2, meta: _GATE3_FAILING)
 
     final = graph.build_graph().invoke(_initial())

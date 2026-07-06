@@ -171,6 +171,40 @@ def _persistence_view(signals: dict) -> dict | None:
     return {"rows": rows, "verdict": " · ".join(parts)}
 
 
+def _ownership_view(signals: dict) -> dict | None:
+    """보유율 팩트 → 표시용 뷰. 값 변형 없음 — 표시 스케일·포맷만.
+
+    막대 높이는 min-max 상대 스케일 — 보유율은 하루 0.0x%p로 움직여 절대
+    스케일로는 전부 같은 높이가 된다(목업 동일). 바닥 26px를 둬 최솟값도
+    막대가 보인다. delta 는 창의 처음↔끝 차이 — 이미 검증된 두 값의 재표현
+    (_gauge 가 두 ratio 를 더하는 것과 같은 범주). 없으면 None → placeholder.
+    """
+    ownership = signals.get("ownership")
+    if not ownership:
+        return None
+    ratios = [row["ratio"] for row in ownership]
+    lo, hi = min(ratios), max(ratios)
+    span = hi - lo
+    bars = []
+    for row in ownership:
+        iso = row.get("date", "")
+        h = 26.0 + (row["ratio"] - lo) / span * 64.0 if span else 55.0
+        bars.append({
+            "iso": iso,
+            "label": iso[5:].replace("-", "/"),   # "07/03" (daily 와 같은 포맷)
+            "num": f"{row['ratio']:.2f}",         # KIS 원본이 소수 2자리 — 그대로
+            "h": round(h, 1),
+        })
+    delta = ratios[-1] - ratios[0]
+    return {
+        "bars": bars,
+        "latest": f"{ratios[-1]:.2f}%",
+        "delta": f"{delta:+.2f}%p",
+        "delta_cls": "buy" if delta > 0 else "sell" if delta < 0 else "mut",
+        "delta_arrow": "▲" if delta > 0 else "▼" if delta < 0 else "―",
+    }
+
+
 # 표시용 라벨: KIS 공식명 기본 + 통칭 병기(확인 가능성 — 원본과 같은 이름).
 _DETAIL_LABELS = {"기금": "기금(연기금)", "증권": "증권(금융투자)"}
 # 목업이 보여주는 5개(검증은 7개 전체, 표시는 이 5개만).
@@ -243,6 +277,7 @@ def build_report(
         "daily": _daily_view(signals),      # None이면 템플릿이 placeholder로 후퇴
         "persistence": _persistence_view(signals),  # None이면 placeholder로 후퇴
         "inst_detail": _inst_detail_view(signals),  # None이면 placeholder로 후퇴
+        "ownership": _ownership_view(signals),      # None이면 placeholder로 후퇴
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",
