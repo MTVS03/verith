@@ -59,10 +59,12 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
     yearly_metrics = {}
     dart_calls = 0
     fs_div = request.fs_div
+    latest_live_year: str | None = None
     if request.report_mode == "latest":
         selection = discover_latest_report(corp_code, fs_div)
-        use_cache = False
+        source_records.extend(selection.probe_records)
         dart_calls += selection.probe_calls
+        latest_live_year = str(selection.bsns_year)
     else:
         selection = latest_annual_selection()
 
@@ -71,12 +73,13 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
     years = [str(year) for year in range(current_year - request.years + 1, current_year + 1)]
 
     for year in years:
+        year_use_cache = use_cache and year != latest_live_year
         result = fetch_financial_statement_rows(
             corp_code,
             int(year),
             reprt_code=reprt_code,
             fs_div=fs_div,
-            use_cache=use_cache,
+            use_cache=year_use_cache,
         )
         rows = result.rows
         source_records.append(result.source_record)
@@ -87,7 +90,7 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
                 int(year),
                 reprt_code=reprt_code,
                 fs_div="OFS",
-                use_cache=use_cache,
+                use_cache=year_use_cache,
             )
             rows = fallback.rows
             source_records.append(fallback.source_record)
