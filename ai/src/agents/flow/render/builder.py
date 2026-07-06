@@ -258,6 +258,7 @@ def build_report(
     gate2: GateResult,
     meta: dict,
     interpretation: str | None = None,
+    gate1: GateResult | None = None,   # 게이트1(입력 검증) — None이면 배지 생략(구버전 호환)
 ) -> str:
     """신호·게이트2·메타(+선택적 해석)를 받아 HTML 리포트 문자열을 반환한다.
 
@@ -268,6 +269,7 @@ def build_report(
     context = {
         "meta": meta,
         "market": meta.get("market"),       # KIS 대표 시장명 원본. None → 템플릿이 칩 생략
+        "gate1": gate1,                     # None이면 템플릿이 배지 생략
         "gate2": gate2,
         "rows": rows,
         "alignment": signals.get("alignment"),
