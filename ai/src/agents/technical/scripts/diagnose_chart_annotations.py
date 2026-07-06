@@ -104,7 +104,7 @@ def _pre_dedup_annotations(period: ChartPeriod, source: list[OHLCV]) -> list[dic
         + cb._volume_spike_annotations(source, vol_avg, tv_avg, start)
         + cb._sr_touch_annotations(source, start)
         + cb._rsi_annotations(source, rsis, start)
-        + cb._box_range_annotation(source)
+        + cb._box_range_annotations(source, start)
     )
 
 
