@@ -19,8 +19,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import time
 from datetime import date
+from pathlib import Path
 
 import httpx
 import pandas as pd
@@ -66,8 +69,8 @@ def _load_credentials() -> tuple[str, str, str]:
     return app_key, app_secret, base_url.rstrip("/")
 
 
-def _issue_token(client: httpx.Client, app_key: str, app_secret: str) -> str:
-    """접근토큰 발급(POST). 실패 시 상태코드만 알리고 멈춘다(토큰/키 비노출)."""
+def _issue_token(client: httpx.Client, app_key: str, app_secret: str) -> tuple[str, float]:
+    """접근토큰 발급(POST) → (토큰, 유효초). 실패 시 상태코드만 알리고 멈춘다(토큰/키 비노출)."""
     resp = client.post(
         _OAUTH_PATH,
         json={"grant_type": "client_credentials",
@@ -75,9 +78,61 @@ def _issue_token(client: httpx.Client, app_key: str, app_secret: str) -> str:
     )
     if resp.status_code != 200:
         raise KisError(f"KIS 토큰 발급 실패 (HTTP {resp.status_code}).")
-    token = resp.json().get("access_token")
+    body = resp.json()
+    token = body.get("access_token")
     if not token:
         raise KisError("KIS 토큰 발급 응답에 access_token이 없습니다.")
+    return token, float(body.get("expires_in") or 86400)
+
+
+# ── 토큰 캐시 ─────────────────────────────────────────────
+# KIS 토큰은 24h 유효한데 발급 '빈도'에 제한이 있다(과발급 → 403).
+# 렌더·테스트가 각각 새 프로세스라 메모리 캐시로는 부족 → 파일 캐시.
+# 경로는 리포 밖(~/.cache)이라 커밋될 수 없다(비밀 커밋 금지 규약을 구조로 보장).
+_TOKEN_CACHE_PATH = Path.home() / ".cache" / "verith" / "kis_token.json"
+_TOKEN_MARGIN_SEC = 60          # 만료 직전 토큰은 안 쓴다(리포트 생성은 초 단위라 충분)
+
+
+def _read_cache(path: Path, now: float) -> str | None:
+    """캐시된 토큰이 유효하면 반환, 없거나 만료·손상이면 None. 값은 출력하지 않는다."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    token = data.get("token")
+    expires_at = data.get("expires_at")
+    if not token or not isinstance(expires_at, (int, float)):
+        return None
+    if now >= expires_at - _TOKEN_MARGIN_SEC:
+        return None
+    return token
+
+
+def _write_cache(path: Path, token: str, expires_at: float) -> None:
+    """토큰을 파일로 저장(권한 600)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"token": token, "expires_at": expires_at}), encoding="utf-8"
+    )
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass                    # 권한 미지원 파일시스템이어도 동작은 유지
+
+
+def _get_token(client: httpx.Client, app_key: str, app_secret: str) -> str:
+    """캐시 우선 토큰 획득 — 유효 캐시가 있으면 발급 0회(빈도 제한 회피).
+
+    알려진 한계(M2 최소): 같은 키로 다른 곳에서 새 토큰을 발급하면 KIS 가
+    이전 토큰을 무효화한다. 그 경우 조회가 KisError 로 멈춘다(정직한 실패).
+    반응형 재발급은 넣지 않는다.
+    """
+    now = time.time()
+    cached = _read_cache(_TOKEN_CACHE_PATH, now)
+    if cached:
+        return cached
+    token, expires_in = _issue_token(client, app_key, app_secret)
+    _write_cache(_TOKEN_CACHE_PATH, token, now + expires_in)
     return token
 
 
@@ -100,7 +155,7 @@ def fetch_supply_demand(
     date_str = base_date.strftime("%Y%m%d") if isinstance(base_date, date) else str(base_date)
 
     with httpx.Client(base_url=base_url, timeout=_TIMEOUT) as client:
-        token = _issue_token(client, app_key, app_secret)
+        token = _get_token(client, app_key, app_secret)
         resp = client.get(
             _QUOTATIONS_PATH,
             headers={
