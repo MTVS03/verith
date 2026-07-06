@@ -290,5 +290,9 @@ ai/src/agents/technical/scripts/.kis_token.json
 **/.kis_token.json
 
 # technical agent smoke script 출력 JSON (수동 실행 산출물 — 커밋하지 않음)
-ai/scripts/technical_smoke_output/
+ai/src/agents/technical/scripts/technical_smoke_output/
 **/technical_smoke_output/
+
+# technical agent intraday 분봉 smoke 출력 JSON (수동 실행 산출물 — 커밋하지 않음)
+ai/src/agents/technical/scripts/intraday_smoke_output/
+**/intraday_smoke_output/
