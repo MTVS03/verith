@@ -1,0 +1,62 @@
+"""export/to_json.py — 신호·검증 → JSON 페이로드 (render 와 나란한 또 하나의 출구).
+
+원리: "직렬화지 재계산이 아니다."
+  계산·검증은 signals.py·verify_*.py 가 이미 끝냈다. 여기서는 그 결과를 받는
+  쪽이 읽을 수 있게 '옮겨 담기만' 한다 — signals 를 재호출하지 않고 어떤 값도
+  만들거나 바꾸지 않는다(허용되는 실변환은 UUID→str 하나). render 가 "표시만",
+  extract_daily 가 "꺼내기만"인 것과 같은 원리다.
+
+verification 키가 "검증된 데이터" 정체성의 운반체다: 게이트 1·2·3의 통과 여부와
+checks 전문이 실려, JSON 만 받은 쪽도 숫자마다 무엇으로 검증됐는지 확인할 수
+있다(확인 가능성). gate3 판정은 실패 기록도 그대로 싣는다(정직한 검증 이력).
+
+구조는 지금 dict 를 그대로 반영한 기본형(한글 키 무변환): 받는 쪽(팀)이 아직
+안 정해졌으므로 이름을 추측해 바꾸지 않는다 — JSON↔리포트↔검증 문장이 같은
+어휘로 대조되고, 팀 요청이 오면 매핑은 이 모듈 한 곳에서 한다.
+"""
+
+from __future__ import annotations
+
+import json
+from uuid import UUID
+
+from ..schemas import GateResult
+
+# 페이로드 스키마 버전. 구조가 바뀌면 +1 — 저장된 JSON 을 불러오는 쪽이
+# 세대를 구분할 유일한 열쇠(저장/불러오기 대비의 최소 장치).
+PAYLOAD_VERSION = 1
+
+
+def build_payload(
+    signals: dict,
+    meta: dict,
+    gate1: GateResult | None,
+    gate2: GateResult | None,
+    gate3: GateResult | None = None,
+    interpretation: str | None = None,
+    report_id: UUID | None = None,
+) -> dict:
+    """검증된 조각들을 JSON 호환 dict 로 조립한다 (옮겨 담기만).
+
+    interpretation 은 게이트3 통과분만 싣는다 — render_node 와 같은 규칙
+    (두 출구 일관). 이것이 이 모듈의 유일한 판정이며, 새 판정이 아니라
+    같은 규칙의 재적용이다. gate3 판정 자체는 실패여도 그대로 싣는다.
+    """
+    passed3 = gate3 is not None and gate3.passed
+    return {
+        "version": PAYLOAD_VERSION,
+        "report_id": str(report_id) if report_id else None,   # UUID→str (유일한 실변환)
+        "meta": meta,                    # base_date 는 이미 ISO 문자열(호출부 책임)
+        "signals": signals,              # compute_signals dict 그대로 (한글 키 포함)
+        "verification": {
+            "gate1": gate1.model_dump() if gate1 else None,
+            "gate2": gate2.model_dump() if gate2 else None,
+            "gate3": gate3.model_dump() if gate3 else None,
+        },
+        "interpretation": interpretation if passed3 else None,
+    }
+
+
+def to_json(payload: dict) -> str:
+    """payload → JSON 문자열. 한글 키·값이 그대로 보이게 ensure_ascii=False."""
+    return json.dumps(payload, ensure_ascii=False)

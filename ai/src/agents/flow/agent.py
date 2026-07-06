@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date
 
 from . import config
+from .export.to_json import build_payload
 from .graph import build_graph
 from .schemas import AgentInput, AgentOutput, SupplyDemandState
 
@@ -20,8 +21,11 @@ _GRAPH = build_graph()
 
 
 def _get(final, key):
-    """langgraph invoke 결과가 dict든 pydantic 객체든 같은 방식으로 값 꺼내기."""
-    return final[key] if isinstance(final, dict) else getattr(final, key)
+    """langgraph invoke 결과가 dict든 pydantic 객체든 같은 방식으로 값 꺼내기.
+
+    한 번도 안 쓰인 채널(예: 게이트2 실패로 explain 을 건너뛴 경로의 gate3)은
+    결과 dict 에 아예 없으므로 None 으로 후퇴한다(스키마 기본값과 동일)."""
+    return final.get(key) if isinstance(final, dict) else getattr(final, key, None)
 
 
 def run(
@@ -52,12 +56,31 @@ def run(
     # html 은 render 노드가 채운 값. report_id 는 흐름을 관통한 상관관계 ID.
     # base_date 는 collect 가 확정한 실제 거래일(입력 후보일이 아님 — 정직한 메타).
     confirmed = _get(final, "base_date")
+    base_date_iso = confirmed.isoformat() if confirmed else None
+
+    # ── JSON 출구 (배선 A): 검증된 state 를 옮겨 담기만 — 재계산·재검증 없음 ──
+    payload = build_payload(
+        signals=_get(final, "signals"),
+        meta={
+            "stock_name": stock_name,
+            "ticker": ticker,
+            "market": _get(final, "market"),
+            "base_date": base_date_iso,
+        },
+        gate1=_get(final, "gate1"),
+        gate2=_get(final, "gate2"),
+        gate3=_get(final, "gate3"),
+        interpretation=_get(final, "interpretation"),
+        report_id=_get(final, "report_id"),
+    )
+
     return AgentOutput(
         report_id=_get(final, "report_id"),
         html=_get(final, "html"),
         meta={
             "stock_name": stock_name,
             "ticker": ticker,
-            "base_date": confirmed.isoformat() if confirmed else None,
+            "base_date": base_date_iso,
         },
+        payload=payload,
     )
