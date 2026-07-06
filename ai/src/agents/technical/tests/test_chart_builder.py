@@ -360,3 +360,96 @@ def test_rolling_sr_schema_and_importance_unchanged():
         assert set(a) >= {"id", "kind", "date", "price", "label", "importance", "source", "meta"}
         assert a["importance"] == "medium"   # importance 미변경(retier는 별도 커밋)
         assert a["source"] == "code"
+
+
+# ── rolling box_range_candidate (feat/technical-chart-patterns) ─────────────────
+from src.agents.technical.charts.chart_builder import _box_range_at  # noqa: E402
+
+
+def _box_series(n: int) -> list[OHLCV]:
+    """n봉 박스권(상단 108 부근 / 하단 100 부근, range 8% ≤ 12%)."""
+    closes, highs, lows = [], [], []
+    for i in range(n):
+        top = i % 2 == 0
+        closes.append(107.0 if top else 101.0)
+        highs.append(108.0 if top else 102.0)
+        lows.append(106.0 if top else 100.0)
+    return series(closes, highs=highs, lows=lows)
+
+
+def _box_dates(daily) -> list[str]:
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    return [a["date"] for a in anns if a["kind"] == "box_range_candidate"]
+
+
+def test_rolling_box_on_past_window():
+    # 앞 41봉 박스 → 이후 급등(플래토 130)해서 최신 창은 박스 아님 → 과거 봉에 box_range 생성
+    box = _box_series(41)
+    trend = series([130.0] * 10, highs=[130.0] * 10, lows=[130.0] * 10,
+                   start=date(2025, 1, 1) + timedelta(days=41))
+    daily = box + trend
+    dates = _box_dates(daily)
+    assert dates                       # 박스 후보 생성됨
+    assert _d(50) not in dates         # 최신 봉(급등 구간)은 박스 아님
+    assert all(d <= _d(40) for d in dates)  # 박스 후보는 과거 flat 구간에만
+
+
+def test_rolling_box_latest_judgment_preserved():
+    # i=len-1 판정이 기존 최신-only와 동일: 최신 40봉이 박스면 그 끝봉에서 box 판정
+    daily = _box_series(45)
+    ann = _box_range_at(daily, len(daily) - 1)
+    assert ann is not None
+    assert ann["kind"] == "box_range_candidate"
+    assert ann["date"] == daily[-1].date
+
+
+def test_rolling_box_no_lookahead():
+    # 박스 구간(bars 20~59) 앞에 강한 상승(bars 0~19) → 창에 상승이 섞인 i에선 박스 아님.
+    # 미래(박스 완성)를 미리 보지 않으므로 i=40에선 None, 창이 박스로 가득 찬 i=59에서만 박스.
+    rise = series([60.0 + 2.0 * i for i in range(20)],
+                  highs=[60.0 + 2.0 * i for i in range(20)],
+                  lows=[60.0 + 2.0 * i for i in range(20)])
+    box = _box_series(40)
+    box = series([float(b.close) for b in box],
+                 highs=[float(b.high) for b in box], lows=[float(b.low) for b in box],
+                 start=date(2025, 1, 1) + timedelta(days=20))
+    daily = rise + box
+    assert _box_range_at(daily, 40) is None       # 창에 상승 섞임 → 박스 아님(미래 안 봄)
+    assert _box_range_at(daily, 59) is not None    # 창이 박스로 가득 → 박스
+
+
+def test_rolling_box_skips_initial_window():
+    # 창(40봉) 못 채우는 초기 구간(index < 39)엔 생성 안 됨
+    daily = _box_series(45)
+    assert _box_range_at(daily, 38) is None    # window 부족
+    assert _box_range_at(daily, 39) is not None
+    dates = _box_dates(daily)
+    assert dates and all(d >= _d(39) for d in dates)
+
+
+def test_rolling_box_dedup_bounds_count():
+    # 60봉 박스 → 매 창이 박스 후보지만 dedup(1y=10봉)으로 과도하지 않게 정리
+    daily = _box_series(60)
+    box = [a for a in cdata(payload_of(build_chart_payloads(daily, [], []),
+                                       ChartPeriod.ONE_YEAR))["annotations"]
+           if a["kind"] == "box_range_candidate"]
+    assert 1 <= len(box) <= 5    # 21개 후보(39..59)가 dedup 10봉으로 ~3개 수준
+
+
+def test_rolling_box_not_generated_in_trend():
+    # 명확한 상승 추세 → 어떤 창도 박스 아님
+    daily = series([100.0 + 2.0 * i for i in range(60)])
+    assert "box_range_candidate" not in _kinds_from_daily(daily)
+
+
+def test_rolling_box_schema_and_metadata():
+    daily = _box_series(45)
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    box = [a for a in anns if a["kind"] == "box_range_candidate"]
+    assert box
+    for a in box:
+        assert a["importance"] == "low"   # importance 미변경
+        assert a["source"] == "code"
+        # 상단/하단 + breakout 대비 metadata(자유 dict, schema 변경 없음)
+        assert {"top", "bottom", "range_pct", "top_touch", "bottom_touch", "window_bars"} <= set(a["meta"])
+        assert a["meta"]["window_bars"] == 40

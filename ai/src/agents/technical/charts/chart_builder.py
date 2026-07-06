@@ -142,7 +142,7 @@ def _build_chart_data(period: ChartPeriod, candle_unit: str, source: Sequence[OH
         + _volume_spike_annotations(source, vol_avg, tv_avg, start)
         + _sr_touch_annotations(source, start)
         + _rsi_annotations(source, rsis, start)
-        + _box_range_annotation(source)
+        + _box_range_annotations(source, start)
     )
     date_to_index = {bar.date: i for i, bar in enumerate(source)}
     annotations = _finalize_annotations(annotations, ANNOTATION_DEDUP_BARS[period.value], date_to_index)
@@ -314,21 +314,46 @@ def _rsi_annotations(source: Sequence[OHLCV], rsis: list, start: int) -> list[di
     return anns
 
 
-def _box_range_annotation(source: Sequence[OHLCV]) -> list[dict]:
-    window = list(source[-BOX_LOOKBACK_DAYS:])
-    if len(window) < BOX_LOOKBACK_DAYS:
-        return []
+def _box_range_at(source: Sequence[OHLCV], end_i: int) -> dict | None:
+    """`source[end_i]`를 끝으로 하는 **직전 BOX_LOOKBACK_DAYS 창**(현재봉 포함, look-ahead 없음)이
+    박스권이면 box_range_candidate annotation dict, 아니면 None. 창이 부족한 초기 구간은 None.
+
+    조건(기존 최신-only와 동일): range width ≤ BOX_RANGE_THRESHOLD_PCT AND 상/하단 각각 터치
+    BOX_MIN_TOUCH_COUNT회 이상. 미래 봉(end_i 이후)은 절대 보지 않는다.
+    meta에 top/bottom/range_pct + top_touch/bottom_touch/window_bars(box_breakout 대비)를 남긴다.
+    """
+    lo_i = end_i - BOX_LOOKBACK_DAYS + 1
+    if lo_i < 0:  # 창(40봉)을 못 채우는 초기 구간 skip
+        return None
+    window = list(source[lo_i:end_i + 1])
     highs = [float(b.high) for b in window]
     lows = [float(b.low) for b in window]
     top, bottom = max(highs), min(lows)
     if bottom <= 0 or (top - bottom) / bottom > BOX_RANGE_THRESHOLD_PCT:
-        return []
+        return None
     top_touch = sum(1 for h in highs if abs(h - top) / top <= NEAR_RESISTANCE_THRESHOLD_PCT)
     bottom_touch = sum(1 for lo in lows if abs(lo - bottom) / bottom <= NEAR_SUPPORT_THRESHOLD_PCT)
     if top_touch < BOX_MIN_TOUCH_COUNT or bottom_touch < BOX_MIN_TOUCH_COUNT:
-        return []
-    return [_ann("box_range_candidate", window[-1].date, None, "low",
-                 {"top": top, "bottom": bottom, "range_pct": round((top - bottom) / bottom, 3)})]
+        return None
+    return _ann("box_range_candidate", source[end_i].date, None, "low", {
+        "top": top, "bottom": bottom, "range_pct": round((top - bottom) / bottom, 3),
+        "top_touch": top_touch, "bottom_touch": bottom_touch, "window_bars": len(window),
+    })
+
+
+def _box_range_annotations(source: Sequence[OHLCV], start: int) -> list[dict]:
+    """visible range의 각 봉을 창 끝점으로 **rolling** 박스권 후보를 생성한다(look-ahead 없음).
+
+    최신 봉(i=len-1)에 대한 판정은 기존 최신-only `_box_range_at(source, len-1)`와 동일하다.
+    창 부족 초기 구간은 skip하며, 연속 박스로 여러 개가 생겨도 dedup이 정리한다.
+    """
+    anns: list[dict] = []
+    first = max(start, BOX_LOOKBACK_DAYS - 1)  # 초기 lookback 부족 구간 skip
+    for i in range(first, len(source)):
+        ann = _box_range_at(source, i)
+        if ann is not None:
+            anns.append(ann)
+    return anns
 
 
 def _finalize_annotations(annotations: list[dict], dedup_bars: int, date_to_index: dict[str, int]) -> list[dict]:
