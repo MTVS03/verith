@@ -17,9 +17,11 @@ import logging
 import math
 import re
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import httpx
+from pydantic import ValidationError
 
 from ..config import (
     KIS_BACKOFF_SECONDS,
@@ -35,6 +37,7 @@ from ..config import (
     is_allowed_ticker,
     load_kis_settings,
 )
+from ..schemas.intraday import IntradayCandle
 from ..schemas.ohlcv import OHLCV
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,37 @@ REQUIRED_KIS_FIELDS = (
     KIS_FIELD_DATE, KIS_FIELD_OPEN, KIS_FIELD_HIGH, KIS_FIELD_LOW,
     KIS_FIELD_CLOSE, KIS_FIELD_VOLUME, KIS_FIELD_TRADING_VALUE,
 )
+
+# ── 주식당일분봉조회 API (kis_mapping §12) — D/W/M과 별도 TR ────────────────────
+MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+MINUTE_TR_ID = "FHKST03010200"  # 실전/모의 동일 (kis_mapping §12.2)
+# 요청 FID 값 — kis_mapping §12.3 / 공식 샘플 기준. FID_COND_MRKT_DIV_CODE는 MARKET_DIV_CODE("J") 재사용.
+# 아래 두 값의 정확한 코드는 §12.9 smoke 확인 대상(구조·필드명은 확정).
+MINUTE_PW_DATA_INCU_YN = "Y"  # FID_PW_DATA_INCU_YN
+MINUTE_ETC_CLS_CODE = ""      # FID_ETC_CLS_CODE
+MINUTE_MAX_CALLS = 20          # 30건×20 ≈ 600봉 (1일 1분봉 ~391) — 무한 루프 방지 상한
+MINUTE_MARKET_OPEN_HHMMSS = "090000"  # 이 시각 이전으로는 더 역방향 조회하지 않는다
+
+# output2 원본 필드 → IntradayCandle (kis_mapping §12.4). close는 분봉 현재가(stck_prpr)로,
+# 일봉의 stck_clpr과 다르다. trading_value는 매핑하지 않는다(acml_tr_pbmn은 누적).
+KIS_MIN_FIELD_DATE = "stck_bsop_date"
+KIS_MIN_FIELD_HOUR = "stck_cntg_hour"
+KIS_MIN_FIELD_OPEN = "stck_oprc"
+KIS_MIN_FIELD_HIGH = "stck_hgpr"
+KIS_MIN_FIELD_LOW = "stck_lwpr"
+KIS_MIN_FIELD_CLOSE = "stck_prpr"
+KIS_MIN_FIELD_VOLUME = "cntg_vol"
+REQUIRED_MIN_FIELDS = (
+    KIS_MIN_FIELD_DATE, KIS_MIN_FIELD_HOUR, KIS_MIN_FIELD_OPEN,
+    KIS_MIN_FIELD_HIGH, KIS_MIN_FIELD_LOW, KIS_MIN_FIELD_CLOSE, KIS_MIN_FIELD_VOLUME,
+)
+# output1 메타데이터 필드 (kis_mapping §12.5)
+KIS_MIN_OUT1_PREV_CLOSE = "stck_prdy_clpr"
+KIS_MIN_OUT1_LAST_PRICE = "stck_prpr"
+KIS_MIN_OUT1_CUM_VOLUME = "acml_vol"
+KIS_MIN_OUT1_CUM_TRADING_VALUE = "acml_tr_pbmn"
+
+_HHMMSS_RE = re.compile(r"^\d{6}$")
 
 
 
@@ -470,3 +504,226 @@ def fetch_multi_timeframe_ohlcv(
     validate_ticker(ticker)
     end = normalize_end_date(end_date)  # 한 번 정규화 → 세 타임프레임 동일 기준일
     return {period: fetch_ohlcv(ticker, period, end_date=end) for period in ALLOWED_PERIODS}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 주식당일분봉조회 (kis_mapping §12) — output2 → IntradayCandle, output1 → 메타데이터
+# ─────────────────────────────────────────────────────────────────────────────
+def _to_intraday_timestamp(bsop_date: object, cntg_hour: object) -> str:
+    """KIS 'YYYYMMDD' + 'HHMMSS' → IntradayCandle.timestamp 'YYYY-MM-DDTHH:MM:SS'."""
+    iso_date = _to_iso_date(bsop_date, KIS_MIN_FIELD_DATE)  # 8자리·달력 검증 재사용
+    hh = str(cntg_hour).strip()
+    if not _HHMMSS_RE.match(hh):
+        raise KisFieldError(f"체결시각 형식 오류 ({KIS_MIN_FIELD_HOUR}={cntg_hour!r}), 'HHMMSS' 6자리 기대")
+    try:
+        datetime.strptime(hh, "%H%M%S")  # 실제 시각 검증(256000 등 거부)
+    except ValueError as exc:
+        raise KisFieldError(f"존재하지 않는 체결시각 ({KIS_MIN_FIELD_HOUR}={cntg_hour!r})") from exc
+    return f"{iso_date}T{hh[0:2]}:{hh[2:4]}:{hh[4:6]}"
+
+
+def parse_kis_intraday_item(item: dict) -> IntradayCandle:
+    """output2 원소 1건 → IntradayCandle. trading_value는 매핑하지 않는다(acml_tr_pbmn은 누적).
+
+    필수 필드 누락·숫자 변환 실패·스키마 위반(high<low 등)은 KisFieldError로 fail-fast한다(row skip 안 함).
+    """
+    missing = [f for f in REQUIRED_MIN_FIELDS if f not in item]
+    if missing:
+        raise KisFieldError(f"KIS 분봉 output2 필수 필드 누락: {missing}")
+    try:
+        return IntradayCandle(
+            timestamp=_to_intraday_timestamp(item[KIS_MIN_FIELD_DATE], item[KIS_MIN_FIELD_HOUR]),
+            open=_to_price(item[KIS_MIN_FIELD_OPEN], KIS_MIN_FIELD_OPEN),
+            high=_to_price(item[KIS_MIN_FIELD_HIGH], KIS_MIN_FIELD_HIGH),
+            low=_to_price(item[KIS_MIN_FIELD_LOW], KIS_MIN_FIELD_LOW),
+            close=_to_price(item[KIS_MIN_FIELD_CLOSE], KIS_MIN_FIELD_CLOSE),
+            volume=_to_int(item[KIS_MIN_FIELD_VOLUME], KIS_MIN_FIELD_VOLUME),
+            trading_value=None,  # acml_tr_pbmn은 누적 거래대금이라 개별 분봉 값이 아님(kis_mapping §12.4)
+            interval="1min",
+        )
+    except ValidationError as exc:  # high<low 등 스키마 위반 → fail-fast
+        raise KisFieldError(f"분봉 스키마 검증 실패: {exc}") from exc
+
+
+def parse_kis_intraday_output(output2: list[dict]) -> list[IntradayCandle]:
+    """output2 배열 → IntradayCandle 리스트(정렬·dedupe는 상위 fetch에서 병합 시 처리). 빈 배열은 []."""
+    if not output2:
+        return []
+    return [parse_kis_intraday_item(item) for item in output2]
+
+
+def _opt_price(out1: dict, field: str) -> float | None:
+    raw = out1.get(field)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(_to_price(raw, field))
+    except KisFieldError:
+        return None
+
+
+def _opt_int(out1: dict, field: str) -> int | None:
+    raw = out1.get(field)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return _to_int(raw, field)
+    except KisFieldError:
+        return None
+
+
+def _extract_output1(data: dict) -> dict:
+    """output1(종목 요약)을 dict로 반환. 단일 객체/리스트 첫 원소 모두 허용, 부재 시 {}."""
+    out1 = data.get("output1")
+    if isinstance(out1, dict):
+        return out1
+    if isinstance(out1, list) and out1 and isinstance(out1[0], dict):
+        return out1[0]
+    return {}
+
+
+@dataclass(frozen=True)
+class IntradayFetchResult:
+    """주식당일분봉조회 결과 — 정규화 candles + output1 메타데이터.
+
+    supervisor는 previous_close(전일 종가) 등 메타데이터로 intraday_context를 채운다.
+    (이 단계에서 status 판정·보정은 하지 않는다.)
+    """
+    candles: list[IntradayCandle]
+    previous_close: float | None
+    latest_price: float | None
+    cumulative_volume: int | None
+    cumulative_trading_value: int | None
+
+
+def _resolve_input_hour(as_of: date | datetime | None, input_hour: str | None) -> str:
+    """FID_INPUT_HOUR_1(HHMMSS). input_hour 우선, 없으면 as_of 시각, 그것도 없으면 현재 시각."""
+    if input_hour is not None:
+        if not _HHMMSS_RE.match(input_hour):
+            raise ValueError(f"input_hour는 'HHMMSS' 6자리여야 합니다: {input_hour!r}")
+        return input_hour
+    if isinstance(as_of, datetime):
+        return as_of.strftime("%H%M%S")
+    return datetime.now().strftime("%H%M%S")
+
+
+def _hhmmss_minus_minute(hhmmss: str) -> str:
+    """HHMMSS에서 1분 뺀 HHMMSS(같은 날 기준). 역방향 페이징 커서 계산용."""
+    return (datetime.strptime(hhmmss, "%H%M%S") - timedelta(minutes=1)).strftime("%H%M%S")
+
+
+def _call_minute_chart(
+    settings: KISSettings, token: str, ticker: str, input_hour: str, client: httpx.Client,
+) -> dict:
+    """주식당일분봉조회 1회 호출. 네트워크/429/EGW00201은 재시도(기존 D/W/M 패턴 재사용, _call_chart 무변경)."""
+    headers = {
+        "content-type": "application/json; charset=utf-8",
+        "authorization": f"Bearer {token}",
+        "appkey": settings.api_key,
+        "appsecret": settings.api_secret,
+        "tr_id": MINUTE_TR_ID,
+        "custtype": CUST_TYPE,
+    }
+    params = {
+        "FID_COND_MRKT_DIV_CODE": MARKET_DIV_CODE,
+        "FID_INPUT_ISCD": ticker,
+        "FID_INPUT_HOUR_1": input_hour,
+        "FID_PW_DATA_INCU_YN": MINUTE_PW_DATA_INCU_YN,
+        "FID_ETC_CLS_CODE": MINUTE_ETC_CLS_CODE,
+    }
+    url = f"{settings.base_url}{MINUTE_CHART_PATH}"
+
+    last_err = "unknown"
+    for attempt in range(KIS_MAX_RETRIES):
+        try:
+            resp = client.get(url, headers=headers, params=params)
+        except httpx.RequestError as exc:
+            last_err = f"network error: {exc}"
+        else:
+            if resp.status_code == 429 or RATE_LIMIT_MSG_CODE in resp.text:
+                last_err = f"rate limit(HTTP {resp.status_code})"
+            elif resp.status_code != 200:
+                raise KisApiError(f"KIS HTTP {resp.status_code}: {resp.text[:200]}")
+            else:
+                data = resp.json()
+                if data.get("rt_cd") == "0":
+                    return data
+                if data.get("msg_cd") == RATE_LIMIT_MSG_CODE:
+                    last_err = f"rate limit(rt_cd): {data.get('msg1')}"
+                else:
+                    raise KisApiError(
+                        f"KIS 오류 rt_cd={data.get('rt_cd')} "
+                        f"msg_cd={data.get('msg_cd')} msg1={data.get('msg1')}"
+                    )
+        if attempt < KIS_MAX_RETRIES - 1:
+            logger.warning("kis_minute_request_retry", extra={"ticker": ticker, "hour": input_hour, "reason": last_err})
+            _sleep_backoff(attempt)
+    raise KisApiError(f"KIS 분봉 최대 재시도({KIS_MAX_RETRIES}) 초과: {last_err}")
+
+
+def fetch_minute_ohlcv(
+    ticker: str,
+    *,
+    as_of: date | datetime | None = None,
+    input_hour: str | None = None,
+    limit: int | None = None,
+    client: httpx.Client | None = None,
+) -> IntradayFetchResult:
+    """주식당일분봉조회(TR FHKST03010200)로 **당일** 1분봉을 조회한다(kis_mapping §12).
+
+    당일만 제공·1회 최대 30건이라, `FID_INPUT_HOUR_1`을 **역방향으로 이동하며 반복 조회**하고
+    timestamp 기준 dedupe·오름차순 정렬한다(tr_cont/FK100/NK100 방식 아님). `input_hour`가 없으면
+    `as_of` 시각(또는 현재 시각) 기준으로 시작한다. 미래 시각은 공식 샘플상 현재 기준으로 조회되며,
+    코드에서 과하게 보정하지 않는다. `limit`이 있으면 최신 `limit`개만 반환한다.
+    빈 output2는 빈 candles로 반환하고, **status(휴장·장전 등) 판정은 하지 않는다**(supervisor 몫).
+    """
+    validate_ticker(ticker)
+    if limit is not None and limit <= 0:
+        return IntradayFetchResult([], None, None, None, None)
+    cursor = _resolve_input_hour(as_of, input_hour)
+
+    owns_client = client is None
+    client = client or httpx.Client(timeout=KIS_TIMEOUT_SECONDS)
+    try:
+        settings = load_kis_settings()
+        token = get_access_token(client=client)
+        by_ts: dict[str, IntradayCandle] = {}
+        metadata: dict | None = None
+        oldest_hour: str | None = None
+        for _ in range(MINUTE_MAX_CALLS):
+            data = _call_minute_chart(settings, token, ticker, cursor, client)
+            if metadata is None:
+                metadata = _extract_output1(data)  # 첫 응답의 종목 요약을 메타데이터로
+            candles = parse_kis_intraday_output(_extract_output2(data))
+            if not candles:  # 자연 종료: 더 과거(또는 데이터) 없음
+                break
+            for candle in candles:
+                by_ts[candle.timestamp] = candle
+
+            batch_oldest_hour = min(c.timestamp[11:].replace(":", "") for c in candles)  # HHMMSS
+            if batch_oldest_hour <= MINUTE_MARKET_OPEN_HHMMSS:  # 장 시작 이전까지 확보
+                break
+            if oldest_hour is not None and batch_oldest_hour >= oldest_hour:  # 정체
+                break
+            oldest_hour = batch_oldest_hour
+            next_cursor = _hhmmss_minus_minute(batch_oldest_hour)
+            if next_cursor >= cursor:  # 경계 wrap 등으로 진전 없음 → 중단
+                break
+            cursor = next_cursor
+            if limit is not None and len(by_ts) >= limit:
+                break
+    finally:
+        if owns_client:
+            client.close()
+
+    candles_sorted = sorted(by_ts.values(), key=lambda c: c.timestamp)  # 과거→최신
+    if limit is not None:
+        candles_sorted = candles_sorted[-limit:]  # 최신 limit개
+    out1 = metadata or {}
+    return IntradayFetchResult(
+        candles=candles_sorted,
+        previous_close=_opt_price(out1, KIS_MIN_OUT1_PREV_CLOSE),
+        latest_price=_opt_price(out1, KIS_MIN_OUT1_LAST_PRICE),
+        cumulative_volume=_opt_int(out1, KIS_MIN_OUT1_CUM_VOLUME),
+        cumulative_trading_value=_opt_int(out1, KIS_MIN_OUT1_CUM_TRADING_VALUE),
+    )
