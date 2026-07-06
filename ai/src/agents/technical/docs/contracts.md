@@ -186,7 +186,7 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
 **불변식:** intraday는 **`final_regime`을 덮어쓰지 않는다**(읽기 전용). 현재 단계에서 **top-level `confidence`·`signal_score`·`risk` 구조는 intraday로 변경하지 않는다**(보정값은 `intraday_context` 내부 설명용). `intraday_context`는 아직 전용 저장 테이블에 매핑하지 않는다(런타임/Beta — 저장 여부는 후속 결정).
 
-**미구현 / 정지선:** **KIS 분봉 fetcher(`kis_client.fetch_minute_ohlcv`)는 아직 구현되지 않았다.** KIS 공식 분봉 TR/endpoint/필드/페이징이 확정되기 전까지 정지한다(`kis_mapping.md §12`). 현재 1d 조립 경로는 **이미 주어진 `IntradayCandle` 리스트**(예: `supervisor.run(..., intraday_candles=...)`)에서만 동작한다. intraday annotation(캔들 위 마커 등)은 **Phase 3 / Future Work**이며 현재 구현된 것처럼 기술하지 않는다.
+**구현 상태 (Beta):** KIS 분봉 매핑은 공식 샘플로 확정됐고(`kis_mapping.md §12`), **`kis_client.fetch_minute_ohlcv`는 구현 완료**다. supervisor에는 **optional `intraday_fetcher` 주입 경로**가 있다(`run(..., intraday_fetcher=...)`). **단 production default-on은 아니다** — 기본 agent path는 기존 D/W/M과 동일하게 동작하고, **intraday_fetcher를 주입한 경우에만** 1d chart·`intraday_context`가 생성된다. fetch 실패·빈 응답은 D/W/M output 실패로 전파되지 않는다(intraday off). `intraday_candles` 직접 주입 경로(`supervisor.run(..., intraday_candles=...)`)는 테스트/fixture/manual 용도로 유지된다. production default-on 여부는 별도 결정이며, intraday annotation(캔들 위 마커 등)은 **Phase 3 / Future Work**로 현재 구현된 것처럼 기술하지 않는다.
 
 ### 3. JSON ↔ ERD 매핑 (backend 저장 기준)
 
@@ -402,4 +402,4 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 6. **신호 판정은 코드, 설명 문장은 LLM.** `technical_signals[]`에서 `signal`·`value`·`metrics`·`weight`는 코드가 확정하고, `detail`만 LLM이 그 확정값을 서술한다. LLM은 판정을 바꿀 수 없으며 `detail`은 검증 ③ 대상이다. 화면에서도 이 경계를 색으로 구분 표시한다(코드=청록, LLM=보라).
 7. **에이전트는 DB를 모른다.** 3장 매핑은 backend가 수행하는 참고용. 에이전트는 JSON 구조만 책임진다.
 8. **변경 시 소스 문서 순서:** JSON 계약(필드·구조)은 `contracts.md`를 먼저 고친다. DB 컬럼명·저장 구조 변경은 `schema.md`를 먼저 고친다(schema가 DB 이름의 최종 기준). enum 값 변경은 `enums.md`를 기준으로 삼는다. 세 경우 모두 소스 문서를 고친 뒤 나머지 문서 → 코드·backend 순으로 반영한다.
-9. **1D intraday는 조건부·보조(Beta).** `charts`는 `{3m, 1y, 5y}`가 항상 존재하고 `1d`는 조건부다 — 소비 측은 `len == 3`이 아니라 **period 집합**으로 처리한다. `chart_data`는 `candle_unit` 판별 유니온(D/W/M=`ChartData`, 1d=`IntradayChartData`)이며 `OHLCV.date`(날짜 전용)는 불변, intraday는 `IntradayCandle.timestamp`를 쓴다. `intraday_context`는 optional이고, intraday는 `final_regime`·top-level `confidence`/`signal_score`/`risk`를 바꾸지 않는다(보정값은 context 내부 설명용, cap ±0.05·signal_score_adjustment는 0.0). KIS 분봉 fetcher는 공식 매핑 확정 전까지 미구현이며, intraday annotation은 Phase 3다.
+9. **1D intraday는 조건부·보조(Beta).** `charts`는 `{3m, 1y, 5y}`가 항상 존재하고 `1d`는 조건부다 — 소비 측은 `len == 3`이 아니라 **period 집합**으로 처리한다. `chart_data`는 `candle_unit` 판별 유니온(D/W/M=`ChartData`, 1d=`IntradayChartData`)이며 `OHLCV.date`(날짜 전용)는 불변, intraday는 `IntradayCandle.timestamp`를 쓴다. `intraday_context`는 optional이고, intraday는 `final_regime`·top-level `confidence`/`signal_score`/`risk`를 바꾸지 않는다(보정값은 context 내부 설명용, cap ±0.05·signal_score_adjustment는 0.0). KIS 분봉 fetcher(`fetch_minute_ohlcv`)는 구현 완료이고 supervisor에 optional `intraday_fetcher` 주입 경로가 있으나 **production default-on은 아니다**(주입 시에만 1d 생성). intraday annotation은 Phase 3다.

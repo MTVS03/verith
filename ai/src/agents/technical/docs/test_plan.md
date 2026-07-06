@@ -504,7 +504,7 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 | CONTRACT-11 | intraday 유무 | `regime.final_regime`·top-level `confidence`/`signal_score`/`risk` 동일(intraday로 불변) |
 | CONTRACT-12 | intraday 조립 실패 | D/W/M output 정상 반환·`intraday_context=null`(전체 실패로 번지지 않음) |
 
-> **1D intraday 계약 테스트**(위 CONTRACT-08~12)는 모두 **fixture 기반**이며 real KIS 분봉을 호출하지 않는다(KIS 분봉 fetcher 미구현, `kis_mapping.md §12`). `intraday_context` 필드(hint·alignment·`confidence_adjustment` cap ±0.05·`signal_score_adjustment`=0.0·`risk_notes`) 단위 검증은 `test_intraday_*` 스위트에서 다룬다.
+> **1D intraday 계약 테스트**(위 CONTRACT-08~12)는 모두 **fixture/mock 기반**이며 real KIS 분봉을 호출하지 않는다. KIS 분봉 fetcher(`fetch_minute_ohlcv`)는 **구현 완료**이고 mock 기반으로 매핑·페이징을 검증하며(`test_kis_intraday_client.py`), supervisor의 optional `intraday_fetcher` 주입도 fake fetcher로 검증한다(성공→1d 추가·context 세팅, 빈/예외→D/W/M 정상, previous_close 사용/일봉 fallback). **production default-on은 아니므로** 기본 supervisor 실행은 D/W/M만 낸다(fetcher 주입 시에만 1d). `intraday_context` 필드(hint·alignment·`confidence_adjustment` cap ±0.05·`signal_score_adjustment`=0.0·`risk_notes`) 단위 검증은 `test_intraday_*` 스위트에서 다룬다. real KIS 분봉은 **manual smoke**로만 확인한다(`kis_mapping.md §12.9`).
 
 ### enum 값 검증
 

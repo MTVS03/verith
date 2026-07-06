@@ -279,7 +279,9 @@ per, eps, pbr, itewhol_loan_rmnd_ratem
 > `examples_llm/domestic_stock/inquire_time_itemchartprice/{inquire_time_itemchartprice.py, chk_inquire_time_itemchartprice.py}`,
 > API명 `[국내주식] 기본시세 > 주식당일분봉조회 [v1_국내주식-022]`.
 > 남은 것은 **실제 응답 값·정렬 방향·건수 경계**(§12.6)로, fixture 또는 수동 smoke로 확인한다.
-> fetcher(`services/kis_client.py::fetch_minute_ohlcv`) 구현은 **커밋 13** 범위다(이 문서는 매핑만).
+> fetcher(`services/kis_client.py::fetch_minute_ohlcv`)는 **구현 완료**이며, supervisor에는 optional
+> `intraday_fetcher` 주입 경로가 있다(커밋 13·14). 단 **production default-on은 아니다** — 기본 agent
+> path는 기존 D/W/M과 동일하고, `run(..., intraday_fetcher=fetch_minute_ohlcv)`로 주입할 때만 1d가 조회된다.
 
 ### 12.1 범위·용어
 
@@ -378,12 +380,17 @@ D/W/M 일·주·월봉과 **1D 분봉은 완전히 다른 API**다. 일/주/월 
 - 정식 **거래일 달력(휴장일) 소스는 repo에 없음** → v1은 **주말 + 분봉 0건 + KIS 응답**으로 휴리스틱 판정.
   정식 거래시간(09:00–15:30 KST)·휴장일 캘린더 통합은 **후속(Future Work)**.
 
-### 12.9 커밋 13(fetcher) 전 최종 확인 항목
+### 12.9 manual smoke로 확인할 항목 (fetcher는 구현 완료, 실측 대기)
 
-아래는 코드 구현(커밋 13)에서 fixture/수동 smoke로 최종 확인한다(임의 추측 금지):
+`fetch_minute_ohlcv`는 구현되었고 mock 테스트로 매핑·페이징을 검증했다. 아래는 **실 KIS 수동 smoke**로만
+확인 가능한 항목이며(임의 추측 금지), 확인 후 이 절을 "실측 완료"로 승격한다:
 
-- `output2` 실제 정렬 방향과 30건 경계 동작,
-- `FID_COND_MRKT_DIV_CODE`·`FID_PW_DATA_INCU_YN`·`FID_ETC_CLS_CODE`의 정확한 코드 값(공식 샘플 그대로),
+- `output2` **실제 응답 정렬 방향**(과거→최신 vs 역순 — 정규화는 timestamp 오름차순으로 통일하므로 결과는 정합),
+- **30건 경계** 동작(역방향 페이징 커서 이동),
+- `FID_PW_DATA_INCU_YN`·`FID_ETC_CLS_CODE`의 정확한 코드 값(현재 `"Y"`/`""`로 두고 실측 확인),
+- 장중/장전/장후/휴장 응답 형태(빈 `output2` 등),
+- `output1.stck_prdy_clpr`(previous_close) 정확성,
+- `cntg_vol` 특이사항(첫 체결 전 직전 분봉 체결량 표기 — volume spike 한계, §12.6),
 - 분봉 조회의 rate limit·에러 코드(D/W/M과 동일 패턴 재사용 가능 여부).
 
 ---

@@ -231,7 +231,7 @@ Streamlit lab의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반�
 
 장중 분봉(1d)은 **보조 화면**이다(정본 정책: `chart_annotation_spec.md §3.1`, 계약: `contracts.md` "1D intraday"). 기존 **D/W/M 계약은 그대로 유지**되며, intraday는 그 위에 얹히는 **선택적** 확장이다.
 
-**fetcher-무관 범위(구현됨):**
+**구현된 범위:**
 
 | 항목 | 위치 |
 | --- | --- |
@@ -242,9 +242,10 @@ Streamlit lab의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반�
 | intraday 관측 컨텍스트 계산 | `charts/intraday_context_builder.py` |
 | intraday_regime_hint·regime_alignment | `synthesis/intraday_alignment.py` |
 | confidence_adjustment(cap ±0.05)·risk_notes(context 내부) | `synthesis/intraday_adjustment.py` |
-| supervisor의 optional 조립(`run(..., intraday_candles=...)`, 실패는 흡수) | `supervisor/technical_supervisor.py` |
+| **KIS 분봉 fetcher** `fetch_minute_ohlcv`(inquire-time-itemchartprice, TR FHKST03010200) | `services/kis_client.py` |
+| supervisor의 optional 조립 — 직접 `intraday_candles` 주입 + optional `intraday_fetcher` 주입(둘 다 실패는 흡수) | `supervisor/technical_supervisor.py` |
 | 1D Intraday QA(fixture/manual) | `devtools/streamlit_technical_lab.py` |
 
-**정지선(미구현):** **KIS 분봉 fetcher(`kis_client.fetch_minute_ohlcv`)는 착수하지 않는다** — KIS 공식 분봉 TR/endpoint/필드/페이징이 확정되기 전까지 정지한다(`kis_mapping.md §12`). 현재 1d는 **주어진 `IntradayCandle` 리스트**에서만 조립된다.
+**production default-on은 아니다:** supervisor의 `intraday_fetcher` 기본값은 `None`이라, **기본 agent path는 기존 D/W/M과 동일**하다. 실 KIS 분봉을 쓰려면 호출부에서 `run(..., intraday_fetcher=fetch_minute_ohlcv)`로 **명시 주입**해야 한다(`agent.py`는 thin wrapper 유지 — 변경 없음). default-on을 어느 계층에서 켤지는 **별도 결정**이다. `kis_mapping.md §12.9`의 항목은 실 KIS **manual smoke**로 확인한다.
 
 **불변식:** `charts`는 `{3m, 1y, 5y}`가 항상 존재하고 `1d`는 조건부(소비 측은 `len == 3`이 아닌 period 집합으로 처리). `OHLCV.date`는 날짜 전용 유지. intraday는 `final_regime`을 덮어쓰지 않고, top-level `confidence`/`signal_score`/`risk`도 이 단계에서 변경하지 않는다(`signal_score_adjustment`=0.0). intraday **마커 annotation은 Phase 3(Future Work)**.
