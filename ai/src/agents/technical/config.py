@@ -222,7 +222,7 @@ CACHE_SECONDS_PER_DAY = 86400         # stale 일수 → Redis expire 초 환산
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7.3 Trace 로깅 상수 (trace_schema.md §13). services/trace_logger.py가 사용한다.
+# 7.3 Trace 로깅 상수 (trace_schema.md §13). observability/trace_logger.py가 사용한다.
 #     관측 전용 — 운영 결선(JSONL path·config sink 자동 생성)은 AI endpoint 브랜치에서 한다.
 # ─────────────────────────────────────────────────────────────────────────────
 TRACE_MAX_ERROR_MESSAGE_LENGTH = 300  # trace error message 최대 길이(secret/원문 박제 방지·축약)

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from .schemas.contracts import TechnicalAgentInput, TechnicalAgentOutput
-from .services.trace_logger import TraceSink
+from .observability.trace_logger import TraceSink
 from .supervisor import technical_supervisor
 from .supervisor.technical_supervisor import OhlcvFetcher
 
