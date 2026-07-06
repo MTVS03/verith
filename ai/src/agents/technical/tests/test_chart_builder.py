@@ -1,0 +1,286 @@
+"""chart_builder 단위테스트 (CHART-*, test_plan.md §6). 외부 호출 없음.
+
+chart_data 구조·source 매핑·slice·annotation 생성을 직접 만든 OHLCV fixture로 검증한다.
+"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+from pathlib import Path
+
+from src.agents.technical.charts.chart_builder import build_chart_payloads
+from src.agents.technical.schemas.contracts import ChartPayload
+from src.agents.technical.schemas.enums import ChartPeriod
+from src.agents.technical.schemas.ohlcv import OHLCV
+
+CHARTS_DIR = Path(__file__).resolve().parent.parent / "charts"
+CANDLE_FIELDS = {"date", "open", "high", "low", "close", "volume", "trading_value"}
+CHART_DATA_KEYS = {"candle_unit", "candles", "overlays", "subcharts", "annotations"}
+
+
+def series(closes, *, highs=None, lows=None, volumes=None, trading_values=None,
+           start=date(2025, 1, 1), step_days=1) -> list[OHLCV]:
+    bars = []
+    for i, c in enumerate(closes):
+        hi = highs[i] if highs else max(c, c)
+        lo = lows[i] if lows else min(c, c)
+        bars.append(OHLCV(
+            date=(start + timedelta(days=step_days * i)).isoformat(),
+            open=c, high=max(hi, c), low=min(lo, c), close=c,
+            volume=volumes[i] if volumes else 100_000,
+            trading_value=trading_values[i] if trading_values else 2_000_000_000,
+        ))
+    return bars
+
+
+def payload_of(payloads, period: ChartPeriod) -> ChartPayload:
+    return next(p for p in payloads if p.period == period)
+
+
+def cdata(payload: ChartPayload) -> dict:
+    """chart_data(ChartData) → 최종 JSON dict. 테스트는 최종 계약 JSON을 검증한다."""
+    return payload.chart_data.model_dump(mode="json", by_alias=True)
+
+
+def kinds_of(payload: ChartPayload) -> set[str]:
+    return {a["kind"] for a in cdata(payload)["annotations"]}
+
+
+def rich_daily(n=80) -> list[OHLCV]:
+    return series([100 + i for i in range(n)])
+
+
+# ── payload / source / candle_unit ────────────────────────────────────────────
+def test_three_payloads_for_each_period():
+    payloads = build_chart_payloads(rich_daily(), rich_daily(), rich_daily())
+    # D/W/M 3종만 생성(1d 장중 분봉은 별도 경로라 여기서 미생성). ChartPeriod 전량과 같지 않다.
+    assert {p.period for p in payloads} == {
+        ChartPeriod.THREE_MONTHS, ChartPeriod.ONE_YEAR, ChartPeriod.FIVE_YEARS,
+    }
+
+
+def test_source_and_candle_unit_mapping():
+    daily = series([100.0] * 120)
+    weekly = series([777.0] * 120, step_days=7, start=date(2020, 1, 1))
+    monthly = series([555.0] * 60, step_days=30, start=date(2020, 1, 1))
+    payloads = build_chart_payloads(daily, weekly, monthly)
+
+    p3m = payload_of(payloads, ChartPeriod.THREE_MONTHS)
+    p1y = payload_of(payloads, ChartPeriod.ONE_YEAR)
+    p5y = payload_of(payloads, ChartPeriod.FIVE_YEARS)
+
+    assert cdata(p3m)["candle_unit"] == "D"
+    assert cdata(p1y)["candle_unit"] == "D"
+    assert cdata(p5y)["candle_unit"] == "W"
+    # 3m·1y는 daily(100), 5y는 weekly(777) — monthly(555)는 어디에도 없음
+    assert all(c["close"] == 100.0 for c in cdata(p3m)["candles"])
+    assert all(c["close"] == 777.0 for c in cdata(p5y)["candles"])
+    assert all(c["close"] != 555.0 for c in cdata(p1y)["candles"])
+    assert cdata(p5y)["candles"], "5y가 weekly source로 채워져야 함"
+
+
+def test_no_resample_function():
+    for path in CHARTS_DIR.glob("*.py"):
+        assert "resample" not in path.read_text(encoding="utf-8").lower()
+
+
+# ── slice / 데이터 부족 ───────────────────────────────────────────────────────
+def test_candles_sliced_by_period_days():
+    daily = series([100.0 + i for i in range(200)])  # 200일
+    p3m = payload_of(build_chart_payloads(daily, [], []), ChartPeriod.THREE_MONTHS)
+    dates = [date.fromisoformat(c["date"]) for c in cdata(p3m)["candles"]]
+    assert dates, "candles 존재"
+    assert (dates[-1] - dates[0]).days <= 90        # 90일 창
+    assert len(dates) < 200                          # 전체보다 적게 slice
+
+
+def test_insufficient_data_uses_available_no_exception():
+    payloads = build_chart_payloads(series([100.0, 101.0, 102.0]), [], [])
+    p3m = payload_of(payloads, ChartPeriod.THREE_MONTHS)
+    assert len(cdata(p3m)["candles"]) == 3       # 확보분만
+
+
+def test_empty_source_has_empty_candles():
+    p5y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.FIVE_YEARS)
+    assert cdata(p5y)["candles"] == []
+
+
+# ── chart_data 구조 ───────────────────────────────────────────────────────────
+def test_chart_data_has_required_keys():
+    p1y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR)
+    assert set(cdata(p1y).keys()) == CHART_DATA_KEYS
+
+
+def test_candle_row_fields_match_contract():
+    p1y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR)
+    assert set(cdata(p1y)["candles"][0].keys()) == CANDLE_FIELDS
+
+
+def test_moving_average_overlay_generated():
+    overlays = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["overlays"]
+    windows = {o["window"] for o in overlays["moving_average"]}
+    assert {5, 20, 60} <= windows
+
+
+def test_rsi_subchart_generated():
+    sub = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["subcharts"]
+    assert sub["rsi"]["period"] == 14 and sub["rsi"]["points"]
+
+
+def test_volume_subchart_generated():
+    sub = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["subcharts"]
+    assert sub["volume"]["avg_window"] == 20 and sub["volume"]["bars"]
+
+
+def test_support_resistance_overlay_generated():
+    overlays = cdata(payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR))["overlays"]
+    types = {o["type"] for o in overlays["support_resistance"]}
+    assert types == {"support", "resistance"}
+
+
+# ── annotation kind ───────────────────────────────────────────────────────────
+def _kinds_from_daily(daily) -> set[str]:
+    payloads = build_chart_payloads(daily, [], [])
+    return kinds_of(payload_of(payloads, ChartPeriod.ONE_YEAR))
+
+
+def test_golden_cross_annotation():
+    daily = series([100 - i for i in range(20)] + [80 + 3 * i for i in range(20)])
+    assert "golden_cross" in _kinds_from_daily(daily)
+
+
+def test_dead_cross_annotation():
+    daily = series([80 + i for i in range(20)] + [98 - 3 * i for i in range(20)])
+    assert "dead_cross" in _kinds_from_daily(daily)
+
+
+def test_volume_spike_annotation():
+    vols = [1000] * 24 + [5000]
+    daily = series([100.0] * 25, volumes=vols)
+    assert "volume_spike" in _kinds_from_daily(daily)
+
+
+def test_support_touch_annotation():
+    closes = [105.0] * 24 + [100.5]
+    daily = series(closes, highs=[110.0] * 25, lows=[100.0] * 25)
+    assert "support_touch" in _kinds_from_daily(daily)
+
+
+def test_resistance_touch_annotation():
+    closes = [105.0] * 24 + [109.5]
+    daily = series(closes, highs=[110.0] * 25, lows=[100.0] * 25)
+    assert "resistance_touch" in _kinds_from_daily(daily)
+
+
+def test_rsi_overbought_annotation():
+    daily = series([100 + i for i in range(30)])  # 지속 상승 → RSI 과열 진입
+    assert "rsi_overbought" in _kinds_from_daily(daily)
+
+
+def test_rsi_oversold_annotation():
+    daily = series([200 - i for i in range(30)])  # 지속 하락 → RSI 과매도 진입
+    assert "rsi_oversold" in _kinds_from_daily(daily)
+
+
+def test_box_range_candidate_annotation():
+    closes, highs, lows = [], [], []
+    for i in range(45):
+        top = i % 2 == 0
+        closes.append(107.0 if top else 101.0)
+        highs.append(108.0 if top else 102.0)
+        lows.append(106.0 if top else 100.0)
+    daily = series(closes, highs=highs, lows=lows)
+    assert "box_range_candidate" in _kinds_from_daily(daily)
+
+
+def test_deferred_kinds_not_generated():
+    # 여러 시나리오에서도 후속 kind는 절대 생성되지 않음
+    for daily in (rich_daily(), series([100 - i for i in range(20)] + [80 + 3 * i for i in range(20)])):
+        assert not ({"box_breakout_candidate", "cup_handle_candidate"} & _kinds_from_daily(daily))
+
+
+# ── annotation 공통 정책 ──────────────────────────────────────────────────────
+def _all_annotations(daily):
+    p1y = payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR)
+    return cdata(p1y)["annotations"]
+
+
+def test_annotation_source_always_code():
+    anns = _all_annotations(series([100 + i for i in range(30)]))
+    assert anns and all(a["source"] == "code" for a in anns)
+
+
+def test_annotation_ids_deterministic():
+    anns = _all_annotations(series([100 + i for i in range(30)]))
+    assert [a["id"] for a in anns] == [f"ann_{i:03d}" for i in range(1, len(anns) + 1)]
+
+
+def test_annotation_labels_no_buy_sell():
+    # 과매수/과매도(oversold/overbought)는 정상 기술 용어이므로 제외하고 검사
+    forbidden = ["매수", "매도", "사라", "팔아", "손절", "목표가"]
+    daily = series([200 - i for i in range(30)])  # rsi_oversold 등 포함
+    for a in _all_annotations(daily):
+        cleaned = a["label"].replace("과매수", "").replace("과매도", "")
+        assert not [w for w in forbidden if w in cleaned], f"금지 표현: {a['label']}"
+
+
+def test_chart_data_excludes_regime_synthesis():
+    p1y = payload_of(build_chart_payloads(rich_daily(), [], []), ChartPeriod.ONE_YEAR)
+    banned = {"regime", "synthesis", "risk", "technical_signals", "confidence",
+              "final_regime", "alignment_flag", "consensus", "signal_score"}
+    assert not (banned & set(cdata(p1y).keys()))
+
+
+def test_no_external_dependency_imports():
+    banned = ["httpx", "redis", "requests", "openai", "psycopg", "sqlalchemy", "langchain"]
+    for path in CHARTS_DIR.glob("*.py"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if s.startswith(("import ", "from ")):
+                assert not any(pkg in s for pkg in banned), f"{path.name}: {s}"
+
+
+# ── Phase A hardening: S/R touch count 게이트 ─────────────────────────────────
+def test_support_touch_requires_min_touch_count():
+    # 현재가는 지지에 근접하지만 그 저점이 1회뿐 → support_touch 생성 안 함
+    single = series([110.0] * 19 + [100.0], highs=[200.0] * 20, lows=[110.0] * 19 + [100.0])
+    assert "support_touch" not in _kinds_from_daily(single)
+    # 같은 저점이 여러 번(>=2) 터치 → 생성
+    multi = series([100.0] * 20, highs=[200.0] * 20, lows=[100.0] * 20)
+    assert "support_touch" in _kinds_from_daily(multi)
+
+
+def test_sr_overlay_kept_even_when_touch_annotation_gated():
+    single = series([110.0] * 19 + [100.0], highs=[200.0] * 20, lows=[110.0] * 19 + [100.0])
+    p1y = payload_of(build_chart_payloads(single, [], []), ChartPeriod.ONE_YEAR)
+    types = {o["type"] for o in cdata(p1y)["overlays"]["support_resistance"]}
+    assert types == {"support", "resistance"}  # overlay는 유지
+
+
+# ── Phase A hardening: dedup은 봉 index 거리 기준 ─────────────────────────────
+from src.agents.technical.charts.chart_builder import _finalize_annotations  # noqa: E402
+
+
+def _mk(kind, when):
+    return {"kind": kind, "date": when, "price": None, "label": "x",
+            "importance": "low", "source": "code", "meta": {}}
+
+
+def test_dedup_by_bar_index_not_calendar():
+    # 달력상 두 달 떨어졌지만 봉 index로는 3봉 → dedup_bars=5면 중복 제거
+    anns = [_mk("volume_spike", "2025-01-02"), _mk("volume_spike", "2025-03-10")]
+    date_to_index = {"2025-01-02": 100, "2025-03-10": 103}
+    result = _finalize_annotations(anns, 5, date_to_index)
+    assert len(result) == 1
+
+
+def test_dedup_keeps_when_index_gap_large():
+    anns = [_mk("volume_spike", "2025-01-02"), _mk("volume_spike", "2025-01-09")]
+    date_to_index = {"2025-01-02": 100, "2025-01-09": 106}  # 6봉 간격 >= 5
+    assert len(_finalize_annotations(anns, 5, date_to_index)) == 2
+
+
+def test_dedup_same_date_same_kind_merged():
+    anns = [_mk("golden_cross", "2025-01-02"), _mk("golden_cross", "2025-01-02")]
+    date_to_index = {"2025-01-02": 100}
+    assert len(_finalize_annotations(anns, 5, date_to_index)) == 1
