@@ -408,8 +408,9 @@ Missing required KIS environment variables: KIS_API_KEY, KIS_API_SECRET
 
 복구 가능한 실패는 trace에 남기고, 문서에 정의된 fallback을 따른다.
 
-- KIS 일봉 실패 + stale cache 있음 → stale cache 사용
-- KIS 일봉 실패 + cache 없음 → data_limited
+- KIS 일봉 실패 + stale cache 있음 → stale cache 사용(200 `stale_cache`)
+- KIS 응답은 왔으나 일봉이 비어 있음(데이터 부족) → 200 `data_limited`
+- **KIS transport/API 장애 + 쓸 수 있는 stale cache 없음**(아무 데이터도 못 받음) → `KisApiError` 재전파 → endpoint **502 AI_UNAVAILABLE**. 인프라 장애를 `data_limited` 200으로 감싸지 않는다(장애 탐지 위해). `data_limited`는 데이터가 **일부라도 확보된** 경우에만 쓴다(`api_spec.md §8` 정합).
 - 주/월봉 실패 + 일봉 정상 → 일봉 기준 분석 계속
 - LLM 검증 실패 → 재생성 1회 후 템플릿 폴백
 

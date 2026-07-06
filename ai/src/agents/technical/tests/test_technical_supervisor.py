@@ -819,13 +819,13 @@ def test_res_type_error_propagates_even_with_stale():
         _run_cache(_FakeCache(_DWM_STALE), fetcher=_type_error_fetcher)
 
 
-def test_res_bad_as_of_propagates_even_with_stale():
-    # 미래 as_of → normalize_end_date ValueError(run_data_collect 안) → stale로 덮지 않고 전파
-    future = TechnicalAgentInput(ticker=TICKER, query="q", request_id="r",
-                                 as_of="2099-01-01T00:00:00+09:00")
-    with pytest.raises(ValueError):
-        sup.run(future, llm_client=ScriptedLlm([NORM_OK, FOCUS_OK]),
-                fetcher=_kis_fail_fetcher, cache=_FakeCache(_DWM_STALE), trace_id="t")
+def test_res_bad_as_of_rejected_at_input():
+    # 미래 as_of는 이제 입력 계약(TechnicalAgentInput validator)에서 fail-fast로 거절된다
+    # (KIS/OpenAI/cache 이전). endpoint에서는 422 VALIDATION_ERROR로 매핑된다.
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        TechnicalAgentInput(ticker=TICKER, query="q", request_id="r",
+                            as_of="2099-01-01T00:00:00+09:00")
 
 
 # ── per-timeframe stale 재구성 (D 필수 · W/M optional) ────────────────────────
@@ -1004,3 +1004,46 @@ def test_trace_sink_failure_does_not_break_run():
                   fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY},
                   trace_id="t", trace_sink=BoomSink())
     assert out.data_status == DataStatus.NORMAL          # sink 예외에도 정상 완주
+
+
+# ── ALLOWLIST + DEADLINE (feat/technical-ai-endpoint hardening) ────────────────
+import time as _time  # noqa: E402
+
+from src.agents.technical.runtime.deadline import Deadline, DeadlineExceeded  # noqa: E402
+from src.agents.technical.services.kis_client import OutOfScopeTickerError  # noqa: E402
+
+
+def _dwm_fetcher(t, *, end_date=None):
+    return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+
+
+def test_allowlist_rejects_before_llm_and_fetcher():
+    # allowlist 밖 ticker(형식은 6자리) → OpenAI/KIS 이전에 OutOfScopeTickerError
+    llm = ScriptedLlm([])  # 호출되면 안 됨(응답 없음)
+    calls = {"n": 0}
+
+    def fetch(t, *, end_date=None):
+        calls["n"] += 1
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    bad = TechnicalAgentInput(ticker="999999", query="q", request_id="r", as_of=AS_OF)
+    with pytest.raises(OutOfScopeTickerError):
+        sup.run(bad, llm_client=llm, fetcher=fetch, trace_id="t")
+    assert llm.prompts == [] and calls["n"] == 0          # OpenAI·KIS 미호출
+
+
+def test_expired_deadline_raises_before_preprocess():
+    llm = ScriptedLlm([])
+    expired = Deadline(expires_at=_time.monotonic() - 1)  # 이미 만료
+    with pytest.raises(DeadlineExceeded):
+        sup.run(_input(), llm_client=llm, fetcher=_dwm_fetcher, deadline=expired, trace_id="t")
+    assert llm.prompts == []                              # 예산 초과 → LLM 미호출
+
+
+def test_deadline_checks_placed_at_stages(monkeypatch):
+    # check_deadline이 주요 stage(전처리·데이터·재생성 포함)에 배치돼 있는지 — 호출 stage 기록
+    seen: list[str] = []
+    monkeypatch.setattr(sup, "check_deadline", lambda dl, stage: seen.append(stage))
+    _run([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])     # regen 발생
+    for stage in ("preprocess", "focus_analysis", "data_collect",
+                  "regime_classify", "interpret_report", "interpret_regeneration"):
+        assert stage in seen
