@@ -81,7 +81,9 @@ class TechnicalSignal(_StrictModel):
     """
     indicator: IndicatorType  # 코드 확정
     signal: Signal  # 코드 확정 (LLM이 바꿀 수 없음)
-    value: float  # 코드 확정 (결정론 계산 결과)
+    # 코드 확정 대표 수치. 계산 가능하면 숫자, 데이터 부족 등으로 계산 불가하면 None.
+    # None은 0을 의미하지 않는다(honest scoping). IndicatorSignalResult.value(float|None)와 정합.
+    value: float | None
     metrics: list[str]  # 코드 확정 (표시용 수치 칩 배열, 예: "5MA 82,900")
     detail: str  # LLM 서술 (위 확정값을 자연어로 풀이)
     detail_source: GenerationSource  # detail 문장의 최종 출처

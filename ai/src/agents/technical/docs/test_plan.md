@@ -394,6 +394,36 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 - **의미 일치는 검증하지 않음(M2):** `focus_summary`가 `analysis_focus`를 의미적으로 정확히 반영하는지는 **결정론 검증기를 만들지 않는다**(오탐 위험 큼). 프롬프트에는 반영 지시를 유지하되, 코드 검증은 위 항목까지만 한다.
 - **호출 실패 경계(M3):** 노드 1·2는 **LLM 응답이 도착한 뒤의 parse/schema/type/금지어/종목/앵커 검증 실패**에만 template fallback을 쓴다. `client.complete()` 자체의 예외(TimeoutError·RuntimeError·네트워크/API 장애)는 **노드에서 broad-catch로 삼키지 않고 상위(supervisor 또는 LLM client wrapper)로 전파**한다. fallback 사유 기록(`fallback_reason`)은 trace_logger/supervisor와 함께 설계할 후속 작업이다(이번 브랜치 미포함).
 
+### 5.10 supervisor end-to-end 흐름(SUP-*)
+
+**성격:** 정상 동작 + 위반/예외 감지. **대상:** `supervisor/technical_supervisor.py`. **fake만**(FakeLlm·fake fetcher·고정 trace_id, 실 KIS/LLM 없음). supervisor는 1~10 노드를 조율하고 로컬 dataclass를 `contracts.*`로 조립한다.
+
+| ID | 상황 | 기대 결과 |
+| --- | --- | --- |
+| SUP-01 | 정상 입력 | `TechnicalAgentOutput` 반환(계약 유효, `source="KIS"`, `data_status=normal`) |
+| SUP-02 | trace_id 주입 | 그대로 사용 / 미주입 시 생성 |
+| SUP-03 | normalize→focus 전달 | focus 입력에 `normalized_question`이 들어가고 **원본 query는 들어가지 않는다** |
+| SUP-04 | 조립 정확성 | `RegimeResult`·`SignalSummary`·`TechnicalSignal`·`RiskSummary`·`charts`가 노드 산출과 일치 |
+| SUP-05 | interpret 확정값 불변 | `technical_signals[].signal/value/weight`가 코드 확정값 그대로(LLM은 detail만) |
+| SUP-06 | interpret 1차 성공 | `interpretation.source=llm`, `verification.outcome=passed` |
+| SUP-07 | 1차 검증 실패→재생성 통과 | `source=llm_regenerated`, `regen_count=1` |
+| SUP-08 | 재생성도 실패 | `source=template_fallback`, `outcome=template_fallback`, `regen_count=1` |
+| SUP-09 | interpret `client.complete` 예외 | template fallback 진행(전파 안 함) |
+| SUP-10 | normalize/focus `client.complete` 예외 | fallback 후 파이프라인 계속(출력엔 미포함) |
+| SUP-11 | 일봉 빈 데이터 | `data_status=data_limited`, signal/risk null, technical_signals=[], charts=[], `interpretation=unavailable` |
+| SUP-12 | 일봉 부족(final_regime=unavailable) | `data_status=regime_unavailable`, 6~8 스킵(signal/risk null), chart는 가능분 |
+| SUP-13 | W/M 부족(일봉 정상) | `data_status=data_limited`, 일봉 기준 분석 계속 |
+| SUP-14 | `TechnicalSignal.value=None` | 계약 허용(조립 크래시 없음) |
+| SUP-15 | fetcher 예외 | **전파**(supervisor가 삼키지 않음) |
+| SUP-16 | interpret 한 지표 detail만 실패(재생성 후에도) | **granular fallback** — 그 지표만 `detail_source=template_fallback`, 나머지 detail·interpretation은 유지(REGEN-04) |
+| SUP-17 | `IndicatorSignalResult.value=None` → `_to_technical_signals` | 조립 경로에서 `value=None` 보존(0.0 날조 없음) |
+| SUP-18 | 비-LLM 예외(입력 오류 등) | **전파**(전처리 broad-catch 아님 — `LlmCallError`만 흡수, M2) |
+| SUP-19 | 노드 2 `analysis_focus` | interpret payload에 **설명 강조 힌트**로 전달(H1) |
+
+`REGEN_MAX_COUNT`는 `config.py`에서 가져오며 supervisor가 `1+REGEN_MAX_COUNT`회만 호출한다(하드코딩 아님, M1). LLM 호출 실패는 `nodes/_llm_utils.LlmCallError`로만 잡아 fallback하고, 프롬프트 파일 로딩·타입·프로그래밍 오류는 전파한다(M2).
+
+`normalize_question`·`focus_analysis` 결과는 `TechnicalAgentOutput`에 포함되지 않는다(내부 orchestration용). `verification`은 supervisor가 흐름에서 유도한다(정상: calc_passed·regime_passed=True; unavailable: 둘 다 False, label_matched=True, outcome=template_fallback).
+
 ---
 
 ## 6. 차트 annotation 계산 테스트 (CHART-*)

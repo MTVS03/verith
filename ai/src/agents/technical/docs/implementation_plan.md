@@ -154,7 +154,14 @@ src/ai/
 10. `observability/trace_logger.py`
 11. `prompts/*.md`(interpret_report.md·regenerate_report.md 등 텍스트 자원) + `nodes/*.py`(LLM 노드 어댑터) 연결
 12. `observability/trajectory_eval.py` + `keyword_rules.py` (검증 ③). 노드 10(`nodes/interpret_report.py`)의 문장 검증이 이걸 호출한다
-13. `supervisor/technical_supervisor.py` — 노드 1~10 실행 순서 조율, trace_id 생성, 예외 분기, **검증 ③ 재생성 루프(1회)→template fallback**
+13. `supervisor/technical_supervisor.py` — 노드 1~10 실행 순서 조율, trace_id 생성(주입 없으면 uuid4), 예외 분기, **검증 ③ 재생성 루프(1회)→template fallback**, 그리고 **로컬 dataclass → `contracts.*` 최종 조립**(여기서 처음으로 `TechnicalAgentOutput`을 만든다). 조립 규약:
+    - `MultiframeRegimeResult`→`RegimeResult`(1:1), `SignalScoreResult`+`ConfidenceResult`→`SignalSummary`, `IndicatorSignalResult`+`DetailResult`→`TechnicalSignal`(`value=None` 보존), `risk_detect`·`chart_generate` 반환은 그대로(`RiskSummary(items=…)`·`charts`).
+    - **LLM 호출 자체 예외(normalize·focus·interpret·regenerate의 `client.complete`)는 supervisor가 잡아 template fallback으로 진행**(사용자 응답 생성). **fetcher/KIS 실패·OHLCV envelope 불량·계약 조립 불가·예상 못한 계산 오류는 전파**(조용히 삼키지 않음).
+    - `data_status`: 정상=`normal`, 일봉 빈 데이터=`data_limited`(안전 착지), 봉 부족으로 `final_regime=unavailable`=`regime_unavailable`(6~8 스킵), W/M 부족=`data_limited`(일봉 분석 계속). `stale_cache`·`source="KIS (stale)"`는 범위 밖(E-하네스 후속).
+    - `normalize_question` 결과는 노드 2 입력으로만 쓰고 출력에 싣지 않는다. **`focus_analysis`의 `analysis_focus`·`focus_summary`는 노드 10 payload에 "설명 강조 힌트"로 전달**한다(interpret가 이 관점을 문장에 반영, 확정값은 불변 — prompts.md §4). `schemas/state.py`는 만들지 않고 supervisor 내부 로컬 흐름으로 둔다.
+    - **재생성/부분 폴백:** 1차 interpret 후 `REGEN_MAX_COUNT`(config.py)만큼 재생성한다. 소진 후에도 실패하면 **granular fallback** — `interpretation.text`가 통과하면 유지하고 실패한 지표의 `detail`만 template로 대체한다(REGEN-04). 구조 자체를 못 믿으면(파싱 실패·details 개수/코드값 불일치·확정값 재생성 필드) 전체 폴백. 재생성 횟수는 코드 하드코딩이 아니라 `config.py REGEN_MAX_COUNT`(정본 `config.md §9`)에서 가져온다.
+    - **LLM 호출 실패 경계(typed):** `nodes/_llm_utils.LlmCallError`로 `client.complete` 실패만 감싼다. supervisor는 이 타입만 잡아 fallback하고, 프롬프트 파일 로딩·타입·프로그래밍 오류는 전파한다.
+    - **as_of 한계(현행):** supervisor는 `as_of`를 출력 기준 시각으로만 쓰고 **KIS 조회 end_date로 스레딩하지 않는다**(기본 fetcher는 현재 날짜 기준 조회). 과거 `as_of` 기준 재현 조회는 `fetcher`·`kis_client`·`data_collect`까지 확장하는 별도 작업(예: `refactor/technical-as-of-data-fetch`)으로 분리한다. MVP 라이브 요청(as_of≈현재)에서는 무해하다.
 14. `agent.py` (얇은 wrapper) + 상위 `src/ai/api/internal.py` 라우터 연결 — router→agent→supervisor 흐름 완성
 15. `test_plan.md` 기준 단위테스트 작성 (검증 ①②③ 케이스). `technical_supervisor.run()`을 mock 입력으로 직접 호출해 HTTP 없이 end-to-end 검증
 

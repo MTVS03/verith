@@ -50,6 +50,22 @@ class LlmOutputParseError(ValueError):
     """LLM 응답을 계약(허용 키 object)으로 파싱하지 못함(조용히 삼키지 않고 명시적 실패)."""
 
 
+class LlmCallError(RuntimeError):
+    """LLM **호출 자체** 실패(TimeoutError·네트워크·API 장애 등).
+
+    호출 실패만 이 타입으로 감싼다. 상위(supervisor)는 이것만 잡아 template fallback으로 진행하고,
+    프롬프트 파일 로딩·파싱·검증·프로그래밍 오류는 이 타입이 아니므로 그대로 전파된다.
+    """
+
+
+def call_llm(client: LlmClient, prompt: str) -> str:
+    """LLM 호출 경계. client.complete의 예외만 LlmCallError로 감싼다(그 밖은 호출 전/후라 무관)."""
+    try:
+        return client.complete(prompt)
+    except Exception as exc:  # noqa: BLE001 — 호출 자체 예외를 타입 있는 오류로 전환
+        raise LlmCallError(f"LLM 호출 실패: {exc}") from exc
+
+
 def load_prompt(name: str) -> str:
     """prompts/<name>을 읽어 반환. 로컬 텍스트 자원이며 외부 호출이 아니다."""
     return (PROMPT_DIR / name).read_text(encoding="utf-8")
