@@ -599,14 +599,17 @@ def test_cup_handle_excluded_on_3m():
 
 
 def test_cup_handle_no_lookahead_future_independent():
-    # bar 119 컵 판정은 과거 창만 사용 → 미래 봉을 더 붙여도 그대로 유지
+    # detector look-ahead 순수성: bar 119 판정은 창(0..119)만 사용 → 미래 봉을 붙여도 동일.
+    # (dedup은 keep-newest라 통합 output의 생존 date는 바뀔 수 있어 함수단위로 검증한다.)
+    from src.agents.technical.charts.chart_builder import _cup_handle_at
+    from src.agents.technical.indicators.volume import calculate_volume_average
     base = _cup_series(120)
     future = series([104.0] * 5, highs=[105.0] * 5, lows=[103.0] * 5,
                     start=date(2025, 1, 1) + timedelta(days=120))
-    d_base = {a["date"] for a in _cup_anns_1y(base)}
-    d_ext = {a["date"] for a in _cup_anns_1y(base + future)}
-    assert _d(119) in d_base
-    assert _d(119) in d_ext   # 미래 봉 추가와 무관
+    a_base = _cup_handle_at(base, 119, lookback=120, vol_avg=calculate_volume_average(base))
+    a_ext = _cup_handle_at(base + future, 119, lookback=120, vol_avg=calculate_volume_average(base + future))
+    assert a_base is not None and a_ext is not None
+    assert a_ext["meta"]["right_rim_price"] == a_base["meta"]["right_rim_price"]  # 미래 봉과 무관
 
 
 def test_cup_handle_rim_tolerance_fail():
@@ -740,3 +743,91 @@ def test_5y_retier_keeps_kind_label_meta():
     assert a["kind"] == "cup_handle_candidate" and a["label"] == "컵앤핸들 후보"
     assert a["importance"] == "high"                 # 승격
     assert a["source"] == "code" and "cup_depth_pct" in a["meta"]  # meta 불변
+
+
+# ── heuristic 보강: cup no-handle / V자 / box 왕복 / dedup 정책 (오탐 방지) ──────
+from src.agents.technical.charts.chart_builder import _cup_handle_at as _cup_fn  # noqa: E402
+from src.agents.technical.indicators.volume import calculate_volume_average as _vol_avg  # noqa: E402
+
+
+def _cup_at(source, i=119, *, lookback=120):
+    return _cup_fn(source, i, lookback=lookback, vol_avg=_vol_avg(source))
+
+
+def _v_series(n):
+    """평평한 고점(108) + 중앙 단봉 급락(85) → 단봉 V자."""
+    closes, highs, lows = [108.0] * n, [109.0] * n, [107.0] * n
+    mid = int(n * 0.46)
+    closes[mid], highs[mid], lows[mid] = 85.0, 86.0, 84.0
+    return series(closes, highs=highs, lows=lows)
+
+
+# cup: no-handle / 얕은 조정 / 상승 핸들 배제
+def test_cup_handle_still_accepts_valid_handle():
+    assert _cup_at(_cup_series(120)) is not None
+
+
+def test_cup_handle_rejects_flat_handle_shallow_pullback():
+    # 핸들이 사실상 조정 없음(flat) → 최소 pullback 미만 → 생성 안 됨
+    assert _cup_at(_cup_series(120, handle_bottom=109.0)) is None
+
+
+def test_cup_handle_rejects_rising_handle_no_dip():
+    # right rim 이후 조정 없이 상승(핸들 저점이 rim 위) → 생성 안 됨
+    assert _cup_at(_cup_series(120, handle_bottom=116.0)) is None
+
+
+# cup: V자 배제 / 둥근 저점 유지
+def test_cup_handle_rejects_single_bar_v_shape():
+    assert _cup_at(_v_series(120)) is None            # 단봉 급락 → 저점 봉 수 부족
+
+
+def test_cup_handle_accepts_rounded_bottom():
+    assert _cup_at(_cup_series(120)) is not None       # 저점 근처 다봉 → 둥근 컵 유지
+
+
+# box: 왕복/교차 조건
+def test_box_rejects_monotonic_decline():
+    daily = series([108.0 - 8.0 * i / 44 for i in range(45)])   # 108→100 완만 하락(range 8%)
+    assert _box_range_at(daily, 44) is None
+
+
+def test_box_rejects_monotonic_rise():
+    daily = series([100.0 + 8.0 * i / 44 for i in range(45)])   # 100→108 완만 상승
+    assert _box_range_at(daily, 44) is None
+
+
+def test_box_accepts_alternating_roundtrip():
+    assert _box_range_at(_box_series(45), 44) is not None       # 상/하단 왕복 박스
+
+
+def test_box_breakout_only_from_alternating_box():
+    # 단방향 추세 뒤 급등 → 직전 창이 박스 아님 → breakout 없음
+    daily = series([108.0 - 8.0 * i / 44 for i in range(45)] + [130.0])
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    assert [a for a in anns if a["kind"] == "box_breakout_candidate"] == []
+
+
+# dedup: 최신/중요도 우선(§15.1)
+def test_dedup_keeps_newest_same_importance():
+    anns = [_mk("volume_spike", "2025-01-02"), _mk("volume_spike", "2025-01-04")]
+    r = _finalize_annotations(anns, 5, {"2025-01-02": 100, "2025-01-04": 102})
+    assert len(r) == 1 and r[0]["date"] == "2025-01-04"        # 최신이 남음
+
+
+def test_dedup_keeps_higher_importance_even_if_older():
+    older_hi = {**_mk("box_breakout_candidate", "2025-01-02"), "importance": "high"}
+    newer_med = {**_mk("box_breakout_candidate", "2025-01-04"), "importance": "medium"}
+    r = _finalize_annotations([newer_med, older_hi], 5, {"2025-01-02": 100, "2025-01-04": 102})
+    assert len(r) == 1 and r[0]["importance"] == "high" and r[0]["date"] == "2025-01-02"
+
+
+def test_dedup_different_kind_not_merged():
+    anns = [_mk("golden_cross", "2025-01-02"), _mk("volume_spike", "2025-01-02")]
+    assert len(_finalize_annotations(anns, 5, {"2025-01-02": 100})) == 2
+
+
+# 5y retier 안전성: 조정 없는/유효하지 않은 후보는 애초에 생성 안 됨 → high 승격 없음
+def test_5y_no_handle_cup_not_generated_so_not_promoted():
+    weekly = _cup_series(78, handle_bottom=109.0, step_days=7)
+    assert not [a for a in _anns_5y(weekly) if a["kind"] == "cup_handle_candidate"]

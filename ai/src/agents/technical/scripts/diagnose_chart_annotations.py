@@ -3,9 +3,9 @@
 목적: "전략(annotation)이 잘 안 보인다"의 원인을 숫자로 가른다.
   - 생성 자체가 안 됨(조건 불충족) vs
   - 생성되지만 dedup에서 줄어듦 vs
-  - 생성되지만 importance가 낮아 프론트 필터에 걸림 vs
+  - 생성되지만 importance가 낮아 프론트 필터에 걸림(특히 5y) vs
   - 봉 수 부족으로 계산 불가 vs
-  - 구현 자체가 없음(box_breakout·cup_handle)
+  - 생성기 미구현(현재 전 10종 구현 완료 — 미구현 목록은 비어 있다)
 
 방식(프로덕션 무변경): `charts/chart_builder.py`의 public `build_chart_payloads`(post-dedup 정본)와
 내부 annotation 생성기(`_cross_annotations` 등)를 **읽기 전용**으로 호출해 pre/post-dedup을 비교한다.
@@ -28,6 +28,7 @@ import math
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import get_args
 
 # 스탠드얼론 스크립트라 ai/ 를 sys.path에 올려 `src...` import가 되게 한다.
 # 이 파일 위치: ai/src/agents/technical/scripts/ → parents[4] = ai/
@@ -52,17 +53,15 @@ from src.agents.technical.indicators.volume import (  # noqa: E402
     calculate_trading_value_average,
     calculate_volume_average,
 )
+from src.agents.technical.schemas.chart import AnnotationKind  # noqa: E402
 from src.agents.technical.schemas.enums import ChartPeriod  # noqa: E402
 from src.agents.technical.schemas.ohlcv import OHLCV  # noqa: E402
 
 _DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "chart_annotation_diagnostics_output"
 
-# annotation kind 정본 (schemas/chart.py AnnotationKind = chart_annotation_spec §7, 10종)
-ALL_KINDS = [
-    "golden_cross", "dead_cross", "volume_spike", "support_touch", "resistance_touch",
-    "rsi_overbought", "rsi_oversold", "box_range_candidate",
-    "box_breakout_candidate", "cup_handle_candidate",
-]
+# annotation kind 정본을 스키마에서 **자동 유도**(schemas/chart.py AnnotationKind = chart_annotation_spec §7).
+# 수동 목록 복제 대신 계약을 단일 소스로 삼는다 — kind가 추가/제거되면 진단기가 자동 반영한다.
+ALL_KINDS = list(get_args(AnnotationKind))
 # 계약엔 있지만 chart_builder 생성기가 없는 kind. 전 kind 구현 완료 → 비어 있음
 # (남으면 "contract exists but generator missing"으로 표시).
 UNIMPLEMENTED_KINDS: list[str] = []

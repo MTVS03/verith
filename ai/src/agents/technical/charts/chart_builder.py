@@ -24,15 +24,19 @@ from datetime import date, timedelta
 from ..config import (
     ANNOTATION_DEDUP_BARS,
     BOX_LOOKBACK_DAYS,
+    BOX_MIN_ALTERNATIONS,
     BOX_MIN_TOUCH_COUNT,
     BOX_RANGE_THRESHOLD_PCT,
     CHART_PERIOD_DAYS,
+    CUP_HANDLE_BOTTOM_TOLERANCE_PCT,
     CUP_HANDLE_DAILY_LOOKBACK_BARS,
     CUP_HANDLE_MAX_DEPTH_PCT,
     CUP_HANDLE_MAX_HANDLE_BARS,
     CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT,
+    CUP_HANDLE_MIN_BOTTOM_BARS,
     CUP_HANDLE_MIN_DEPTH_PCT,
     CUP_HANDLE_MIN_HANDLE_BARS,
+    CUP_HANDLE_MIN_HANDLE_PULLBACK_PCT,
     CUP_HANDLE_RIM_TOLERANCE_PCT,
     CUP_HANDLE_WEEKLY_LOOKBACK_BARS,
     KIS_PERIOD_DAILY,
@@ -353,10 +357,31 @@ def _box_range_at(source: Sequence[OHLCV], end_i: int) -> dict | None:
     bottom_touch = sum(1 for lo in lows if abs(lo - bottom) / bottom <= NEAR_SUPPORT_THRESHOLD_PCT)
     if top_touch < BOX_MIN_TOUCH_COUNT or bottom_touch < BOX_MIN_TOUCH_COUNT:
         return None
+    # 왕복 검사: 각 봉을 상단/하단 zone으로 분류(middle 무시) → 연속 압축 → 전환 수가
+    # BOX_MIN_ALTERNATIONS 이상이어야 박스. 단방향 추세(top들 뒤 bottom들)는 전환 1회라 배제된다.
+    alternations = _zone_alternations(highs, lows, top, bottom)
+    if alternations < BOX_MIN_ALTERNATIONS:
+        return None
     return _ann("box_range_candidate", source[end_i].date, None, "low", {
         "top": top, "bottom": bottom, "range_pct": round((top - bottom) / bottom, 3),
         "top_touch": top_touch, "bottom_touch": bottom_touch, "window_bars": len(window),
+        "alternations": alternations,
     })
+
+
+def _zone_alternations(highs: list, lows: list, top: float, bottom: float) -> int:
+    """봉들을 상단('T')/하단('B') zone으로 분류(둘 다/middle은 무시)해 연속 중복을 압축한 뒤
+    zone 전환 횟수를 센다(top↔bottom 왕복 횟수). 예: T,T,B,B,T → T,B,T → 전환 2."""
+    seq: list[str] = []
+    for h, lo in zip(highs, lows):
+        near_top = top and abs(h - top) / top <= NEAR_RESISTANCE_THRESHOLD_PCT
+        near_bottom = bottom and abs(lo - bottom) / bottom <= NEAR_SUPPORT_THRESHOLD_PCT
+        if near_top == near_bottom:
+            continue  # middle(둘 다 아님) 또는 애매(둘 다) → 왕복 판정에서 제외
+        zone = "T" if near_top else "B"
+        if not seq or seq[-1] != zone:
+            seq.append(zone)
+    return max(0, len(seq) - 1)
 
 
 def _box_range_annotations(source: Sequence[OHLCV], start: int) -> list[dict]:
@@ -422,10 +447,11 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
     """`source[end_i]`를 끝으로 하는 직전 `lookback`봉 창(현재봉 포함, look-ahead 없음)이 컵앤핸들
     **후보** 형태면 annotation dict, 아니면 None(chart_annotation_spec §13). 미래 봉은 보지 않는다.
 
-    보수적 결정론 판정: ① left_rim=앞 30% 최고 high ② bottom=전체 최저 low(중앙부·left_rim 이후)
-    ③ right_rim=bottom 이후 최고 high(핸들 최소 여지 남김) → rim 차 ≤tol · depth∈[min,max] ·
-    handle 길이∈[min,max]·되돌림 ≤max·handle 저점이 컵 깊이 절반 위·최신 close가 handle~rim 근처.
-    **돌파(neckline breakout)는 요구하지 않는다**(관찰 후보). 거래량은 gate가 아니라 meta로만 남긴다.
+    보수적 결정론 판정: ① left_rim=앞 30% 최고 high ② bottom=전체 최저 low(중앙부·left_rim 이후,
+    **bottom 근처 ≥MIN_BOTTOM_BARS봉** = 단봉 V자 배제) ③ right_rim=bottom 이후 최고 high(핸들 최소
+    여지) → rim 차 ≤tol · depth∈[min,max] · handle 길이∈[min,max] · **handle 되돌림∈[MIN,MAX]이고
+    handle 저점 < right_rim(실제 조정 존재)** · handle 저점이 컵 깊이 절반 위 · 최신 close가 handle~rim 근처.
+    **돌파(neckline breakout)는 요구하지 않는다**(관찰 후보). 완전 곡률 판정은 Phase 2. 거래량은 meta로만.
     """
     lo_i = end_i - lookback + 1
     if lo_i < 0:  # 창(lookback봉)을 못 채우는 초기 구간 skip
@@ -442,6 +468,11 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
     bottom = lows[bottom_idx]
     if bottom_idx <= left_rim_idx or not (0.3 <= bottom_idx / (n - 1) <= 0.7):
         return None  # 저점이 좌측 rim 이후·중앙부여야 컵 모양
+    # 둥근 저점 근사: bottom 근처(±tol)에 최소 봉 수가 있어야 한다(단봉 V자 spike 배제). 완전 곡률은 Phase 2.
+    if bottom > 0:
+        bottom_zone_bars = sum(1 for lo in lows if lo <= bottom * (1 + CUP_HANDLE_BOTTOM_TOLERANCE_PCT))
+        if bottom_zone_bars < CUP_HANDLE_MIN_BOTTOM_BARS:
+            return None
 
     right_end = n - CUP_HANDLE_MIN_HANDLE_BARS  # 우측 rim 뒤 핸들 최소 확보
     if right_end <= bottom_idx + 1:
@@ -463,7 +494,11 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
 
     handle_low = min(lows[right_rim_idx + 1:])
     handle_pullback = (right_rim - handle_low) / right_rim
-    if handle_pullback > CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT:
+    # 핸들은 **실제 조정(dip)** 이 있어야 한다: 최소 되돌림 이상·최대 이하, handle 저점 < right_rim.
+    # (상한만 있으면 right_rim 이후 계속 상승/무조정도 handle_forming으로 오탐된다.)
+    if handle_low >= right_rim or not (
+        CUP_HANDLE_MIN_HANDLE_PULLBACK_PCT <= handle_pullback <= CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT
+    ):
         return None
     if handle_low <= bottom + (rim - bottom) * 0.5:
         return None  # 핸들 저점이 컵 저점보다 충분히 위(핸들이 컵만큼 깊으면 무효)
@@ -536,21 +571,32 @@ def _apply_period_importance_policy(annotations: list[dict], *, period: ChartPer
     return annotations
 
 
+_IMPORTANCE_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
 def _finalize_annotations(annotations: list[dict], dedup_bars: int, date_to_index: dict[str, int]) -> list[dict]:
     """동일 kind 근접 중복 제거 → 정렬 → 결정론 id(ann_001..) 부여.
 
     중복 제거는 달력일이 아니라 **candle(봉) index 거리**로 판정한다(주말·휴장 왜곡 방지,
-    chart_annotation_spec §8.4). 같은 kind가 dedup_bars 봉 이내면 앞선 것만 남긴다.
+    chart_annotation_spec §8.4). 같은 kind가 dedup_bars 봉 이내면 **importance가 높은 것, 같으면 더
+    최신(index 큰) 것을 남긴다**(§15.1) — rolling detector에서 초기 미성숙 후보가 아니라 완성된
+    최신 후보가 표시되도록. 선호도 순으로 greedy 채택하며, 이미 채택된 동일 kind와 dedup_bars 이내면 버린다.
     """
     kept: list[dict] = []
-    last_index_by_kind: dict[str, int] = {}
-    for ann in sorted(annotations, key=lambda a: (a["kind"], date_to_index.get(a["date"], -1))):
+    kept_index_by_kind: dict[str, list[int]] = {}
+    # 선호도: importance 높은 것 → 같으면 최신(index 큰) 것 먼저. 결정론(date 안정 정렬).
+    ordered_pref = sorted(
+        annotations,
+        key=lambda a: (_IMPORTANCE_RANK.get(a["importance"], 0), date_to_index.get(a["date"], -1)),
+        reverse=True,
+    )
+    for ann in ordered_pref:
         idx = date_to_index.get(ann["date"], -1)
-        prev = last_index_by_kind.get(ann["kind"])
-        if prev is not None and idx - prev < dedup_bars:
+        near = any(abs(idx - kidx) < dedup_bars for kidx in kept_index_by_kind.get(ann["kind"], ()))
+        if near:
             continue
         kept.append(ann)
-        last_index_by_kind[ann["kind"]] = idx
+        kept_index_by_kind.setdefault(ann["kind"], []).append(idx)
 
     ordered = sorted(kept, key=lambda a: (date_to_index.get(a["date"], -1), a["kind"]))
     for i, ann in enumerate(ordered, start=1):
