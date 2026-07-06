@@ -6,6 +6,8 @@ dedupe/sort·limit·빈 응답·high<low 거부, 그리고 헤더 tr_id·필수 
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from src.agents.technical.schemas.intraday import IntradayCandle
@@ -153,6 +155,39 @@ def test_fetch_limit_zero_short_circuits(monkeypatch):
     result = fetch_minute_ohlcv("373220", input_hour="093000", limit=0)
     assert result.candles == []
     assert calls["hours"] == []  # 호출 자체를 하지 않음
+
+
+# ── input_hour 검증 (네트워크 호출 전 fail-fast) ──────────────────────────────
+@pytest.mark.parametrize("hh", ["083000", "153000", "235959", "000000"])
+def test_input_hour_valid_accepted(monkeypatch, hh):
+    calls = _patch(monkeypatch, [_resp([_out2("090100", close="101")])])
+    result = fetch_minute_ohlcv("373220", input_hour=hh)
+    assert result.candles  # 정상 진행
+    assert calls["hours"][0] == hh  # 검증 통과 후 그대로 전달
+
+
+@pytest.mark.parametrize("hh", ["240000", "256000", "126099", "12:30:00", "abc123", "", "09300", "0930000"])
+def test_input_hour_invalid_rejected_before_network(monkeypatch, hh):
+    calls = _patch(monkeypatch, [_resp([_out2("090100")])])
+    with pytest.raises(KisFieldError):
+        fetch_minute_ohlcv("373220", input_hour=hh)
+    assert calls["hours"] == []  # 네트워크(_call_minute_chart) 호출 전에 거부
+
+
+def test_input_hour_none_uses_as_of_or_now(monkeypatch):
+    # 기존 동작 유지: input_hour=None이면 as_of 시각(있으면)으로 진행, 예외 없음.
+    calls = _patch(monkeypatch, [_resp([_out2("143000", close="101")])])
+    result = fetch_minute_ohlcv("373220", as_of=datetime(2026, 7, 6, 14, 30, 0), input_hour=None)
+    assert result.candles
+    assert calls["hours"][0] == "143000"  # as_of 시각에서 커서 시작
+
+
+def test_validate_hhmmss_helper():
+    assert kc._validate_hhmmss("093000", field="input_hour") == "093000"
+    assert kc._validate_hhmmss(" 235959 ", field="input_hour") == "235959"  # strip
+    for bad in ["240000", "256000", "126099", "12:30:00", "abc123", "", "1230"]:
+        with pytest.raises(KisFieldError):
+            kc._validate_hhmmss(bad, field="input_hour")
 
 
 # ── 요청 헤더/파라미터 (실제 _call_minute_chart 경유, fake httpx client) ────────

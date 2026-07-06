@@ -454,7 +454,7 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 
 ### 5.12 수동 end-to-end smoke (pytest 밖)
 
-`ai/scripts/smoke_technical_agent.py`는 **수동 실행용** smoke script다. `run_technical_agent()`를 **real KIS + fake LLM**으로 호출해 전체 흐름과 `TechnicalAgentOutput` 생성을 확인하고 결과 JSON을 저장한다. real KIS env(`KIS_API_KEY`/`SECRET`/`BASE_URL`)가 필요하므로 **pytest·CI 기본 흐름에는 포함하지 않는다**. 파이프라인 정확성 자체는 `test_technical_supervisor.py`(fake fetcher + fake LLM)가 이미 결정론으로 커버한다 — smoke는 실제 KIS 시세로 도는지를 사람이 확인하는 보완재다.
+`src/agents/technical/scripts/smoke_technical_agent.py`는 **수동 실행용** smoke script다. `run_technical_agent()`를 **real KIS + fake LLM**으로 호출해 전체 흐름과 `TechnicalAgentOutput` 생성을 확인하고 결과 JSON을 저장한다. real KIS env(`KIS_API_KEY`/`SECRET`/`BASE_URL`)가 필요하므로 **pytest·CI 기본 흐름에는 포함하지 않는다**. 파이프라인 정확성 자체는 `test_technical_supervisor.py`(fake fetcher + fake LLM)가 이미 결정론으로 커버한다 — smoke는 실제 KIS 시세로 도는지를 사람이 확인하는 보완재다.
 
 ---
 
@@ -504,7 +504,7 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 | CONTRACT-11 | intraday 유무 | `regime.final_regime`·top-level `confidence`/`signal_score`/`risk` 동일(intraday로 불변) |
 | CONTRACT-12 | intraday 조립 실패 | D/W/M output 정상 반환·`intraday_context=null`(전체 실패로 번지지 않음) |
 
-> **1D intraday 계약 테스트**(위 CONTRACT-08~12)는 모두 **fixture/mock 기반**이며 real KIS 분봉을 호출하지 않는다. KIS 분봉 fetcher(`fetch_minute_ohlcv`)는 **구현 완료**이고 mock 기반으로 매핑·페이징을 검증하며(`test_kis_intraday_client.py`), supervisor의 optional `intraday_fetcher` 주입도 fake fetcher로 검증한다(성공→1d 추가·context 세팅, 빈/예외→D/W/M 정상, previous_close 사용/일봉 fallback). **production default-on은 아니므로** 기본 supervisor 실행은 D/W/M만 낸다(fetcher 주입 시에만 1d). `intraday_context` 필드(hint·alignment·`confidence_adjustment` cap ±0.05·`signal_score_adjustment`=0.0·`risk_notes`) 단위 검증은 `test_intraday_*` 스위트에서 다룬다. real KIS 분봉은 **manual smoke**로만 확인한다(`kis_mapping.md §12.9`).
+> **1D intraday 계약 테스트**(위 CONTRACT-08~12)는 모두 **fixture/mock 기반**이며 real KIS 분봉을 호출하지 않는다. KIS 분봉 fetcher(`fetch_minute_ohlcv`)는 **구현 완료**이고 mock 기반으로 매핑·페이징을 검증하며(`test_kis_intraday_client.py`), supervisor의 optional `intraday_fetcher` 주입도 fake fetcher로 검증한다(성공→1d 추가·context 세팅, 빈/예외/날짜 mismatch→D/W/M 정상, previous_close 사용/일봉 fallback). **production default-on은 아니므로**(`INTRADAY_FETCH_ENABLED` 기본 False) 기본 supervisor 실행은 D/W/M만 낸다 — 1d는 **flag가 `True`이거나 명시 `intraday_fetcher`/`intraday_candles`가 주입될 때만** 조립된다(주입은 테스트/dev 경로). `intraday_context` 필드(hint·alignment·`confidence_adjustment`·`signal_score_adjustment`(±cap, v1은 0.0)·`risk_notes`(≤3) — 경계는 스키마가 강제, `config.md §12`) 단위 검증은 `test_intraday_*` 스위트에서 다룬다. real KIS 분봉은 **manual smoke**로만 확인한다(`kis_mapping.md §12.9`).
 
 ### enum 값 검증
 

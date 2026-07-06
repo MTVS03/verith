@@ -1,11 +1,13 @@
 """기술적 분석 에이전트 — 개발용 수동 시각 QA 도구 (Streamlit lab).
 
-목적(자동 테스트 아님): 프론트 구현 전에 KIS D/W/M 시세와 `run_technical_agent()` 출력·
+목적(자동 테스트 아님): 프론트 구현 전에 KIS D/W/M(+1d) 시세와 agent 출력·
 chart payload 가 화면에서 쓸 만한 구조인지 **사람이 눈으로** 확인한다.
 
-  KIS : real 호출 (services/kis_client.fetch_multi_timeframe_ohlcv — 이 파일은 KIS API 직접 호출 없음)
+  KIS : real 호출 (services/kis_client.fetch_multi_timeframe_ohlcv + fetch_minute_ohlcv — 이 파일은 KIS API 직접 호출 없음)
   LLM : fake (payload-aware — 프롬프트의 코드 확정 라벨을 읽어 검증 ③ 1차 통과 문장 생성, 우회 없음)
-  진입점 : 공식 agent.run_technical_agent() 만 호출 (production 로직·노드 직접 호출 없음)
+  진입점 : production 진입점은 공식 agent.run_technical_agent() 다. 단 §5 Agent 실행은 **QA 도구 예외로
+           supervisor.run() 을 직접 호출**한다 — run_technical_agent()가 intraday_fetcher 주입을 받지
+           않아 1d까지 캐시 재사용으로 확인하려면 supervisor 직접 호출이 필요하기 때문이다(production 로직은 동일).
   저장 : 디스크 미기록. st.download_button 으로 output JSON 만 내려받는다.
   secret : 화면에 절대 표시하지 않는다 (존재 여부만 OK/MISSING).
 
@@ -104,7 +106,7 @@ _FOCUS_RESPONSE = json.dumps(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # payload-aware fake LLM (self-contained)
-# smoke script(scripts/smoke_technical_agent.py)의 fake 와 분기·문장 계약을 맞추되,
+# smoke script(src/agents/technical/scripts/smoke_technical_agent.py)의 fake 와 분기·문장 계약을 맞추되,
 # 정책상 cross-import 하지 않는다(각 도구가 독립 실행 가능하도록 의도된 중복).
 # 라벨 사전은 observability.keyword_rules 를 공용 import 하므로 계약의 단일 출처는 유지된다.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -998,7 +1000,8 @@ def main() -> None:
         chart_selection = _render_chart_section(output)
         _render_raw_json_section(output, chart_selection)
 
-    # §11 1D Intraday QA — 항상 렌더(agent 무관). Real KIS 소스는 버튼 클릭 시에만 호출.
+    # §11 1D Intraday QA — 항상 렌더(agent 무관). fixture/manual 합성 입력 edge-case 검수만이며 KIS 호출 없음.
+    # (real KIS 1d 확인은 §4 조회 → §5 Agent 실행 → §6 차트 결과에서 본다.)
     _render_intraday_qa_section(as_of_dt)
 
 
