@@ -249,10 +249,17 @@ TRADING_VALUE_SPIKE_MULTIPLIER = 2.0   # 거래대금 급증 배수
 BOX_LOOKBACK_DAYS = 40                 # 박스권 탐색 기간
 BOX_RANGE_THRESHOLD_PCT = 0.12         # 박스권 상·하단 범위 허용 폭
 BOX_MIN_TOUCH_COUNT = 2                # 박스권 왕복 최소 횟수
-CUP_LOOKBACK_DAYS = 120                # 컵앤핸들 탐색 기간 (MVP 미구현)
-CUP_MIN_DEPTH_PCT = 0.10               # 컵 최소 깊이 (MVP 미구현)
-CUP_MAX_DEPTH_PCT = 0.40               # 컵 최대 깊이 (MVP 미구현)
-HANDLE_MAX_PULLBACK_PCT = 0.15         # 핸들 최대 되돌림 (MVP 미구현)
+# 컵앤핸들 후보(chart_annotation_spec §13). 탐색 창은 timeframe별 **봉(BARS)** 기준으로 분리한다
+# (같은 120이라도 일봉=120일·주봉=120주로 의미가 달라 DAYS 이름은 쓰지 않는다). 1y=일봉·5y=주봉만 대상,
+# 3m 제외. charts/chart_builder.py::_cup_handle_annotations가 사용한다(annotation-only, signal 미반영).
+CUP_HANDLE_DAILY_LOOKBACK_BARS = 120       # 1y 일봉 탐색 창(봉)
+CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78       # 5y 주봉 탐색 창(봉)
+CUP_HANDLE_RIM_TOLERANCE_PCT = 0.05        # 좌/우 rim 가격 차 허용(≤5%) — 회복 정도
+CUP_HANDLE_MIN_DEPTH_PCT = 0.10            # 컵 최소 깊이(rim 대비)
+CUP_HANDLE_MAX_DEPTH_PCT = 0.40            # 컵 최대 깊이(rim 대비)
+CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15  # 핸들 최대 되돌림(우측 rim 대비)
+CUP_HANDLE_MIN_HANDLE_BARS = 5             # 핸들 최소 길이(봉)
+CUP_HANDLE_MAX_HANDLE_BARS = 30            # 핸들 최대 길이(봉)
 
 # annotation 중복 제거 창 — candle(봉) index 거리 기준 (chart_annotation_spec §8.4).
 ANNOTATION_DEDUP_BARS = {
