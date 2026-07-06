@@ -70,6 +70,8 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 `1d`를 정식 지원하려면 다음이 필요하다: KIS **분봉 전용 API**(`inquire-daily-itemchartprice`의 D/W/M과 다른 TR), 분봉 캐시(`ohlcv:minute:{ticker}`, TTL 1분), 장중 갱신 주기, `enums.md`·`config.md`의 `period` 확장, 별도 테스트. MVP는 이 확장을 열어두되 스코프에 넣지 않는다.
 
+**현재 구현 상태(Beta):** `ChartPeriod`에 `1d` 추가, `charts[].chart_data`의 `ChartData | IntradayChartData` 판별 유니온(`candle_unit` 기준, 1d=`1min`), `IntradayCandle.timestamp`(날짜+시각) 스키마, 1d chart payload·`intraday_context`(hint·alignment·confidence_adjustment·risk_notes) 조립이 코드에 반영되어 있다(계약은 `contracts.md` "1D intraday" 참조). **KIS 분봉 매핑은 공식 샘플로 확정됐고(`kis_mapping.md §12`), `kis_client.fetch_minute_ohlcv`는 구현 완료**다. **production default-on은 아니다**(`config.INTRADAY_FETCH_ENABLED` 기본 False) — 1d는 **flag가 `True`이거나 명시 `intraday_fetcher`/`intraday_candles`가 주입될 때만** 리포트 생성 1회에 D/W/M과 함께 조립된다(주입은 테스트/dev 경로). fetch 실패·빈 응답·**날짜 mismatch**(KIS 분봉은 today-only라 `as_of` 날짜 ≠ candle 날짜)면 1d chart를 생략하고 `intraday_context=None`으로 두며 D/W/M을 깨지 않는다. 위 표의 "장중 거래량 급증 표시"·"분봉 RSI 표시" 및 **캔들 위 마커 annotation은 여전히 Future Work(Phase 3)**이며 현재 구현된 것처럼 기술하지 않는다 — **현재 `IntradayChartData`에는 `annotations` 필드 자체가 없고**(D/W/M `ChartData`에만 존재), intraday에 annotation을 넣으려면 **별도 계약 변경**이 필요하다. 기존 D/W/M `AnnotationKind`(§7)를 intraday에 그대로 재사용하지 않으며, v1 annotation 후보는 실제 분봉 smoke·noise 확인 후 결정한다. `final_regime`은 intraday로 바꾸지 않고, top-level `confidence`/`signal_score`/`risk`도 이 단계에서 변경하지 않는다.
+
 용어 주의: "실시간"이 아니라 **"장중/분봉/준실시간 참고 차트"**로 표기한다. WebSocket 틱 스트리밍은 별개 기능이며 MVP·Beta 범위 밖이다. 분봉 REST 조회(1~5분 갱신)까지가 Beta 후보다.
 
 ---
@@ -91,6 +93,10 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 ## 5. chart_data 기본 구조
 
 `contracts.md`의 `charts[].chart_data`는 다음 구조를 따른다. `period`는 `charts[]` 레벨에, `candle_unit`과 실제 데이터(candles·overlays·subcharts·annotations)는 `chart_data` 안에 둔다(이중 중첩 없음).
+
+이 구조는 `schemas/chart.py`의 `ChartData` Pydantic 모델로 계약 검증한다(자유 dict 아님). key 이름은 이 문서를 정본으로 하며 바꾸지 않는다 — 특히 `support_resistance`의 `from`은 alias로 유지한다. 하위 모델은 `extra="forbid"`(단 `annotation.meta`는 자유 `dict`)이고, candles는 내부 표준 `OHLCV`를 재사용한다.
+
+**계약 강화 규칙:** 수치 필드는 **inf/nan을 허용하지 않는다**(비정상 값은 fail-fast, `_to_price`도 동일). 모든 date/from/to는 **ISO `YYYY-MM-DD`만** 허용한다(실제 달력 날짜 검증). `annotation.source`는 **필수**이며 `"code"`만 허용한다(§6). candle은 `high >= low`, RSI 서브차트는 `oversold < overbought`여야 한다. `ChartPayload.period`와 `chart_data.candle_unit`은 §3 규정(3m·1y=D, 5y=W)과 정합해야 한다.
 
 ```json
 {
@@ -116,7 +122,7 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
       "volume": { "avg_window": 20, "bars": [ { "date": "2026-06-30", "volume": 12345678, "avg_volume": 10000000, "is_spike": false } ] }
     },
     "annotations": [
-      { "id": "ann_001", "kind": "moving_average_golden_cross", "date": "2026-05-14", "price": 83200.0, "label": "골든크로스", "importance": "medium", "source": "code" }
+      { "id": "ann_001", "kind": "golden_cross", "date": "2026-05-14", "price": 83200.0, "label": "골든크로스", "importance": "medium", "source": "code" }
     ]
   }
 }
@@ -147,18 +153,20 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 ## 7. annotation kind
 
-| kind | 표시 라벨 | 의미 |
-| --- | --- | --- |
-| `moving_average_golden_cross` | 골든크로스 | 단기 이동평균선이 중장기 이동평균선을 상향 돌파 |
-| `moving_average_dead_cross` | 데드크로스 | 단기 이동평균선이 중장기 이동평균선을 하향 돌파 |
-| `volume_spike` | 거래량 급증 | 거래량이 최근 평균 대비 크게 증가 |
-| `support_touch` | 지지선 근접 | 가격이 주요 지지 구간에 근접 |
-| `resistance_touch` | 저항선 근접 | 가격이 주요 저항 구간에 근접 |
-| `rsi_overbought` | RSI 과열 | RSI가 과열 기준 이상 |
-| `rsi_oversold` | RSI 과매도 | RSI가 과매도 기준 이하 |
-| `box_range_candidate` | 박스권 후보 | 일정 기간 가격이 제한된 범위에서 움직임 |
-| `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 |
-| `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 |
+| kind | 표시 라벨 | 의미 | MVP |
+| --- | --- | --- | --- |
+| `golden_cross` | 골든크로스 | 단기 이동평균선이 중장기 이동평균선을 상향 돌파 | ✅ |
+| `dead_cross` | 데드크로스 | 단기 이동평균선이 중장기 이동평균선을 하향 돌파 | ✅ |
+| `volume_spike` | 거래량 급증 | 거래량이 최근 평균 대비 크게 증가 | ✅ |
+| `support_touch` | 지지선 근접 | 가격이 주요 지지 구간에 근접 | ✅ |
+| `resistance_touch` | 저항선 근접 | 가격이 주요 저항 구간에 근접 | ✅ |
+| `rsi_overbought` | RSI 과열 | RSI가 과열 기준 이상 | ✅ |
+| `rsi_oversold` | RSI 과매도 | RSI가 과매도 기준 이하 | ✅ |
+| `box_range_candidate` | 박스권 후보 | 일정 기간 가격이 제한된 범위에서 움직임 | ✅ |
+| `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 | ⏳ 후속 |
+| `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 | ⏳ 후속 |
+
+크로스 kind는 MVP 구현에서 `golden_cross`/`dead_cross`로 확정한다(§8은 이동평균선 크로스 규칙을 정의한다). `box_breakout_candidate`·`cup_handle_candidate`는 오탐 가능성이 크고 구현 난도가 높아 **MVP 구현 범위에서 제외**하고 후속 단계에서 별도 문서·테스트 보강 후 구현한다(§12.2·§13 규칙은 정본으로 유지).
 
 패턴 관련 annotation은 확정이 아니라 **후보(candidate)**로 표기한다. 패턴 탐지는 오탐 가능성이 높으므로 "확정" 표현을 쓰지 않는다(honest scoping).
 
@@ -170,35 +178,37 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 
 ### 8.1 계산 대상
 
-이동평균선은 `config.md`의 `MA_WINDOWS = [5, 20, 60]`를 따른다. 5MA=단기, 20MA=중기, 60MA=장기.
+이동평균선은 `config.md`의 `MA_WINDOWS`(= `[MA_SHORT_WINDOW, MA_MID_WINDOW, MA_LONG_WINDOW]`, 기본 `[5, 20, 60]`)를 따른다. short=단기, mid=중기, long=장기. 아래 표의 `5MA/20MA/60MA`는 기본값 기준 표기이며, 골든/데드크로스는 **고정 숫자가 아니라 역할(short·mid·long) 조합의 교차**로 판정한다 — window 값이 바뀌면 교차 대상 숫자도 함께 바뀐다.
 
 ### 8.2 골든크로스
 
-이전 봉 `short_ma <= long_ma`, 현재 봉 `short_ma > long_ma`이면 `moving_average_golden_cross`를 생성한다.
+이전 봉 `short_ma <= long_ma`, 현재 봉 `short_ma > long_ma`이면 `golden_cross`를 생성한다.
 
-| 조합 | 중요도 |
+| 조합 (역할) | 중요도 |
 | --- | --- |
-| 5MA 상향 돌파 20MA | medium |
-| 20MA 상향 돌파 60MA | high |
+| short MA 상향 돌파 mid MA (기본 5MA/20MA) | medium |
+| mid MA 상향 돌파 long MA (기본 20MA/60MA) | high |
 
 ### 8.3 데드크로스
 
-이전 봉 `short_ma >= long_ma`, 현재 봉 `short_ma < long_ma`이면 `moving_average_dead_cross`를 생성한다.
+이전 봉 `short_ma >= long_ma`, 현재 봉 `short_ma < long_ma`이면 `dead_cross`를 생성한다.
 
-| 조합 | 중요도 |
+| 조합 (역할) | 중요도 |
 | --- | --- |
-| 5MA 하향 이탈 20MA | medium |
-| 20MA 하향 이탈 60MA | high |
+| short MA 하향 이탈 mid MA (기본 5MA/20MA) | medium |
+| mid MA 하향 이탈 long MA (기본 20MA/60MA) | high |
 
 ### 8.4 중복 제거
 
 같은 종류의 크로스가 가까운 기간 안에 반복되면 중복 표시를 줄인다.
 
-| 기간 | 중복 제거 기준 |
-| --- | --- |
-| `3m` | 5거래일 이내 동일 kind 중복 제거 |
-| `1y` | 10거래일 이내 동일 kind 중복 제거 |
-| `5y` | 4주 이내 동일 kind 중복 제거 |
+중복 제거는 **달력일이 아니라 candle(봉) index 거리**로 계산한다(주말·휴장일 왜곡 방지). 창 값 정본은 `config.md §10 ANNOTATION_DEDUP_BARS`다.
+
+| 기간 | 기본 봉 | 중복 제거 창(봉 index) |
+| --- | --- | --- |
+| `3m` | 일봉 | 5봉 이내 동일 kind 중복 제거 |
+| `1y` | 일봉 | 10봉 이내 동일 kind 중복 제거 |
+| `5y` | 주봉 | 4봉(≈4주) 이내 동일 kind 중복 제거 |
 
 ---
 
@@ -371,7 +381,7 @@ annotation 생성 과정은 trace(`chart_generate` 노드)에 남긴다: `period
   "node": "chart_generate",
   "output_summary": {
     "period": "1y", "candle_unit": "D",
-    "generated_annotations": { "moving_average_golden_cross": 2, "volume_spike": 3, "support_touch": 1, "resistance_touch": 2 },
+    "generated_annotations": { "golden_cross": 2, "volume_spike": 3, "support_touch": 1, "resistance_touch": 2 },
     "skipped_annotations": [ { "kind": "cup_handle_candidate", "reason": "not enough bars" } ]
   }
 }
@@ -385,8 +395,8 @@ annotation 생성 과정은 trace(`chart_generate` 노드)에 남긴다: `period
 
 | ID | 입력 | 기대 결과 |
 | --- | --- | --- |
-| CHART-01 | 5MA가 20MA를 상향 돌파 | moving_average_golden_cross 생성 |
-| CHART-02 | 5MA가 20MA를 하향 이탈 | moving_average_dead_cross 생성 |
+| CHART-01 | 5MA가 20MA를 상향 돌파 | golden_cross 생성 |
+| CHART-02 | 5MA가 20MA를 하향 이탈 | dead_cross 생성 |
 | CHART-03 | 거래량이 20봉 평균의 2배 이상 | volume_spike 생성 |
 | CHART-04 | 현재가가 최근 지지선 ±2% 이내 | support_touch 생성 |
 | CHART-05 | 현재가가 최근 저항선 ±2% 이내 | resistance_touch 생성 |

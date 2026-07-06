@@ -21,15 +21,29 @@
 
 ※ 3번 라벨은 `bullish_reversal_watch`, 표시 라벨은 "상승 전환 관찰"로 확정한다. "전환 관찰"은 예측 뉘앙스를 줄이고 관찰된 신호를 설명하는 표현이다.
 
+> **MA 표기 규약:** 위 표(및 이 문서)의 `5MA`·`20MA`·`60MA`는 **기본값 기준 표기**이며, 실제로는 각각 **short MA·mid MA·long MA**(`config.md`의 `MA_SHORT_WINDOW`·`MA_MID_WINDOW`·`MA_LONG_WINDOW`, 기본 5/20/60)를 가리킨다. 정배열(short>mid>long)·골든크로스(short가 mid를 상향 돌파) 같은 규칙의 **의미는 역할 기준**이며, window 값이 바뀌면 표기 숫자도 함께 바뀐다. 코드는 하드코딩 숫자가 아니라 역할 상수로 접근한다.
+
 **우선순위 근거:** 극단 상태(과매도·과열)를 추세보다 먼저 검사한다. "정배열 + RSI 72"는 추세유지가 아니라 **과열**로 잡아야 정직하다.
 
 **3·4번 분리 근거:** "상승 전환 관찰"(3)은 정배열이 완성되기 전, 전환 신호가 관찰되는 단계다(20MA>60MA 아직 아님). "상승 추세 유지"(4)는 정배열이 완성된 단계다. 3번을 4번처럼 빡세게(정배열 필수) 잡으면 거의 안 뜨므로 분리한다.
 
-**판단 불가:** 규칙 검사에 필요한 지표가 부족하면(예: 60MA 계산 불가) `final_regime = 판단 불가`로 처리하고 이후 종합·신뢰도를 스킵한다.
+**판단 불가 vs 조건 False (구분):** 두 경우를 나눈다.
+
+- **필수 데이터 자체 부족** → `unavailable`. MVP 기준은 **일봉 수 < `MIN_DAILY_BARS`(60)** 다. 이때 60MA 최신값조차 계산할 수 없으므로 `daily_regime = final_regime = unavailable`로 처리하고 종합·신뢰도를 스킵한다.
+- **필수 데이터는 있으나 일부 보조 조건만 계산 불가** → 그 **조건만 `False`**로 두고 규칙 검사를 계속한다. 예: 봉이 정확히 60개면 60MA 최신값은 나오지만 `SLOPE_LOOKBACK_DAYS`만큼의 **60MA 기울기**는 계산이 부족할 수 있다. 이 경우 전체를 `unavailable`로 만들지 않고 해당 우상향 조건만 False 처리하며, 우선순위 어디에도 걸리지 않으면 기본값 `sideways`로 착지한다(억지 판정 금지).
+
+즉 `unavailable`은 "봉 수 부족(< MIN_DAILY_BARS)"에서만 나오고, 값은 있으나 기울기 등 보조 계산이 부족한 경우는 `sideways` 등으로 정상 착지한다.
 
 ### 2단계 — 멀티프레임 보정
 
 일봉 1차 국면을 주/월봉 추세로 보정하되, **라벨은 바꾸지 않고** `alignment_flag`와 `regime_context`만 채운다.
+
+**주/월봉 추세(`weekly_trend`·`monthly_trend`) 계산:** 절대 가격차가 아니라 **변화율**로 판정한다.
+
+- `slope_pct = (최신 종가 − TREND_SLOPE_LOOKBACK봉 전 종가) / (그 종가)`
+- `slope_pct > +TREND_SIDEWAYS_THRESHOLD_PCT` → `up` / `< −TREND_SIDEWAYS_THRESHOLD_PCT` → `down` / 그 사이(±밴드 이내) → `sideways`
+- 봉 수가 `MIN_WEEKLY_BARS`(주봉)·`MIN_MONTHLY_BARS`(월봉) 미만이거나 기준 종가가 0이면 → `unavailable`
+- `TREND_SIDEWAYS_THRESHOLD_PCT` 밴드가 없으면 실데이터에서 sideways가 거의 나오지 않으므로 도입한다(`config.md §3`). 일봉 MA 기울기(`SLOPE_MIN`)와는 별개 축이다.
 
 **보정 기준 (월봉 우선):**
 
@@ -102,3 +116,7 @@
 입력: 일봉 과열 + 월봉 상승              → 기대: final_regime=과열, alignment_flag=중립
 입력: 봉 40개 (60MA 불가)               → 기대: 판단 불가
 ```
+
+### regime(상태)과 지표별 signal(방향)은 다른 축
+
+이 문서의 regime은 **국면(상태)** 판정이다. 종합 신호에 쓰는 **지표별 `signal`(positive/neutral/negative, 방향)**은 별개 축이며 그 산출 규칙은 `config.md §4.1`(synthesis)에 있다. 예: `final_regime=overheated`(상태)면서 `consensus=weak_positive`(방향)일 수 있다(glossary "final_regime vs consensus"). 같은 지표(RSI 등)를 쓰더라도 regime 조건과 signal 조건은 다르게 정의된다 — 특히 RSI 극단(≥`RSI_OVERBOUGHT`/≤`RSI_OVERSOLD`)은 regime에서는 과열/과매도 반등으로, synthesis signal에서는 방향 불명확으로 보아 neutral로 둔다.
