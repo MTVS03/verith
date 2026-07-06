@@ -24,6 +24,19 @@ def test_parse_json_response_infers_missing_verdict_label() -> None:
     assert verdict_label == "strong"
 
 
+def test_interpret_result_allows_missing_usage() -> None:
+    result = llm_interpreter.InterpretResult(
+        verdict="보통입니다.",
+        interpretation="지표가 혼재합니다.",
+        verdict_label="moderate",
+        provider="template",
+        model="rule-based",
+    )
+
+    assert result.prompt_tokens is None
+    assert result.completion_tokens is None
+
+
 @pytest.mark.asyncio
 async def test_interpret_uses_template_when_qwen_is_skipped_and_openai_key_missing(monkeypatch):
     monkeypatch.setattr(llm_interpreter, "_qwen_skip_until", time.time() + 60)

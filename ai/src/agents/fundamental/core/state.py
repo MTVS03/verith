@@ -40,8 +40,10 @@ class FundamentalAgentState(TypedDict, total=False):
     llm_provider: str
     llm_model: str
     llm_latency_ms: int
+    llm_usage: dict[str, int | None]
     llm_guard_violations: list[str]
     verification_summary: dict[str, Any]
+    cost_summary: dict[str, Any]
     confidence: float
     meta: dict[str, Any]
     response: FundamentalResponse

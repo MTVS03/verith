@@ -29,6 +29,7 @@ def report_node(state: FundamentalAgentState) -> dict[str, Any]:
         "fresh_dart": state["request"].report_mode == "latest",
         "retrieval_summary": state.get("retrieval_summary", {}),
         "verification_summary": state.get("verification_summary", {}),
+        "cost_summary": state.get("cost_summary", {}),
         "corp_code": state["corp_code"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "trace_id": request.trace_id,

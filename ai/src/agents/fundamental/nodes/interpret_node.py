@@ -30,5 +30,9 @@ async def interpret_node(state: FundamentalAgentState) -> dict[str, Any]:
         "llm_provider": result.provider,
         "llm_model": result.model,
         "llm_latency_ms": result.latency_ms,
+        "llm_usage": {
+            "prompt_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
+        },
         "llm_guard_violations": [],
     }

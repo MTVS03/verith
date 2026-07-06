@@ -23,6 +23,8 @@ class InterpretResult:
     flags: list[str] = field(default_factory=list)
     latency_ms: int = 0
     prompt: str = ""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 _qwen_failures = 0
@@ -69,7 +71,7 @@ async def _call_openai_compatible(
     model: str,
     prompt: str,
     timeout: float,
-) -> tuple[str, str, str | None]:
+) -> tuple[str, str, str | None, dict[str, int | None]]:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
@@ -99,7 +101,14 @@ async def _call_openai_compatible(
                 )
             message = response.choices[0].message
             content = message.content or getattr(message, "reasoning_content", "") or ""
-            return _parse_json_response(content)
+            usage = getattr(response, "usage", None)
+            prompt_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
+            completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
+            verdict, interpretation, verdict_label = _parse_json_response(content)
+            return verdict, interpretation, verdict_label, {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            }
         except Exception as exc:
             chat_error = exc
 
@@ -111,7 +120,14 @@ async def _call_openai_compatible(
             prompt=f"{SYSTEM_PROMPT}\n\n{prompt}\n\nReturn only the final JSON object. No <think>:",
         )
         content = response.choices[0].text or ""
-        return _parse_json_response(content)
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
+        completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
+        verdict, interpretation, verdict_label = _parse_json_response(content)
+        return verdict, interpretation, verdict_label, {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        }
     except Exception:
         if chat_error is not None:
             raise chat_error
@@ -151,7 +167,7 @@ async def interpret(
 
     if now >= _qwen_skip_until:
         try:
-            verdict, interpretation, verdict_label = await _call_openai_compatible(
+            verdict, interpretation, verdict_label, usage = await _call_openai_compatible(
                 base_url=settings.QWEN_BASE_URL,
                 api_key=settings.LLM_DUMMY_KEY,
                 model=settings.QWEN_MODEL,
@@ -167,6 +183,8 @@ async def interpret(
                 model=settings.QWEN_MODEL,
                 latency_ms=round((time.perf_counter() - started) * 1000),
                 prompt=prompt,
+                prompt_tokens=usage["prompt_tokens"],
+                completion_tokens=usage["completion_tokens"],
             )
         except Exception:
             _qwen_failures += 1
@@ -176,7 +194,7 @@ async def interpret(
 
     if settings.OPENAI_API_KEY:
         try:
-            verdict, interpretation, verdict_label = await _call_openai_compatible(
+            verdict, interpretation, verdict_label, usage = await _call_openai_compatible(
                 base_url=None,
                 api_key=settings.OPENAI_API_KEY,
                 model=settings.OPENAI_MODEL,
@@ -192,6 +210,8 @@ async def interpret(
                 flags=flags,
                 latency_ms=round((time.perf_counter() - started) * 1000),
                 prompt=prompt,
+                prompt_tokens=usage["prompt_tokens"],
+                completion_tokens=usage["completion_tokens"],
             )
         except Exception:
             pass

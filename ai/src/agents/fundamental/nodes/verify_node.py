@@ -21,6 +21,7 @@ async def verify_node(state: FundamentalAgentState) -> dict[str, Any]:
     llm_model = state["llm_model"]
     llm_latency_ms = state["llm_latency_ms"]
     llm_verdict_label = state.get("llm_verdict_label")
+    usage_records = [state.get("llm_usage", {})]
     llm_guard_violations: list[str] = []
     initial_provider = llm_provider
     initial_model = llm_model
@@ -54,6 +55,12 @@ async def verify_node(state: FundamentalAgentState) -> dict[str, Any]:
                 prompt_override=retry_prompt,
             )
             extend_unique(risk_flags, retry_result.flags)
+            usage_records.append(
+                {
+                    "prompt_tokens": retry_result.prompt_tokens,
+                    "completion_tokens": retry_result.completion_tokens,
+                }
+            )
             retry_guard = guard_llm_output(
                 retry_result.verdict,
                 retry_result.interpretation,
@@ -89,6 +96,15 @@ async def verify_node(state: FundamentalAgentState) -> dict[str, Any]:
     stability = assess_verdict_stability(verdict, state["label"], llm_verdict_label)
     if not stability.verdict_stable:
         extend_unique(risk_flags, ["VERDICT_STABILITY_GUARDED"])
+    prompt_tokens = [item.get("prompt_tokens") for item in usage_records if item.get("prompt_tokens") is not None]
+    completion_tokens = [item.get("completion_tokens") for item in usage_records if item.get("completion_tokens") is not None]
+    cost_summary = {
+        "llm_calls": len(usage_records),
+        "prompt_tokens": sum(prompt_tokens) if prompt_tokens else None,
+        "completion_tokens": sum(completion_tokens) if completion_tokens else None,
+        "dart_network_calls": (state.get("retrieval_summary") or {}).get("financial_network_calls"),
+        "probe_calls": (state.get("retrieval_summary") or {}).get("probe_network_calls"),
+    }
     verification_summary = {
         "binding_passed": EVIDENCE_UNBOUND_FLAG not in risk_flags,
         "consistency_passed": not any(is_consistency_flag(flag) for flag in risk_flags),
@@ -102,6 +118,7 @@ async def verify_node(state: FundamentalAgentState) -> dict[str, Any]:
         "initial_model": initial_model,
         "final_provider": llm_provider,
         "final_model": llm_model,
+        "cost_summary": cost_summary,
     }
 
     return {
@@ -112,6 +129,7 @@ async def verify_node(state: FundamentalAgentState) -> dict[str, Any]:
         "llm_latency_ms": llm_latency_ms,
         "llm_guard_violations": llm_guard_violations,
         "verification_summary": verification_summary,
+        "cost_summary": cost_summary,
         "risk_flags": risk_flags,
         "confidence": confidence_from(state["ratios"], risk_flags),
     }

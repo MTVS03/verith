@@ -125,8 +125,8 @@ def build_summary(results: dict[str, FundamentalResponse | Exception], years: in
         "",
         "| ticker | corp_name | score | report_label | peer_rank | peer_label | sector_score | confidence | "
         + " | ".join(SUMMARY_HEADERS)
-        + " | llm | guard_violations | risk_flags |",
-        "|---|---|---|---|---|---|---|---|" + "---|" * len(SUMMARY_HEADERS) + "---|---|---|",
+        + " | llm | prompt_tokens | completion_tokens | dart_calls | guard_violations | risk_flags |",
+        "|---|---|---|---|---|---|---|---|" + "---|" * len(SUMMARY_HEADERS) + "---|---|---|---|---|---|",
     ]
     for ticker, result in results.items():
         corp_name = STOCK_NAME_MAP.get(ticker, "?")
@@ -134,12 +134,17 @@ def build_summary(results: dict[str, FundamentalResponse | Exception], years: in
             lines.append(
                 f"| {ticker} | {corp_name} | ERROR | - | - | - | - | - |"
                 + " - |" * len(SUMMARY_HEADERS)
-                + f" - | - | {type(result).__name__}: {result} |"
+                + f" - | - | - | - | - | {type(result).__name__}: {result} |"
             )
             continue
         ratio_cells = " | ".join(_ratio_cell(result, key) for key in SUMMARY_RATIOS)
         flags = ", ".join(result.risk_flags) or "-"
         guard_violations = ", ".join(result.meta.get("llm_guard_violations") or []) or "-"
+        cost_summary = result.meta.get("cost_summary") or {}
+        prompt_tokens = cost_summary.get("prompt_tokens") or "-"
+        completion_tokens = cost_summary.get("completion_tokens") or "-"
+        dart_calls = cost_summary.get("dart_network_calls")
+        dart_calls = "-" if dart_calls is None else dart_calls
         llm = result.meta.get("llm_provider", "?")
         peer_rank = result.meta.get("peer_rank", "-")
         peer_count = result.meta.get("peer_count", "-")
@@ -147,7 +152,8 @@ def build_summary(results: dict[str, FundamentalResponse | Exception], years: in
         sector_score = result.meta.get("sector_relative_score", "-")
         lines.append(
             f"| {ticker} | {result.corp_name} | {result.score} | {display_label(result.verdict_label)} "
-            f"| {peer_rank}/{peer_count} | {peer_label} | {sector_score} | {result.confidence} | {ratio_cells} | {llm} | {guard_violations} | {flags} |"
+            f"| {peer_rank}/{peer_count} | {peer_label} | {sector_score} | {result.confidence} | {ratio_cells} "
+            f"| {llm} | {prompt_tokens} | {completion_tokens} | {dart_calls} | {guard_violations} | {flags} |"
         )
     lines.append("")
     return "\n".join(lines)
