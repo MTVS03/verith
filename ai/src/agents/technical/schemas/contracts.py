@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .chart import ChartData
-from .intraday import IntradayChartData
+from .intraday import IntradayChartData, IntradayContext
 from .enums import (
     AlignmentFlag,
     ChartPeriod,
@@ -162,3 +162,6 @@ class TechnicalAgentOutput(_StrictModel):
     # interpretation 은 항상 존재(null 아님) — 불가 시 template_fallback 문장으로 안전 착지.
     interpretation: InterpretationResult
     verification: VerificationResult
+    # 1D 장중 분봉 보조 컨텍스트(Beta). 없으면 None — 기존 D/W/M 분석은 그대로 통과한다.
+    # final_regime 을 바꾸지 않는 보조 근거이며, 생성·보정 로직은 후속(Phase 2)에서 붙는다.
+    intraday_context: IntradayContext | None = None
