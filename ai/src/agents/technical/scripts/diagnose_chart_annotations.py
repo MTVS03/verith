@@ -63,7 +63,7 @@ ALL_KINDS = [
     "box_breakout_candidate", "cup_handle_candidate",
 ]
 # 계약엔 있지만 chart_builder 생성기가 없는 kind (0개가 정상 — "contract exists but generator missing").
-UNIMPLEMENTED_KINDS = ["box_breakout_candidate", "cup_handle_candidate"]
+UNIMPLEMENTED_KINDS = ["cup_handle_candidate"]
 _IMPORTANCE_LEVELS = ["high", "medium", "low"]
 
 # period → 기본 candle_unit (build_chart_payloads 매핑과 동일: 3m·1y=D, 5y=W)
@@ -105,6 +105,7 @@ def _pre_dedup_annotations(period: ChartPeriod, source: list[OHLCV]) -> list[dic
         + cb._sr_touch_annotations(source, start)
         + cb._rsi_annotations(source, rsis, start)
         + cb._box_range_annotations(source, start)
+        + cb._box_breakout_annotations(source, start, vol_avg)
     )
 
 

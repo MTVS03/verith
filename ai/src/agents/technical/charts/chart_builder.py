@@ -10,8 +10,9 @@
   - annotation은 전부 코드가 생성한다(source="code"). label은 코드 템플릿(투자 권유 표현 없음).
   - D→W/M 리샘플을 하지 않는다. 5y는 주봉 candle을 그대로 쓴다.
 
-MVP 구현 annotation: golden_cross·dead_cross·volume_spike·support_touch·resistance_touch·
-rsi_overbought·rsi_oversold·box_range_candidate. box_breakout·cup_handle은 후속(제외).
+구현 annotation: golden_cross·dead_cross·volume_spike·support_touch·resistance_touch·
+rsi_overbought·rsi_oversold·box_range_candidate·box_breakout_candidate. cup_handle은 후속(제외).
+support/resistance·box_range·box_breakout은 visible range 전체를 rolling으로 판정한다(look-ahead 없음).
 """
 
 from __future__ import annotations
@@ -58,6 +59,7 @@ _LABELS = {
     "rsi_overbought": "RSI 과열",
     "rsi_oversold": "RSI 과매도",
     "box_range_candidate": "박스권 후보",
+    "box_breakout_candidate": "박스권 이탈 관찰",
 }
 
 # 골든/데드 크로스 판정 MA 조합 (config 역할 상수, chart_annotation_spec §8.2).
@@ -143,6 +145,7 @@ def _build_chart_data(period: ChartPeriod, candle_unit: str, source: Sequence[OH
         + _sr_touch_annotations(source, start)
         + _rsi_annotations(source, rsis, start)
         + _box_range_annotations(source, start)
+        + _box_breakout_annotations(source, start, vol_avg)
     )
     date_to_index = {bar.date: i for i, bar in enumerate(source)}
     annotations = _finalize_annotations(annotations, ANNOTATION_DEDUP_BARS[period.value], date_to_index)
@@ -353,6 +356,50 @@ def _box_range_annotations(source: Sequence[OHLCV], start: int) -> list[dict]:
         ann = _box_range_at(source, i)
         if ann is not None:
             anns.append(ann)
+    return anns
+
+
+def _box_breakout_annotations(source: Sequence[OHLCV], start: int, vol_avg: list) -> list[dict]:
+    """박스권 상단/하단을 이탈한 **후보**를 생성한다(chart_annotation_spec §12.2).
+
+    "박스가 먼저 있었고 그다음 봉에서 이탈"한 구조로 판단한다 — 봉 i에서 **현재봉을 제외한**
+    직전 박스(`_box_range_at(source, i-1)`, bars ≤ i-1)를 구하고, close[i]가 그 박스 상단 위/하단
+    아래로 마감하면 생성한다. 창(bars ≤ i-1) + 판단봉(i)만 쓰므로 **look-ahead 없음**.
+
+    v1은 **가격 이탈만으로** 후보를 만든다(거래량은 gate가 아니라 meta로만 기록 — §12.2). 확정적
+    돌파/매수·매도 신호가 아니라 **관찰 후보**이며 label·표현은 중립을 유지한다. importance=medium.
+    """
+    anns: list[dict] = []
+    first = max(start, BOX_LOOKBACK_DAYS)  # 직전 박스(창 40봉) + 현재봉 → i >= BOX_LOOKBACK_DAYS
+    for i in range(first, len(source)):
+        box = _box_range_at(source, i - 1)  # 현재봉을 제외한 직전 박스
+        if box is None:
+            continue
+        box_top = box["meta"]["top"]
+        box_bottom = box["meta"]["bottom"]
+        close = float(source[i].close)
+        if close > box_top:
+            direction, ref = "up", box_top
+        elif close < box_bottom:
+            direction, ref = "down", box_bottom
+        else:
+            continue  # 박스 안에 머묾 → 이탈 아님
+        vol_ratio = None
+        avg = vol_avg[i] if i < len(vol_avg) else None
+        if avg:
+            vol_ratio = round(float(source[i].volume) / avg, 2)
+        anns.append(_ann("box_breakout_candidate", source[i].date, ref, "medium", {
+            "direction": direction,
+            "box_top": box_top,
+            "box_bottom": box_bottom,
+            "box_range_pct": box["meta"]["range_pct"],
+            "box_window_bars": box["meta"]["window_bars"],
+            "breakout_close": close,
+            "breakout_pct": round((close - ref) / ref, 4) if ref else None,
+            # 거래량은 생성 조건이 아니라 confirmation 정보(§12.2). 기존 VOLUME_SPIKE_MULTIPLIER 재사용.
+            "volume_confirmed": bool(vol_ratio is not None and vol_ratio >= VOLUME_SPIKE_MULTIPLIER),
+            "volume_ratio": vol_ratio,
+        }))
     return anns
 
 

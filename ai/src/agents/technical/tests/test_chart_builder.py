@@ -453,3 +453,94 @@ def test_rolling_box_schema_and_metadata():
         # 상단/하단 + breakout 대비 metadata(자유 dict, schema 변경 없음)
         assert {"top", "bottom", "range_pct", "top_touch", "bottom_touch", "window_bars"} <= set(a["meta"])
         assert a["meta"]["window_bars"] == 40
+
+
+# ── box_breakout_candidate (feat/technical-chart-patterns) ──────────────────────
+def _breakout_anns(daily) -> list[dict]:
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    return [a for a in anns if a["kind"] == "box_breakout_candidate"]
+
+
+def _breakout_dates(daily) -> list[str]:
+    return [a["date"] for a in _breakout_anns(daily)]
+
+
+def test_box_breakout_upside():
+    # 41봉 박스(상단 108) + 다음 봉 close 115 → 상방 이탈 후보
+    box = _box_series(41)
+    up = series([115.0], highs=[116.0], lows=[114.0], start=date(2025, 1, 1) + timedelta(days=41))
+    anns = _breakout_anns(box + up)
+    assert len(anns) == 1
+    assert anns[0]["date"] == _d(41)
+    assert anns[0]["meta"]["direction"] == "up"
+    assert anns[0]["meta"]["box_top"] == 108.0
+
+
+def test_box_breakout_downside():
+    # 41봉 박스(하단 100) + 다음 봉 close 95 → 하방 이탈 후보
+    box = _box_series(41)
+    down = series([95.0], highs=[96.0], lows=[94.0], start=date(2025, 1, 1) + timedelta(days=41))
+    anns = _breakout_anns(box + down)
+    assert len(anns) == 1
+    assert anns[0]["date"] == _d(41)
+    assert anns[0]["meta"]["direction"] == "down"
+    assert anns[0]["meta"]["box_bottom"] == 100.0
+
+
+def test_box_breakout_none_when_not_box():
+    # 추세라 직전 window가 박스가 아니면, close가 높아도 breakout 없음
+    daily = series([100.0 + 2.0 * i for i in range(45)])
+    assert _breakout_anns(daily) == []
+
+
+def test_box_breakout_none_when_inside_box():
+    # 박스 안에 머물면 breakout 없음(box_range는 있어도 breakout은 없음)
+    daily = _box_series(45)
+    assert _breakout_anns(daily) == []
+
+
+def test_box_breakout_no_lookahead_future_independent():
+    # bar 41 breakout 판정은 과거 박스만 사용 → 미래 봉을 더 붙여도 그대로 유지
+    box = _box_series(41)
+    up = series([115.0], highs=[116.0], lows=[114.0], start=date(2025, 1, 1) + timedelta(days=41))
+    base = box + up
+    extended = base + series([200.0] * 5, highs=[201.0] * 5, lows=[199.0] * 5,
+                             start=date(2025, 1, 1) + timedelta(days=42))
+    assert _d(41) in _breakout_dates(base)
+    assert _d(41) in _breakout_dates(extended)   # 미래 봉 추가와 무관
+
+
+def test_box_breakout_volume_meta():
+    box = _box_series(41)
+    # 거래량 급증 동반 이탈 → volume_confirmed true
+    up_hi = series([115.0], highs=[116.0], lows=[114.0], volumes=[500_000],
+                   start=date(2025, 1, 1) + timedelta(days=41))
+    a_hi = _breakout_anns(box + up_hi)[0]
+    assert a_hi["meta"]["volume_confirmed"] is True
+    assert a_hi["meta"]["volume_ratio"] is not None and a_hi["meta"]["volume_ratio"] >= 2.0
+    # 거래량 평범(기본 100k) → volume_confirmed false, 그래도 후보는 생성(가격 이탈만으로)
+    up_lo = series([115.0], highs=[116.0], lows=[114.0],
+                   start=date(2025, 1, 1) + timedelta(days=41))
+    a_lo = _breakout_anns(box + up_lo)[0]
+    assert a_lo["meta"]["volume_confirmed"] is False
+
+
+def test_box_breakout_not_repeated_after_box_gone():
+    # 박스 이탈 후 상단 위에서 지속되면, 박스가 사라져 연속 후보가 남발되지 않음
+    box = _box_series(41)
+    sustained = series([115.0 + i for i in range(6)],
+                       highs=[117.0 + i for i in range(6)], lows=[113.0 + i for i in range(6)],
+                       start=date(2025, 1, 1) + timedelta(days=41))
+    assert len(_breakout_anns(box + sustained)) <= 2   # dedup/구조상 과도하지 않음
+
+
+def test_box_breakout_schema_and_importance():
+    box = _box_series(41)
+    up = series([115.0], highs=[116.0], lows=[114.0], start=date(2025, 1, 1) + timedelta(days=41))
+    a = _breakout_anns(box + up)[0]
+    assert a["kind"] == "box_breakout_candidate"
+    assert a["importance"] == "medium"   # box_range(low)보다 행동 이벤트 → medium
+    assert a["source"] == "code"
+    assert a["label"] == "박스권 이탈 관찰"
+    assert {"direction", "box_top", "box_bottom", "box_range_pct", "box_window_bars",
+            "breakout_close", "breakout_pct", "volume_confirmed", "volume_ratio"} <= set(a["meta"])
