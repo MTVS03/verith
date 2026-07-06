@@ -160,6 +160,16 @@ KIS 기간별시세는 **한 호출에 최대 100건**을 반환한다. 1년치 
 7. **재시도:** 청크별 호출 실패·`EGW00201`은 기존 `_call_chart`의 retry/backoff(§10·config §8)를 그대로 재사용한다. 새 재시도 로직을 만들지 않는다.
 8. **리샘플 금지:** D/W/M은 각각 `FID_PERIOD_DIV_CODE`로 직접 조회한다. 일봉에서 주/월봉을 파생하지 않는다.
 
+### 8.2 조회 종료일(`end_date`) 스레딩 — `as_of` 반영
+
+리포트의 `as_of`(분석 기준 시점)를 **실제 KIS 조회 종료일**로 반영한다. 과거 `as_of` 요청에서 최신 데이터를 쓰고 출력엔 과거일을 찍는 불일치를 없앤다.
+
+1. **경로:** `TechnicalAgentInput.as_of` → supervisor → `run_data_collect(ticker, as_of=…)` → `fetch_multi_timeframe_ohlcv(ticker, end_date=…)` → `fetch_ohlcv(ticker, period, end_date=…)` → `FID_INPUT_DATE_2`. `FID_INPUT_DATE_1`은 기존 lookback/pagination 정책대로 계산한다(§8.1).
+2. **정규화:** `services/kis_client.normalize_end_date(datetime|date|str|None) -> date | None`가 담당한다. `None`→`None`(기존 오늘 기준), `datetime`→`.date()`, `date`→그대로, `YYYYMMDD`/`YYYY-MM-DD`→`date`(문자열 파싱은 `_normalize_to_date` 재사용). 잘못된 형식·미지원 타입·**미래 날짜**는 `ValueError`. `as_of→end_date` 번역은 `data_collect`가 수행하고, KIS 경계에서는 `end_date`라는 이름을 쓴다.
+3. **미래 거부(tz 안전):** `end_date`가 오늘보다 **명백히 미래**면 `ValueError`. tz-aware `datetime`이면 그 tz 기준 오늘(`datetime.now(tzinfo).date()`)과 비교해, 타임존 차이로 정상적인 "오늘" 요청을 미래로 오판하지 않는다. `date`/naive/문자열은 일반 `date.today()` 기준.
+4. **D/W/M 동일 기준:** `fetch_multi_timeframe_ohlcv`는 한 번 정규화한 `end_date`를 D·W·M **모두 같은 종료일**로 넘긴다.
+5. **하위 호환:** `end_date`/`as_of`를 생략하면 기존 current-date 동작을 유지한다(`fetch_ohlcv_range`는 명시 구간 함수라 시그니처·pagination 무변경, 그대로 재사용).
+
 ---
 
 ## 9. Redis 캐시 저장 구조
