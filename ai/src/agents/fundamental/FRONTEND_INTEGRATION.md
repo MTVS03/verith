@@ -18,6 +18,9 @@
 | `evidence` | DART 원문 근거 링크, 계정 바인딩, `display_value` |
 | `risk_flags` | 데이터 누락, fallback, 검증 경고 |
 | `report_html` | 격리 삽입 가능한 기본 HTML 리포트 블록 |
+| `meta.retrieval_summary` | DART 캐시/네트워크/출처 정책 표시 |
+| `meta.verification_summary` | Verification Gate 표시 |
+| `meta.erd_payload` | 저장 계약 미리보기. DB에 직접 쓰지 않음 |
 
 ## Recommended Layout
 
@@ -46,6 +49,12 @@
 - 최상위 `retrieval_summary`
 
 `report_id`는 `trace_id`, `stock_code`, `bsns_year`, `reprt_code` 기반으로 생성되어 실행마다 새 행을 남기는 이력 보존 모델입니다. 종목당 최신 1건만 필요하면 백엔드에서 `(stock_code, bsns_year, reprt_code)` 기준으로 dedupe 하세요.
+
+## Source Policy Display
+
+현재 annual 모드는 DART 재무제표 원문에 24시간 TTL 캐시를 사용합니다. latest 모드는 T5 전까지 분석 대상 연도 전체를 cache bypass로 조회합니다. 정정공시 기반 무효화는 아직 없고 TTL이 현재 대체 정책입니다.
+
+프론트는 `meta.retrieval_summary.financial_sources`를 사용해 연도별 `cache_status`, `row_count`, `rcept_nos`를 표시할 수 있습니다.
 
 ## Score Display Rule
 
