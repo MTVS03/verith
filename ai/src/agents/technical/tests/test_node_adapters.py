@@ -304,7 +304,7 @@ def test_regime_classify_custom_windows_no_keyerror(monkeypatch):
 def test_chart_generate_custom_windows_no_keyerror(monkeypatch):
     _patch_windows(monkeypatch, 10, 30, 90)
     charts = run_chart_generate(DAILY, WEEKLY, MONTHLY)  # overlay·cross가 새 window로 동작
-    assert len(charts) == 3
+    assert {"3m", "1y", "5y"} <= {p.period.value for p in charts}  # D/W/M 3종 존재(1d는 조건부)
     windows = {
         ov["window"]
         for p in charts
