@@ -380,18 +380,33 @@ D/W/M 일·주·월봉과 **1D 분봉은 완전히 다른 API**다. 일/주/월 
 - 정식 **거래일 달력(휴장일) 소스는 repo에 없음** → v1은 **주말 + 분봉 0건 + KIS 응답**으로 휴리스틱 판정.
   정식 거래시간(09:00–15:30 KST)·휴장일 캘린더 통합은 **후속(Future Work)**.
 
-### 12.9 manual smoke로 확인할 항목 (fetcher는 구현 완료, 실측 대기)
+### 12.9 실측 결과 (manual smoke)
 
-`fetch_minute_ohlcv`는 구현되었고 mock 테스트로 매핑·페이징을 검증했다. 아래는 **실 KIS 수동 smoke**로만
-확인 가능한 항목이며(임의 추측 금지), 확인 후 이 절을 "실측 완료"로 승격한다:
+`scripts/smoke_intraday_minute.py`로 실 KIS 응답을 확인했다. **핵심 매핑·페이징 가정은 모두 실측 확인됨**(red flag 없음).
 
-- `output2` **실제 응답 정렬 방향**(과거→최신 vs 역순 — 정규화는 timestamp 오름차순으로 통일하므로 결과는 정합),
-- **30건 경계** 동작(역방향 페이징 커서 이동),
-- `FID_PW_DATA_INCU_YN`·`FID_ETC_CLS_CODE`의 정확한 코드 값(현재 `"Y"`/`""`로 두고 실측 확인),
-- 장중/장전/장후/휴장 응답 형태(빈 `output2` 등),
-- `output1.stck_prdy_clpr`(previous_close) 정확성,
-- `cntg_vol` 특이사항(첫 체결 전 직전 분봉 체결량 표기 — volume spike 한계, §12.6),
-- 분봉 조회의 rate limit·에러 코드(D/W/M과 동일 패턴 재사용 가능 여부).
+**실행:** ticker `373220`(LG에너지솔루션), executed_at `2026-07-06T19:47`(after-hours), rt_cd `0`·msg_cd `MCA00000`.
+
+| 항목 | 실측 결과 | 상태 |
+| --- | --- | --- |
+| output2 정렬 방향 | **descending**(최신→과거, first `194700` > last `191800`) | ✅ fetcher가 오름차순 정규화 → 정합 |
+| 1회 호출 건수 | **정확히 30건**(≤30) | ✅ 페이징 가정 유효 |
+| normalized 오름차순 | `is_sorted_ascending = true` | ✅ |
+| normalized 중복 제거 | `has_duplicates = false` | ✅ dedupe 동작 |
+| `FID_PW_DATA_INCU_YN="Y"` / `FID_ETC_CLS_CODE=""` | `fid_combo_ok = true`(rt_cd 0) | ✅ 이 조합 수용 확인 |
+| `output1.stck_prdy_clpr` → previous_close | `362500`(present·반복 실행 시 불변) | ✅ 안정 |
+| `output1.stck_prpr` → latest_price | `354500`(present) | ✅ |
+| `output1.acml_vol` → cumulative_volume | `330389`(present) | ✅ |
+| `output1.acml_tr_pbmn` → cumulative_trading_value | `116804950750`(누적) | ✅ 누적으로만 사용 |
+| candle `trading_value` | 전부 `None`(`trading_value_policy_ok = true`) | ✅ acml_tr_pbmn 미매핑 정책 맞음 |
+| 페이징 + limit | `--limit 120` → 120개·4페이지, 정렬·dedupe 유지 | ✅ |
+
+**운영 관찰(비-red-flag):**
+- **데이터 API rate limit(`EGW00201`):** 빠른 역방향 페이징(수십 호출) 중 간헐 발생 → 기존 retry/backoff가 복구(최종 결과 정상). D/W/M과 동일 패턴 재사용 확인.
+- **토큰 발급 1분당 1회(`EGW00133`):** 여러 smoke를 별도 프로세스로 1분 내 연달아 실행하면 토큰 재발급이 막힌다(프로세스 간 토큰 캐시 없음). production은 토큰 캐시/서비스가 있어 무관하나, **수동 smoke는 실행 간격을 1분 이상** 두거나 토큰 파일 캐시를 쓰면 된다.
+- **`MINUTE_MAX_CALLS=20`(≈600봉) 상한:** 정규장(09:00–15:30 ≈391봉)은 여유 있게 커버. 이번 응답은 시간외까지 연속봉(09:46–19:45)이라 상한(600봉)에서 정지 — 정규장 범위엔 영향 없음.
+- **`cntg_vol` 특이사항:** 첫 체결 전 직전 분봉 체결량 표기 가능(§12.6 volume spike 한계) — 정규장 개장 직후 봉으로 재확인 대상.
+
+**pending(세션별 재실행 — 실행 시각 필요):** 정규 장중(09:00–15:30)·장전(09:00 전)·휴장/주말의 빈 `output2` 형태. (이번 실측은 after-hours 시각 기준이라 정규 세션 의미론은 해당 시각 실행으로 채운다.)
 
 ---
 
