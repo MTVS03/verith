@@ -71,7 +71,8 @@ def test_complete_passes_request_params():
     fr = _FakeResponses(response=_FakeResponse("ok"))
     _client(fr, model="m1", temperature=0, max_output_tokens=99, timeout=7).complete("PROMPT")
     assert fr.last_kwargs == {
-        "model": "m1", "input": "PROMPT", "max_output_tokens": 99, "timeout": 7, "temperature": 0,
+        "model": "m1", "input": "PROMPT", "max_output_tokens": 99, "timeout": 7,
+        "temperature": 0, "store": False,
     }
 
 
@@ -79,6 +80,19 @@ def test_temperature_none_is_omitted():
     fr = _FakeResponses(response=_FakeResponse("ok"))
     _client(fr, temperature=None).complete("p")
     assert "temperature" not in fr.last_kwargs  # None이면 파라미터 생략
+
+
+# ── store=False (OpenAI 측 미저장, stateless) ─────────────────────────────────
+def test_store_false_is_passed_by_default():
+    fr = _FakeResponses(response=_FakeResponse("ok"))
+    _client(fr).complete("p")
+    assert fr.last_kwargs["store"] is False  # 기본 stateless
+
+
+def test_store_override():
+    fr = _FakeResponses(response=_FakeResponse("ok"))
+    _client(fr, store=True).complete("p")
+    assert fr.last_kwargs["store"] is True  # 필요 시 override 가능
 
 
 # ── 3. text 추출(strip) ───────────────────────────────────────────────────────
@@ -113,6 +127,20 @@ def test_sdk_errors_convert_to_llm_call_error(exc):
     assert client.last_usage is None  # 실패 시 usage 초기화
 
 
+def test_error_chain_is_broken_no_raw_cause():
+    # raise ... from None → __cause__에 원본 OpenAIError가 남지 않는다(logger.exception raw 노출 방지)
+    leak = "sk-proj-SECRET body=RAW_RESPONSE_BODY"
+    fr = _FakeResponses(raise_exc=openai.OpenAIError(leak))
+    with pytest.raises(LlmCallError) as ei:
+        _client(fr).complete("p")
+    assert ei.value.__cause__ is None                     # 체인 끊김
+    assert ei.value.__suppress_context__ is True          # from None 표식
+    # 전체 traceback chain 어디에도 raw가 없다(간접 재확인)
+    import traceback
+    tb = "".join(traceback.format_exception(type(ei.value), ei.value, ei.value.__traceback__))
+    assert "RAW_RESPONSE_BODY" not in tb and "sk-proj-SECRET" not in tb
+
+
 # ── 6. 예외 메시지에 secret/prompt/raw response 미포함 ────────────────────────
 def test_error_message_has_no_secret_or_prompt():
     leak = "sk-proj-SECRET123 prompt=RAW_PROMPT_TEXT body=RAW_RESPONSE"
@@ -140,6 +168,27 @@ def test_last_usage_none_when_absent():
     assert client.last_usage is None
 
 
+def test_last_usage_none_on_empty_output_even_with_usage():
+    # usage는 있지만 output_text가 빈 실패 → last_usage는 None(진입 시 리셋, text 성공 후에만 저장)
+    fr = _FakeResponses(response=_FakeResponse("", usage=_FakeUsage(1, 2, 3)))
+    client = _client(fr)
+    with pytest.raises(LlmCallError):
+        client.complete("p")
+    assert client.last_usage is None
+
+
+def test_last_usage_not_carried_over_after_failure():
+    # 성공 호출로 usage 저장 → 이후 실패 호출 뒤에는 이전 usage가 남지 않는다
+    ok = _FakeResponses(response=_FakeResponse("ok", usage=_FakeUsage(5, 6, 11)))
+    client = _client(ok)
+    client.complete("p")
+    assert client.last_usage == {"input_tokens": 5, "output_tokens": 6, "total_tokens": 11}
+    client._client = _FakeSDK(_FakeResponses(raise_exc=openai.OpenAIError("boom")))  # 다음 호출 실패
+    with pytest.raises(LlmCallError):
+        client.complete("p")
+    assert client.last_usage is None  # carryover 없음
+
+
 # ── 8. model 속성 노출 + fake 주입으로 네트워크 없음(전 테스트 공통) ──────────
 def test_model_attribute_exposed():
     client = _client(_FakeResponses(response=_FakeResponse("ok")), model="gpt-x")
@@ -153,3 +202,41 @@ def test_default_client_builds_without_network(monkeypatch):
         lambda: config.OpenAiSettings(api_key="sk-test", model="gpt-env"))
     assert default_openai_client().model == "gpt-env"          # .env 값 사용
     assert default_openai_client(model="gpt-x").model == "gpt-x"  # 명시 override 우선
+
+
+# ── retry/timeout 안전화: SDK client에 max_retries=0·timeout=20.0 전달 ─────────
+class _RecordingOpenAI:
+    """openai.OpenAI 생성 인자를 기록하는 대역(네트워크 없음)."""
+    last_kwargs: dict = {}
+
+    def __init__(self, **kwargs):
+        _RecordingOpenAI.last_kwargs = kwargs
+        self.responses = _FakeResponses(response=_FakeResponse("ok"))
+
+
+def _patch_sdk(monkeypatch):
+    monkeypatch.setattr(
+        "src.agents.technical.services.openai_llm_client.load_openai_settings",
+        lambda: config.OpenAiSettings(api_key="sk-test", model="gpt-env"))
+    monkeypatch.setattr("src.agents.technical.services.openai_llm_client.openai.OpenAI", _RecordingOpenAI)
+
+
+def test_default_client_disables_sdk_retries(monkeypatch):
+    _patch_sdk(monkeypatch)
+    default_openai_client()
+    assert _RecordingOpenAI.last_kwargs["max_retries"] == 0     # SDK 재시도 끔
+    assert _RecordingOpenAI.last_kwargs["timeout"] == 20.0      # 보수적 per-call timeout 기본
+
+
+def test_default_client_retry_timeout_override(monkeypatch):
+    _patch_sdk(monkeypatch)
+    default_openai_client(max_retries=1, timeout=10.0)
+    assert _RecordingOpenAI.last_kwargs["max_retries"] == 1
+    assert _RecordingOpenAI.last_kwargs["timeout"] == 10.0
+
+
+def test_default_client_store_flag_forwarded(monkeypatch):
+    _patch_sdk(monkeypatch)
+    client = default_openai_client()
+    client.complete("p")
+    assert client._client.responses.last_kwargs["store"] is False  # 기본 stateless
