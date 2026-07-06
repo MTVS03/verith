@@ -31,6 +31,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+try:  # altair 는 streamlit 번들 의존성 — 없거나 실패하면 close line fallback 으로 동작.
+    import altair as alt
+except ImportError:  # pragma: no cover - 환경 방어용
+    alt = None
+
 # 스탠드얼론 스크립트라 ai/ 를 sys.path 에 올려 `src...` import 가 되게 한다(smoke script 와 동일).
 _AI_ROOT = Path(__file__).resolve().parents[4]
 if str(_AI_ROOT) not in sys.path:
@@ -199,6 +204,68 @@ def _sr_rows(cd: ChartData) -> list[dict]:
         }
         for sr in cd.overlays.support_resistance
     ]
+
+
+def _ma_long_df(cd: ChartData) -> pd.DataFrame:
+    """MA overlay 를 long-form(date/window/value)으로 — altair color=window 용."""
+    rows = [
+        {"date": p.date, "window": f"MA{ma.window}", "value": p.value}
+        for ma in cd.overlays.moving_average
+        for p in ma.points
+    ]
+    return pd.DataFrame(rows)
+
+
+def _candlestick_chart(cd: ChartData) -> "alt.LayerChart":
+    """candles → altair candlestick(wick+body) + MA line overlay + SR horizontal rule.
+
+    OHLC·MA·SR 는 chart payload 값만 사용한다(재계산 없음). 상승봉=빨강, 하락봉=파랑(국내 관례).
+    필드 결손·빈 candles 는 예외를 던져 호출부에서 close line fallback 으로 넘어가게 한다.
+    """
+    if not cd.candles:
+        raise ValueError("candles 가 비어 candlestick 을 그릴 수 없습니다")
+    df = pd.DataFrame(
+        [
+            {"date": c.date, "open": c.open, "high": c.high, "low": c.low, "close": c.close}
+            for c in cd.candles
+        ]
+    )
+    df["is_up"] = df["close"] >= df["open"]
+    # 상승(빨강)/하락(파랑) 최소 색상만 — QA용 시각 구분(과도한 스타일링 없음).
+    up_down = alt.Color(
+        "is_up:N",
+        scale=alt.Scale(domain=[True, False], range=["#d62728", "#1f77b4"]),
+        legend=None,
+    )
+    base = alt.Chart(df).encode(x=alt.X("date:T", title="date"))
+    wick = base.mark_rule().encode(y=alt.Y("low:Q", title="price"), y2="high:Q", color=up_down)
+    body = base.mark_bar().encode(
+        y="open:Q", y2="close:Q", color=up_down,
+        tooltip=["date:T", "open:Q", "high:Q", "low:Q", "close:Q"],
+    )
+    layers = [wick, body]
+
+    ma_df = _ma_long_df(cd)
+    if not ma_df.empty:
+        layers.append(
+            alt.Chart(ma_df).mark_line().encode(
+                x="date:T", y="value:Q", color=alt.Color("window:N", title="MA"),
+                tooltip=["date:T", "window:N", "value:Q"],
+            )
+        )
+
+    sr_df = pd.DataFrame(
+        [{"type": sr.type, "price": sr.price} for sr in cd.overlays.support_resistance]
+    )
+    if not sr_df.empty:
+        layers.append(
+            alt.Chart(sr_df).mark_rule(strokeDash=[4, 4]).encode(
+                y="price:Q", color=alt.Color("type:N", title="S/R"),
+                tooltip=["type:N", "price:Q"],
+            )
+        )
+
+    return alt.layer(*layers).resolve_scale(color="independent").properties(height=420)
 
 
 def _rsi_df(cd: ChartData) -> pd.DataFrame:
@@ -422,7 +489,40 @@ def _render_agent_summary_section(
         return None
 
     _render_summary_metrics(output)
+    _render_technical_signals_table(output)
     return output
+
+
+def _render_technical_signals_table(output: TechnicalAgentOutput) -> None:
+    """5. technical_signals 요약 표(§5 하단). production 계산값을 그대로 표시(재계산 없음).
+
+    chart 가 비어도(data_limited) 5지표 계산 여부를 여기서 확인할 수 있게 §5 에 둔다.
+    value=None 은 0 으로 바꾸지 않고 "—" 로 표시한다(honest scoping).
+    """
+    st.markdown("**technical_signals** (5지표 계산 결과 — production 계산값 그대로)")
+    signals = output.technical_signals
+    if not signals:
+        st.caption("technical_signals 없음 (regime_unavailable / data_limited 등)")
+        return
+    rows = [
+        {
+            "indicator": s.indicator.value,
+            "signal": s.signal.value,
+            "value": "—" if s.value is None else s.value,
+            "weight": s.weight,
+            "detail_source": s.detail_source.value,
+            "detail": s.detail,
+        }
+        for s in signals
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    present = {s.indicator.value for s in signals}
+    expected = [indicator.value for indicator in IndicatorType]  # 정본 enum 순서 그대로
+    missing = [e for e in expected if e not in present]
+    if missing:
+        st.caption(f"포함 지표: {sorted(present)} · 누락: {missing}")
+    else:
+        st.caption(f"{len(expected)}지표({'·'.join(expected)}) 모두 포함")
 
 
 def _render_summary_metrics(output: TechnicalAgentOutput) -> None:
@@ -447,6 +547,26 @@ def _render_summary_metrics(output: TechnicalAgentOutput) -> None:
     st.write(output.interpretation.text)
 
 
+def _render_price_chart(cd: ChartData, view_mode: str) -> None:
+    """Candlestick(altair) 우선, 불가/실패/사용자가 Close line 선택 시 close line fallback.
+
+    KIS 재조회·OHLC 재계산 없이 chart payload 의 candles·MA overlay 만 사용한다.
+    """
+    if view_mode == "Candlestick":
+        if alt is None:
+            st.warning("Candlestick view is unavailable. Showing close line fallback.")
+        else:
+            try:
+                st.altair_chart(_candlestick_chart(cd), use_container_width=True)
+                return
+            except Exception as exc:  # noqa: BLE001 - fallback + 원인은 expander 로 노출(숨기지 않음)
+                st.warning("Candlestick view is unavailable. Showing close line fallback.")
+                with st.expander("candlestick 렌더 오류 상세"):
+                    st.exception(exc)
+    # Close line fallback (close + MA line)
+    st.line_chart(_price_ma_df(cd))
+
+
 def _render_chart_section(output: TechnicalAgentOutput) -> tuple[str, ChartPayload] | None:
     """6~9. 기간 선택 + Price/MA + Volume/RSI + Annotation. (period_key, payload) 반환."""
     if not output.charts:
@@ -466,12 +586,18 @@ def _render_chart_section(output: TechnicalAgentOutput) -> tuple[str, ChartPaylo
         f"annotations={len(cd.annotations)}"
     )
 
-    # 7. Price / Moving Average Chart
+    # 7. Price / Moving Average Chart (Candlestick 기본, Close line fallback)
     st.header("7. Price / Moving Average Chart")
-    st.line_chart(_price_ma_df(cd))
+    view_mode = st.radio(
+        "Price chart view", ["Candlestick", "Close line"], horizontal=True, key="price_view_mode",
+    )
+    _render_price_chart(cd, view_mode)
     sr_rows = _sr_rows(cd)
     if sr_rows:
-        st.markdown("**support / resistance** (수평선 근사는 표로 확인)")
+        st.markdown(
+            "**support / resistance** — 표로 확인"
+            + (" (candlestick view 에서는 점선 수평선으로 근사 표시)" if view_mode == "Candlestick" else "")
+        )
         st.dataframe(pd.DataFrame(sr_rows), use_container_width=True, hide_index=True)
     else:
         st.caption("support_resistance 없음")
@@ -483,6 +609,16 @@ def _render_chart_section(output: TechnicalAgentOutput) -> tuple[str, ChartPaylo
     st.bar_chart(vol_df[["volume"]])
     st.markdown("**avg_volume** (line)")
     st.line_chart(vol_df[["avg_volume"]])
+    spikes = [b for b in cd.subcharts.volume.bars if b.is_spike]
+    st.caption(f"volume spike(is_spike=True): {len(spikes)}건")
+    if spikes:
+        with st.expander("volume spike 상세"):
+            st.dataframe(
+                pd.DataFrame(
+                    [{"date": b.date, "volume": b.volume, "avg_volume": b.avg_volume} for b in spikes]
+                ),
+                use_container_width=True, hide_index=True,
+            )
     st.markdown("**RSI** (+ overbought / oversold 기준선)")
     st.line_chart(_rsi_df(cd))
 

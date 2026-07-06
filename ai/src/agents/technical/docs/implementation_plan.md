@@ -210,9 +210,11 @@ src/ai/
 - 데이터: **real KIS**(`services/kis_client.fetch_multi_timeframe_ohlcv`) + **fake LLM**(payload-aware, 검증 ③ 우회 없음).
 - 진입점: 공식 `agent.run_technical_agent()` 만 호출(노드 직접 호출·production 로직 수정 없음).
 - KIS 이중 호출 회피: raw D/W/M 를 먼저 조회해 `st.session_state` 에 담고, agent 실행 시 injected fetcher 로 같은 데이터를 재사용한다. **이 session_state 는 production cache(Redis/`cache_service`)가 아니라 수동 QA용 임시 상태다.**
-- 렌더링: 기본 Streamlit 차트(line/bar) 중심. plotly·candlestick 은 이번 범위 밖.
+- 렌더링: `chart_data.candles` 를 **candlestick(altair)** 로 QA 렌더링할 수 있고, MA line 을 그 위에 overlay 한다. altair 불가·candles 결손 시 **close line fallback** 을 유지한다. **plotly 는 사용하지 않는다**(altair 는 streamlit 번들 의존성). 상승봉=빨강·하락봉=파랑(국내 관례 최소 색상).
+- 5지표 확인: `moving_average / rsi / volume / support_resistance / pattern` 계산 결과를 화면에서 확인한다 — MA/RSI/volume/SR 는 chart 구간에서, pattern 포함 여부는 §5 의 `technical_signals` 요약 표에서 본다. **candlestick 은 QA용 렌더링일 뿐, production 계산은 `chart_builder` 결과를 그대로 사용한다**(lab 은 재계산하지 않음).
+- support/resistance 는 표를 항상 유지하고, candlestick 에서는 점선 수평선으로 근사 overlay 한다. **annotation marker(캔들 위 마커) overlay 는 future work** 다.
 - 저장: 디스크 미기록. `st.download_button` 으로 output JSON 만 내려받는다. secret 값은 화면에 절대 표시하지 않고 존재 여부만 OK/MISSING.
-- **pytest/CI 에 포함하지 않는다**(real KIS env 필요). streamlit 은 dev dependency.
+- **pytest/CI 에 포함하지 않는다**(real KIS env 필요). **streamlit 은 dev dependency** 이고, **altair 는 streamlit 설치로 사용 가능한 전이(bundled) 의존성**이다 — altair import 가 가능하면 candlestick QA 렌더링을, 불가하면 close line fallback 을 쓴다. **이번 브랜치에서는 altair 를 `pyproject.toml` 에 직접 추가하지 않는다.**
 
 실행:
 
