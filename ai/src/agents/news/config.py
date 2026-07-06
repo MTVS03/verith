@@ -163,6 +163,23 @@ IMPORTANCE_PUBLISHER_WEIGHTS: dict[str, float] = {
 # 테이블에 없는 언론사 / publisher=None 의 기본 가중치(누락돼도 계산이 죽지 않게 방어) — 튜닝 대상.
 IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT: float = 0.5
 
+# ---------------------------------------------------------------------------
+# 지식그래프 조립 설정 — TASK 07. 그래프 빌더는 "이번 배치 델타(GraphNode·GraphRelationship)"만
+# 조립하고 실제 Neo4j MERGE/저장은 backend(TASK 08)가 한다(절대규칙 1). 라벨·관계 타입 문자열은
+# 계약이므로 schemas/graph.py 의 Enum(NodeLabel·RelType)에 두고 config 에는 정책값(토글·키 방식)만 둔다.
+# ---------------------------------------------------------------------------
+# 3차·보류 관계 토글(pipeline_spec §12). 기본 비활성 — 근거 있는 매핑 규칙이 확정되면 켠다.
+#  - BELONGS_TO(Company→Sector): 회사↔산업 매핑이 추출에 없어(둘 다 평면 리스트) 전조합은 환각/과결합
+#    (CLAUDE.md §2-5). 매핑 규칙 확정 전까지 미생성.
+#  - RELATED_TO(Company→Company): "같은 이벤트 공유에서 파생"이라 별도 규칙 필요(pipeline_spec §12, 3차).
+GRAPH_ENABLE_BELONGS_TO: bool = False   # (Company)-[:BELONGS_TO]->(Sector) — 3차·보류(회사↔산업 매핑 부재)
+GRAPH_ENABLE_RELATED_TO: bool = False   # (Company)-[:RELATED_TO]->(Company) — 3차·보류(공유이벤트 파생 규칙 미정)
+
+# NewsRef 참조 키 방식. 그래프 빌드 시점엔 news_id(=Article.id)가 아직 없어 url 로 참조하고,
+# backend(TASK 08)가 저장 시 url upsert 로 얻은 news_id 로 해소한다(SCHEMA_SPEC §3). 문자열 모드로
+# 두어 향후 다른 키(예: content hash)로 교체할 여지를 남긴다 — 현재 지원 값은 "url" 뿐.
+GRAPH_NEWSREF_KEY: str = "url"
+
 # 추출 지시 + 출력 스키마. 감성·영향도를 요청하지 않는다(§2-4). 본문/제목은 신뢰 불가 외부 입력이므로
 # 구획(delimiter)으로 감싸 '데이터'로만 취급하고, 구획 내부의 어떤 지시·명령·URL 요청도 따르지 않는다(§3.1-6).
 EXTRACT_SYSTEM_PROMPT: str = """당신은 한국어 경제 뉴스에서 구조화된 정보를 추출하는 도구다.
