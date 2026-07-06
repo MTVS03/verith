@@ -356,7 +356,18 @@
     {# ── [A] 검증 · 원본 대조 (게이트2) ── #}
     <section class="card" id="verify">
       <h2>검증 · 원본 대조</h2>
-      <div class="cap">신호가 원본 데이터와 정합한지 코드로 대조(게이트2)</div>
+      <div class="cap">입력 검증(게이트1) · 신호가 원본 데이터와 정합한지 코드로 대조(게이트2)</div>
+      {% if gate1 %}
+      {% if gate1.passed %}
+        <span class="badge pass">✓ 입력 검증 통과 (게이트1)</span>
+      {% else %}
+        <span class="badge fail">✗ 입력 검증 실패 (게이트1)</span>
+      {% endif %}
+      <ul class="checks">
+        {% for c in gate1.checks %}<li>{{ c }}</li>{% endfor %}
+        {% for f in gate1.failures %}<li class="bad">{{ f }}</li>{% endfor %}
+      </ul>
+      {% endif %}
       {% if gate2.passed %}
         <span class="badge pass">✓ 검증 통과</span>
       {% else %}

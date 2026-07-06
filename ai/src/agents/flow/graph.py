@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from . import config
 from .core.kis_client import fetch_foreign_ownership, fetch_supply_demand
 from .core.signals import compute_signals
+from .core.verify_input import verify_input
 from .core.verify_interpretation import verify_interpretation
 from .core.verify_rules import verify_signals
 from .nodes.explain import explain
@@ -34,6 +35,15 @@ def _meta(state: SupplyDemandState) -> dict:
 
 
 # ── 노드 ──────────────────────────────────────────────────
+def validate_node(state: SupplyDemandState) -> dict:
+    """게이트1 — 입력 검증 + base_date 산출. 통과 시 판정·기준일을 상태에 싣고,
+    실패 시 예외로 멈춘다(게이트2·3과 달리 후퇴할 리포트 자체가 없다)."""
+    gate1, base_date = verify_input(state.input, state.base_date)
+    if not gate1.passed:
+        raise ValueError("게이트1 실패: " + " / ".join(gate1.failures))
+    return {"gate1": gate1, "base_date": base_date}
+
+
 def collect_node(state: SupplyDemandState) -> dict:
     """수집 + 계산 + 게이트2. df·ownership 은 이 함수 지역변수로만 존재(밖으로 안 나감).
 
@@ -47,14 +57,18 @@ def collect_node(state: SupplyDemandState) -> dict:
         # 붙는 사고를 구조로 차단. 종목명→티커 해석은 게이트1(조각3) 소관.
         raise ValueError("ticker 가 없습니다 — 호출부가 6자리 종목코드를 지정해야 합니다.")
     df, market = fetch_supply_demand(state.base_date, ticker)  # 원재료 — 지역 한정
+    # 확정 base_date 는 응답에서 나온다: 후보일이 휴장일이어도 KIS 가 마지막
+    # 거래일로 클램프해 주므로(실측), 마지막 행 날짜가 실제 확정 거래일이다.
+    confirmed = df.index[-1].date()
     ownership = (
-        fetch_foreign_ownership(state.base_date, ticker)
+        fetch_foreign_ownership(confirmed, ticker)   # 절단 기준도 확정일
         if config.ENABLE_ADVANCED else None
     )
     signals = compute_signals(df, ownership)
     gate2 = verify_signals(df, signals, ownership)
     # market 은 표시 전용 원본 문자열(숫자 아님) — 게이트2 대상이 아니다.
-    return {"signals": signals, "gate2": gate2, "market": market}
+    return {"signals": signals, "gate2": gate2, "market": market,
+            "base_date": confirmed}
 
 
 def explain_node(state: SupplyDemandState) -> dict:
@@ -77,7 +91,8 @@ def render_node(state: SupplyDemandState) -> dict:
     gate3 통과 시에만 interpretation을 싣고 아니면 None(placeholder). 가공 없음."""
     passed3 = state.gate3 is not None and state.gate3.passed
     interpretation = state.interpretation if passed3 else None
-    html = build_report(state.signals, state.gate2, _meta(state), interpretation)
+    html = build_report(state.signals, state.gate2, _meta(state), interpretation,
+                        gate1=state.gate1)
     return {"html": html}
 
 
@@ -103,12 +118,14 @@ def route_after_gate3(state: SupplyDemandState) -> str:
 def build_graph():
     """노드·엣지를 엮어 컴파일된 그래프를 반환한다."""
     g = StateGraph(SupplyDemandState)
+    g.add_node("validate", validate_node)
     g.add_node("collect", collect_node)
     g.add_node("explain", explain_node)
     g.add_node("verify_explanation", gate3_node)
     g.add_node("render", render_node)
 
-    g.add_edge(START, "collect")
+    g.add_edge(START, "validate")
+    g.add_edge("validate", "collect")
     g.add_conditional_edges(
         "collect", route_after_collect,
         {"explain": "explain", "render": "render"},
