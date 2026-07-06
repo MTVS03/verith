@@ -62,6 +62,7 @@ from ..schemas.ohlcv import OHLCV
 from ..services.cache_service import OhlcvCache, as_of_identity
 from ..services.kis_client import (
     IntradayFetchResult,
+    KisApiError,
     fetch_minute_ohlcv,
     fetch_multi_timeframe_ohlcv,
     normalize_end_date,
@@ -514,9 +515,11 @@ def _collect_ohlcv(
 
     cache=None이면 캐시 없이 `run_data_collect` 그대로(기존 동작). 캐시가 있으면:
       1. D/W/M **모두 fresh** → KIS 없이 캐시 사용(used_stale=False)
-      2. 아니면 KIS(`run_data_collect`) → 성공 시 3종 write 후 사용
-      3. KIS 실패 → D/W/M **모두 stale**(fresh 포함) 있으면 stale 사용(used_stale=True),
-         하나라도 없으면 예외 전파(기존 KIS 실패 흐름 유지)
+      2. 아니면 KIS(`run_data_collect`) → 성공 시 3종 write 후 사용(source="KIS")
+      3. KIS 통신 실패(**`KisApiError`만**) → **per-timeframe stale 재구성**:
+         D는 fresh/stale 중 있어야 하고(없으면 예외 전파), W/M은 있으면 쓰고 없으면 `[]`
+         (downstream이 unavailable/data_limited로 처리). 하나라도 stale이면 used_stale=True.
+    **envelope 오류·잘못된 as_of·OHLCV/타입/프로그래밍 오류는 stale로 덮지 않고 전파한다(fail-fast).**
     Redis 장애는 cache_service가 miss/no-op으로 흡수하므로 여기서 전파되지 않는다.
     """
     if cache is None:
@@ -524,33 +527,55 @@ def _collect_ohlcv(
     now = datetime.now(timezone.utc)
     as_of_id = as_of_identity(normalize_end_date(as_of))
 
-    fresh = _cache_collect(cache, ticker, as_of_id, now, statuses=("fresh",))
+    fresh = _cache_collect_all_fresh(cache, ticker, as_of_id, now)
     if fresh is not None:
         return fresh, False
     try:
         data = run_data_collect(ticker, as_of=as_of, fetcher=fetcher)
-    except Exception:
-        stale = _cache_collect(cache, ticker, as_of_id, now, statuses=("fresh", "stale"))
-        if stale is not None:
-            return stale, True  # KIS 실패 + stale 있음 → stale 폴백
-        raise  # stale 불완전 → 기존 KIS 실패 전파
+    except KisApiError:  # 복구 가능한 KIS 통신/조회 실패만 stale 폴백 허용
+        recon = _stale_reconstruct(cache, ticker, as_of_id, now)
+        if recon is not None:
+            return recon  # (dict, used_stale)
+        raise  # D stale/fresh 없음 → 재구성 불가 → 기존 KIS 실패 전파
     for tf in _DWM:
         cache.set(ticker, tf, as_of_id, list(data[tf]), now=now)
     return {tf: list(data[tf]) for tf in _DWM}, False
 
 
-def _cache_collect(
-    cache: OhlcvCache, ticker: str, as_of_id: str, now: datetime, *, statuses: tuple[str, ...],
+def _cache_collect_all_fresh(
+    cache: OhlcvCache, ticker: str, as_of_id: str, now: datetime,
 ) -> dict[str, Sequence[OHLCV]] | None:
-    """D/W/M 3종을 **모두** 지정 status로 캐시에서 얻으면 dict, 하나라도 없으면 None(부분 사용 금지)."""
+    """D/W/M **모두** fresh면 dict, 하나라도 아니면 None(→ KIS 조회)."""
     out: dict[str, Sequence[OHLCV]] = {}
     for tf in _DWM:
         look = cache.get(ticker, tf, as_of_id, now=now)
-        if look.status in statuses and look.candles is not None:
+        if look.status == "fresh" and look.candles is not None:
             out[tf] = look.candles
         else:
             return None
     return out
+
+
+def _stale_reconstruct(
+    cache: OhlcvCache, ticker: str, as_of_id: str, now: datetime,
+) -> tuple[dict[str, Sequence[OHLCV]], bool] | None:
+    """KIS 실패 후 per-timeframe 재구성. **D 필수**(fresh/stale 없으면 None→전파), W/M은 없으면 `[]`.
+
+    tf별로 fresh 우선, 없으면 stale 사용. stale을 하나라도 쓰면 used_stale=True.
+    """
+    out: dict[str, Sequence[OHLCV]] = {}
+    used_stale = False
+    for tf in _DWM:
+        look = cache.get(ticker, tf, as_of_id, now=now)
+        if look.status in ("fresh", "stale") and look.candles is not None:
+            out[tf] = look.candles
+            if look.status == "stale":
+                used_stale = True
+        elif tf == "D":
+            return None      # 일봉이 없으면 분석 불가 → 원 KIS 예외 전파
+        else:
+            out[tf] = []     # W/M 없음 → 빈 리스트(regime unavailable·chart 빈 5y로 안전 처리)
+    return out, used_stale
 
 
 def _unavailable_output(
