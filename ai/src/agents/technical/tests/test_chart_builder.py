@@ -284,3 +284,79 @@ def test_dedup_same_date_same_kind_merged():
     anns = [_mk("golden_cross", "2025-01-02"), _mk("golden_cross", "2025-01-02")]
     date_to_index = {"2025-01-02": 100}
     assert len(_finalize_annotations(anns, 5, date_to_index)) == 1
+
+
+# ── rolling support/resistance (feat/technical-chart-patterns) ──────────────────
+def _d(i: int) -> str:
+    """series 기본 시작일(2025-01-01, step 1일) 기준 index i의 날짜."""
+    return (date(2025, 1, 1) + timedelta(days=i)).isoformat()
+
+
+def _sr_dates(daily, kind: str) -> list[str]:
+    payloads = build_chart_payloads(daily, [], [])
+    anns = cdata(payload_of(payloads, ChartPeriod.ONE_YEAR))["annotations"]
+    return [a["date"] for a in anns if a["kind"] == kind]
+
+
+def test_rolling_support_touch_on_past_bar():
+    # bar 25에서만 support(100) 근접 close, 이후 봉은 멀어짐 → 최신 봉이 아닌 과거 봉에 생성
+    closes = [105.0] * 25 + [100.5] + [105.0] * 20
+    daily = series(closes, highs=[110.0] * 46, lows=[100.0] * 46)
+    dates = _sr_dates(daily, "support_touch")
+    assert _d(25) in dates       # 과거 봉(25)에 support_touch
+    assert _d(45) not in dates   # 최신 봉(45)은 touch 아님
+
+
+def test_rolling_resistance_touch_on_past_bar():
+    closes = [105.0] * 25 + [109.5] + [105.0] * 20
+    daily = series(closes, highs=[110.0] * 46, lows=[100.0] * 46)
+    dates = _sr_dates(daily, "resistance_touch")
+    assert _d(25) in dates
+    assert _d(45) not in dates
+
+
+def test_rolling_support_touch_no_lookahead():
+    # bar 20 저점(100) 단독 → touch_count 1 < 2 이라 생성 안 됨(미래 반복을 미리 보지 않음).
+    # bar 25에서 저점이 반복돼 창 안에 2회가 되면 그때 생성 → annotation은 bar 25에만.
+    lows = [105.0] * 46
+    closes = [108.0] * 46
+    lows[20], closes[20] = 100.0, 100.5   # 1차 저점(단독)
+    lows[25], closes[25] = 100.0, 100.5   # 2차 저점(반복)
+    dates = _sr_dates(series(closes, highs=[112.0] * 46, lows=lows), "support_touch")
+    assert _d(20) not in dates   # 단독 저점 시점엔 생성 안 됨(look-ahead 없음)
+    assert _d(25) in dates       # 반복이 창에 들어온 시점에 생성
+
+
+def test_rolling_support_touch_skips_initial_lookback():
+    # 전 봉 flat=support. 창(20봉) 못 채우는 초기 구간(index<19)엔 생성 안 됨.
+    daily = series([100.0] * 30, highs=[100.0] * 30, lows=[100.0] * 30)
+    dates = _sr_dates(daily, "support_touch")
+    assert dates                             # 생성은 됨
+    assert all(d >= _d(19) for d in dates)   # 모두 index>=19
+    assert _d(0) not in dates and _d(18) not in dates
+
+
+def test_rolling_latest_bar_touch_preserved():
+    # 기존 최신-only 동작 보존: 최신 봉이 support를 touch하면 여전히 생성
+    closes = [105.0] * 24 + [100.5]
+    daily = series(closes, highs=[110.0] * 25, lows=[100.0] * 25)
+    assert _d(24) in _sr_dates(daily, "support_touch")   # 최신 봉(24)
+
+
+def test_rolling_support_touch_dedup_bounds_count():
+    # 60봉 flat=support → 매 봉 touch 후보지만 dedup(1y=10봉)으로 과도하지 않게 정리
+    daily = series([100.0] * 60, highs=[100.0] * 60, lows=[100.0] * 60)
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    sup = [a for a in anns if a["kind"] == "support_touch"]
+    assert 1 <= len(sup) <= 8    # 41개 후보(19..59)가 dedup 10봉으로 ~5개 수준
+
+
+def test_rolling_sr_schema_and_importance_unchanged():
+    daily = series([100.0] * 60, highs=[100.0] * 60, lows=[100.0] * 60)
+    anns = cdata(payload_of(build_chart_payloads(daily, [], []), ChartPeriod.ONE_YEAR))["annotations"]
+    sr = [a for a in anns if a["kind"] in ("support_touch", "resistance_touch")]
+    assert sr
+    for a in sr:
+        assert set(a) >= {"id", "kind", "date", "price", "label", "importance", "source", "meta"}
+        assert a["importance"] == "medium"   # importance 미변경(retier는 별도 커밋)
+        assert a["source"] == "code"

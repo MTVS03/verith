@@ -140,7 +140,7 @@ def _build_chart_data(period: ChartPeriod, candle_unit: str, source: Sequence[OH
     annotations = (
         _cross_annotations(source, mas, start)
         + _volume_spike_annotations(source, vol_avg, tv_avg, start)
-        + _sr_touch_annotations(source)
+        + _sr_touch_annotations(source, start)
         + _rsi_annotations(source, rsis, start)
         + _box_range_annotation(source)
     )
@@ -165,9 +165,11 @@ def _ma_overlays(source: Sequence[OHLCV], mas: dict, start: int) -> list[dict]:
     return overlays
 
 
-def _sr_levels(source: Sequence[OHLCV]) -> dict | None:
-    """최근 SUPPORT_LOOKBACK_DAYS 창의 지지/저항 레벨과 터치 횟수. overlay·touch annotation 공용."""
-    window = list(source[-SUPPORT_LOOKBACK_DAYS:])
+def _sr_levels_at(source: Sequence[OHLCV], end_i: int) -> dict | None:
+    """`source[end_i]` 기준 **직전 SUPPORT_LOOKBACK_DAYS 창**(현재봉 포함, look-ahead 없음)의
+    지지/저항 레벨과 터치 횟수. 미래 봉(end_i 이후)은 절대 보지 않는다."""
+    lo_i = max(0, end_i - SUPPORT_LOOKBACK_DAYS + 1)
+    window = list(source[lo_i:end_i + 1])
     if not window:
         return None
     lows = [float(b.low) for b in window]
@@ -181,6 +183,13 @@ def _sr_levels(source: Sequence[OHLCV]) -> dict | None:
         "from": window[0].date,
         "to": window[-1].date,
     }
+
+
+def _sr_levels(source: Sequence[OHLCV]) -> dict | None:
+    """최신 봉 기준 지지/저항 레벨(overlay 공용). `_sr_levels_at(source, len-1)`와 동일."""
+    if not source:
+        return None
+    return _sr_levels_at(source, len(source) - 1)
 
 
 def _sr_overlays(source: Sequence[OHLCV]) -> list[dict]:
@@ -260,24 +269,33 @@ def _volume_spike_annotations(source: Sequence[OHLCV], vol_avg: list, tv_avg: li
     return anns
 
 
-def _sr_touch_annotations(source: Sequence[OHLCV]) -> list[dict]:
-    """현재가가 지지/저항 레벨에 근접(±pct) **AND** 그 레벨 터치가 BOX_MIN_TOUCH_COUNT회 이상일 때만
-    생성한다(chart_annotation_spec §10.2·§10.3: 유사 가격대 2회 이상)."""
-    levels = _sr_levels(source)
-    if levels is None:
-        return []
-    support, resistance = levels["support"], levels["resistance"]
-    close = float(source[-1].close)
-    last_date = source[-1].date
+def _sr_touch_annotations(source: Sequence[OHLCV], start: int) -> list[dict]:
+    """visible range의 **각 봉을 기준으로 rolling** 지지/저항 근접을 생성한다.
+
+    봉 i에서: 직전 SUPPORT_LOOKBACK_DAYS 창(현재봉 포함, `_sr_levels_at` — look-ahead 없음)의
+    지지/저항 레벨을 구하고, close[i]가 그 레벨에 근접(±pct) **AND** 창 내 터치가
+    BOX_MIN_TOUCH_COUNT회 이상이면 해당 봉 날짜에 annotation을 만든다
+    (chart_annotation_spec §10.2·§10.3: 유사 가격대 2회 이상). 최신 봉 하나만 보던 기존 동작을
+    visible 전 구간으로 확장한 것으로, 최신 봉에 대한 판정 결과는 그대로 유지된다.
+    창을 채우지 못하는 초기 구간(i < SUPPORT_LOOKBACK_DAYS-1)은 skip한다. 중복은 dedup이 정리한다.
+    """
     anns: list[dict] = []
-    if (support and abs(close - support) / support <= NEAR_SUPPORT_THRESHOLD_PCT
-            and levels["support_touch"] >= BOX_MIN_TOUCH_COUNT):
-        anns.append(_ann("support_touch", last_date, support, "medium",
-                         {"touch_count": levels["support_touch"]}))
-    if (resistance and abs(close - resistance) / resistance <= NEAR_RESISTANCE_THRESHOLD_PCT
-            and levels["resistance_touch"] >= BOX_MIN_TOUCH_COUNT):
-        anns.append(_ann("resistance_touch", last_date, resistance, "medium",
-                         {"touch_count": levels["resistance_touch"]}))
+    first = max(start, SUPPORT_LOOKBACK_DAYS - 1)  # 초기 lookback 부족 구간 skip
+    for i in range(first, len(source)):
+        levels = _sr_levels_at(source, i)
+        if levels is None:
+            continue
+        support, resistance = levels["support"], levels["resistance"]
+        close = float(source[i].close)
+        bar_date = source[i].date
+        if (support and abs(close - support) / support <= NEAR_SUPPORT_THRESHOLD_PCT
+                and levels["support_touch"] >= BOX_MIN_TOUCH_COUNT):
+            anns.append(_ann("support_touch", bar_date, support, "medium",
+                             {"touch_count": levels["support_touch"]}))
+        if (resistance and abs(close - resistance) / resistance <= NEAR_RESISTANCE_THRESHOLD_PCT
+                and levels["resistance_touch"] >= BOX_MIN_TOUCH_COUNT):
+            anns.append(_ann("resistance_touch", bar_date, resistance, "medium",
+                             {"touch_count": levels["resistance_touch"]}))
     return anns
 
 
