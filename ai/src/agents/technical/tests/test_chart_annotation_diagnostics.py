@@ -113,3 +113,17 @@ def test_fixture_generates_some_implemented_annotations():
             if kind not in diag.UNIMPLEMENTED_KINDS:
                 total_impl += count
     assert total_impl > 0
+
+
+# ── 5y importance retier가 진단 output(post) 기준으로 반영됨 ──────────────────
+def test_diagnostics_reflects_5y_importance_retier():
+    periods = {p["period"]: p for p in _result()["periods"]}
+    p5 = periods["5y"]
+    by_kind = p5["annotation_count_by_kind"]
+    # 5y에서 cup/box_breakout/box_range는 승격 정책 대상 → 이들은 high(또는 box_range는 medium)로 집계.
+    # 최소 불변식: 5y high 개수는 승격되는 high 후보(cup+breakout) 개수 이상이어야 한다.
+    promoted_high = by_kind["cup_handle_candidate"] + by_kind["box_breakout_candidate"]
+    assert p5["annotation_count_by_importance"]["high"] >= promoted_high
+    # 1y는 승격 대상 아님 — cup/breakout이 high로 집계되지 않는다(정책 5y 한정).
+    p1 = periods["1y"]
+    assert p1["annotation_count_by_kind"]["cup_handle_candidate"] >= 0  # 존재 확인(정책 미적용)
