@@ -86,8 +86,8 @@ def run(
     # 노드 1·2 (LLM 전처리). 최종 output엔 싣지 않지만, focus는 노드 10 설명 강조 힌트로 쓴다(H1).
     _normalized, focus = _preprocess(llm_client, agent_input)
 
-    # 노드 3 데이터수집. fetcher/envelope 실패는 전파(삼키지 않음).
-    ohlcv = run_data_collect(agent_input.ticker, fetcher=fetcher)
+    # 노드 3 데이터수집. as_of를 KIS 조회 종료일로 스레딩(kis_mapping §8.2). 실패는 전파.
+    ohlcv = run_data_collect(agent_input.ticker, as_of=agent_input.as_of, fetcher=fetcher)
     daily, weekly, monthly = ohlcv["D"], ohlcv["W"], ohlcv["M"]
 
     # 일봉 빈 데이터 → 안전 착지(data_limited-B).

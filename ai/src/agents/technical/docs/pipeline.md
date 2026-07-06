@@ -48,6 +48,8 @@ regime 라벨도 confidence 점수도 전부 코드가 확정하고, 마지막 L
 
 **가장 중요한 원칙:** 10번 LLM은 regime·score·confidence·risk를 만들지 않는다. 코드가 확정한 라벨·수치를 문장으로 풀기만 한다. regime과 confidence가 코드에 있다는 것이 veriθ 신뢰성 설계의 핵심이다.
 
+> **데이터수집(노드 3)의 조회 기준일:** `data_collect`는 `as_of`를 KIS 조회 종료일(`end_date`)로 정규화해 fetcher에 넘긴다(D/W/M 동일 기준일). 생략 시 오늘 기준. 상세: `kis_mapping.md §8.2`.
+
 > **노드 어댑터 구현 규약(3~9번):** 각 노드는 `services`·`indicators`·`regime`·`synthesis`·`charts` 모듈을 호출하는 **얇은 wrapper**이며 계산 로직을 재구현하지 않는다. 모듈의 **로컬 dataclass/리스트를 그대로 반환**하고 최종 `contracts.*` 조립은 하지 않는다(계약 조립·전역 state는 supervisor 단계). `indicator_calculate`는 confidence·risk가 소비하는 최신 지표 스칼라 묶음(IndicatorBundle)을 만들고, `regime`·`signal_aggregate`·`chart_generate`는 OHLCV에서 지표를 각자 내부 재계산한다(self-contained). 상세: `implementation_plan.md §3`.
 
 ---

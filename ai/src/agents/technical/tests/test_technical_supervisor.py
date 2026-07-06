@@ -87,7 +87,7 @@ def _good_interp_response(daily, weekly, monthly) -> str:
 
 
 def _run(responses, *, fetcher=None, trace_id=None, agent_input=None):
-    fetcher = fetcher or (lambda t: {"D": DAILY, "W": WEEKLY, "M": MONTHLY})
+    fetcher = fetcher or (lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY})
     return sup.run(agent_input or _input(), llm_client=ScriptedLlm(responses),
                    fetcher=fetcher, trace_id=trace_id)
 
@@ -111,7 +111,7 @@ def test_sup02_trace_id_generated_when_absent():
 def test_sup03_query_not_passed_to_focus():
     client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
     sup.run(_input(query="LG엔솔 지금 사도 돼?"), llm_client=client,
-            fetcher=lambda t: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
+            fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
     normalize_prompt, focus_prompt = client.prompts[0], client.prompts[1]
     assert "지금 사도 돼" in normalize_prompt          # 원본 query는 노드 1에만
     assert "지금 사도 돼" not in focus_prompt           # 노드 2에는 전달 안 됨
@@ -183,7 +183,7 @@ def test_sup10_preprocess_call_exception_continues():
 
 # ── SUP-11·12·13: data/regime unavailable ───────────────────────────────────
 def test_sup11_empty_daily_data_limited():
-    out = _run([NORM_OK, FOCUS_OK], fetcher=lambda t: {"D": [], "W": WEEKLY, "M": MONTHLY})
+    out = _run([NORM_OK, FOCUS_OK], fetcher=lambda t, *, end_date=None: {"D": [], "W": WEEKLY, "M": MONTHLY})
     assert out.data_status == DataStatus.DATA_LIMITED
     assert out.signal is None
     assert out.risk is None
@@ -195,7 +195,7 @@ def test_sup11_empty_daily_data_limited():
 
 def test_sup12_regime_unavailable_skips_signal():
     short_daily = _series(40, day_stride=1, start="2023-01-02")  # < MIN_DAILY_BARS(60)
-    out = _run([NORM_OK, FOCUS_OK], fetcher=lambda t: {"D": short_daily, "W": WEEKLY, "M": MONTHLY})
+    out = _run([NORM_OK, FOCUS_OK], fetcher=lambda t, *, end_date=None: {"D": short_daily, "W": WEEKLY, "M": MONTHLY})
     assert out.data_status == DataStatus.REGIME_UNAVAILABLE
     assert out.signal is None
     assert out.risk is None
@@ -207,7 +207,7 @@ def test_sup13_wm_short_data_limited_but_analyzes():
     weekly_short = _series(5, day_stride=7, start="2025-01-06")   # < MIN_WEEKLY_BARS(12)
     monthly_short = _series(3, day_stride=28, start="2025-01-06")  # < MIN_MONTHLY_BARS(6)
     out = _run([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD],
-               fetcher=lambda t: {"D": DAILY, "W": weekly_short, "M": monthly_short})
+               fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": weekly_short, "M": monthly_short})
     assert out.data_status == DataStatus.DATA_LIMITED
     assert out.signal is not None            # 일봉 기준 분석 계속
     assert len(out.technical_signals) > 0
@@ -223,7 +223,7 @@ def test_sup14_technical_signal_value_none_allowed():
 
 # ── SUP-15: fetcher 예외는 전파 ──────────────────────────────────────────────
 def test_sup15_fetcher_exception_propagates():
-    def boom(_ticker):
+    def boom(_ticker, *, end_date=None):
         raise RuntimeError("KIS down")
     with pytest.raises(RuntimeError):
         _run([NORM_OK, FOCUS_OK], fetcher=boom)
@@ -298,10 +298,36 @@ def test_sup19_focus_hint_in_interpret_payload():
         ensure_ascii=False)
     client = ScriptedLlm([NORM_OK, focus_json, INTERP_BAD, INTERP_BAD])
     sup.run(_input(), llm_client=client,
-            fetcher=lambda t: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
+            fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
     interpret_prompt = client.prompts[2]
     assert "analysis_focus" in interpret_prompt
     assert "momentum" in interpret_prompt
+
+
+# ── DATE-08: as_of가 fetcher end_date로 스레딩되고 output.as_of와 일치 ───────
+def test_sup_as_of_threaded_to_fetcher_end_date():
+    seen = {}
+
+    def rec_fetcher(ticker, *, end_date=None):
+        seen["end_date"] = end_date
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    out = sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD]),
+                  fetcher=rec_fetcher, trace_id="t")
+    assert seen["end_date"] == date(2026, 6, 30)      # AS_OF 날짜가 fetcher로 전달
+    assert out.as_of.date() == seen["end_date"]        # output.as_of와 fetcher end_date 일치
+
+
+def test_sup_as_of_change_changes_end_date():
+    seen = []
+
+    def rec_fetcher(ticker, *, end_date=None):
+        seen.append(end_date)
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    for as_of in ("2026-06-30T14:30:00+09:00", "2025-01-15T09:00:00+09:00"):
+        sup.run(TechnicalAgentInput(ticker=TICKER, query="q", request_id="r", as_of=as_of),
+                llm_client=ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD]),
+                fetcher=rec_fetcher, trace_id="t")
+    assert seen == [date(2026, 6, 30), date(2025, 1, 15)]  # as_of 바뀌면 end_date도 바뀜
 
 
 # ── M1: REGEN_MAX_COUNT만큼만 재생성(하드코딩 아님) ─────────────────────────
@@ -309,6 +335,6 @@ def test_regen_count_matches_config():
     from src.agents.technical.config import REGEN_MAX_COUNT
     client = ScriptedLlm([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
     sup.run(_input(), llm_client=client,
-            fetcher=lambda t: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
+            fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}, trace_id="t")
     # normalize + focus + (1차 interpret + REGEN_MAX_COUNT 재생성)
     assert len(client.prompts) == 2 + (1 + REGEN_MAX_COUNT)

@@ -410,3 +410,60 @@ def test_to_price_accepts_normal():
 def test_parse_item_rejects_infinity_price():
     with pytest.raises(KisFieldError):
         kc.parse_kis_ohlcv_item({**SAMPLE_ITEM, "stck_hgpr": "Infinity"})
+
+
+# ── DATE-01~06: as_of/end_date 스레딩 (kis_mapping §8.2) ───────────────────────
+def test_date01_end_date_used_as_fid_input_date_2(monkeypatch):
+    rec = []
+    _patch(monkeypatch, _mock_market(["20250601"], recorder=rec))
+    kc.fetch_ohlcv("373220", "D", end_date="2025-06-01")
+    assert rec[0][1] == "20250601"  # 첫 청크 date_to(FID_INPUT_DATE_2) = end_date
+
+
+@pytest.mark.parametrize("end_date", [date(2025, 6, 1), datetime(2025, 6, 1, 14, 30)])
+def test_date02_end_date_date_and_datetime(monkeypatch, end_date):
+    rec = []
+    _patch(monkeypatch, _mock_market(["20250601"], recorder=rec))
+    kc.fetch_ohlcv("373220", "D", end_date=end_date)
+    assert rec[0][1] == "20250601"  # date/datetime 모두 date만 사용
+
+
+def test_date03_multi_same_end_date(monkeypatch):
+    seen = []
+
+    def fake(ticker, period, *, end_date=None, client=None):
+        seen.append((period, end_date))
+        return []
+    monkeypatch.setattr(kc, "fetch_ohlcv", fake)
+    kc.fetch_multi_timeframe_ohlcv("373220", end_date="2025-06-01")
+    assert {p for p, _ in seen} == {"D", "W", "M"}
+    assert {e for _, e in seen} == {date(2025, 6, 1)}  # D/W/M 모두 같은 end_date
+
+
+def test_date04_invalid_end_date_raises():
+    with pytest.raises(ValueError):
+        kc.normalize_end_date("2026/07/04")
+    with pytest.raises(ValueError):
+        kc.normalize_end_date(123)
+
+
+def test_date05_future_end_date_rejected():
+    future = date.today() + timedelta(days=10)
+    with pytest.raises(ValueError):
+        kc.normalize_end_date(future)
+
+
+def test_date05_today_and_none_ok():
+    assert kc.normalize_end_date(date.today()) == date.today()
+    assert kc.normalize_end_date(None) is None
+    # tz-aware '지금'은 미래로 오판되지 않는다
+    now_aware = datetime.now().astimezone()
+    assert kc.normalize_end_date(now_aware) == now_aware.date()
+
+
+def test_date06_omit_end_uses_today(monkeypatch):
+    rec = []
+    today = datetime.now().date()
+    _patch(monkeypatch, _mock_market([today.strftime("%Y%m%d")], recorder=rec))
+    kc.fetch_ohlcv("373220", "D")
+    assert rec[0][1] == today.strftime("%Y%m%d")  # 생략 시 오늘 기준
