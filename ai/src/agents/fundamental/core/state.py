@@ -25,6 +25,7 @@ class FundamentalAgentState(TypedDict, total=False):
     insights: dict[str, Any]
     ratios: dict[str, Any]
     evidence: list[Evidence]
+    consistency_notes: list[dict[str, Any]]
     evidence_graph: dict[str, Any]
     analyst_plan: dict[str, Any]
     retrieval_context: dict[str, Any]

@@ -7,7 +7,7 @@ from ..interpret.llm_interpreter import interpret
 from ..interpret.prompts import build_retry_prompt
 from ..ratios.scorer import confidence_from
 from ..verify.binding import EVIDENCE_UNBOUND_FLAG
-from ..verify.consistency import BALANCE_IDENTITY_FAILED_PREFIX
+from ..verify.consistency import is_consistency_flag
 from ..verify.stability import assess_verdict_stability
 from ..verify.verdict_guard import guard_llm_output
 from ..core.state import FundamentalAgentState, extend_unique
@@ -91,11 +91,12 @@ async def verify_node(state: FundamentalAgentState) -> dict[str, Any]:
         extend_unique(risk_flags, ["VERDICT_STABILITY_GUARDED"])
     verification_summary = {
         "binding_passed": EVIDENCE_UNBOUND_FLAG not in risk_flags,
-        "consistency_passed": not any(flag.startswith(BALANCE_IDENTITY_FAILED_PREFIX) for flag in risk_flags),
+        "consistency_passed": not any(is_consistency_flag(flag) for flag in risk_flags),
         "guard_passed": not llm_guard_violations,
         "verdict_stable": stability.verdict_stable,
         "outcome": stability.outcome,
         "reasons": stability.reasons,
+        "consistency_notes": state.get("consistency_notes", []),
         "regen_count": regen_count,
         "initial_provider": initial_provider,
         "initial_model": initial_model,
