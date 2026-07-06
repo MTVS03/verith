@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
+from ..config import INTRADAY_CONFIDENCE_ADJUSTMENT_CAP, INTRADAY_RISK_NOTE_MAX_COUNT
 from .ohlcv import NonNegativeNumber  # inf/nan·음수 불허 재사용(중복 정의 금지)
 
 _ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
@@ -146,7 +147,19 @@ class IntradayContext(_StrictModel):
     intraday_regime_hint: IntradayRegimeHint | None = None
     regime_alignment: RegimeAlignment | None = None
 
-    # 실제 적용된 보정값(감사용). v1은 미보정이라 0.0. cap(confidence ±0.05 등)은 Phase 2에서 적용.
-    confidence_adjustment: float = Field(default=0.0, allow_inf_nan=False)
-    signal_score_adjustment: float = Field(default=0.0, allow_inf_nan=False)
-    risk_notes: list[str] = Field(default_factory=list)
+    # 실제 적용된 보정값(감사용). 계약상 절대값은 INTRADAY_CONFIDENCE_ADJUSTMENT_CAP(±0.05) 이내여야 한다.
+    # v1 구현(intraday_adjustment)은 confidence만 aligned/counter에서 ±cap을 채우고 나머지는 0.0을 생성한다.
+    # signal_score_adjustment: v1 구현은 항상 0.0이지만 계약은 ±cap 범위를 열어 둔다(Phase 2 사용 대비 — B안).
+    confidence_adjustment: float = Field(
+        default=0.0,
+        ge=-INTRADAY_CONFIDENCE_ADJUSTMENT_CAP,
+        le=INTRADAY_CONFIDENCE_ADJUSTMENT_CAP,
+        allow_inf_nan=False,
+    )
+    signal_score_adjustment: float = Field(
+        default=0.0,
+        ge=-INTRADAY_CONFIDENCE_ADJUSTMENT_CAP,
+        le=INTRADAY_CONFIDENCE_ADJUSTMENT_CAP,
+        allow_inf_nan=False,
+    )
+    risk_notes: list[str] = Field(default_factory=list, max_length=INTRADAY_RISK_NOTE_MAX_COUNT)

@@ -10,12 +10,14 @@ from datetime import datetime
 
 import pytest
 
+from src.agents.technical import config
 from src.agents.technical.regime.multiframe import (
     _NEGATIVE_REGIMES,
     _POSITIVE_REGIMES,
 )
 from src.agents.technical.schemas.enums import Regime
 from src.agents.technical.schemas.intraday import IntradayContext
+from src.agents.technical.synthesis import intraday_alignment
 from src.agents.technical.synthesis.intraday_alignment import (
     _BEARISH_REGIMES,
     _BULLISH_REGIMES,
@@ -23,6 +25,16 @@ from src.agents.technical.synthesis.intraday_alignment import (
     classify_regime_alignment,
     infer_intraday_regime_hint,
 )
+
+
+def test_alignment_thresholds_come_from_config():
+    # 판정 임계값 정본은 config.py §14 — alignment 모듈이 그 값을 그대로 참조해야 한다(중앙화 회귀).
+    assert intraday_alignment.INTRADAY_VOLATILITY_RETURN_THRESHOLD is config.INTRADAY_VOLATILITY_RETURN_THRESHOLD
+    assert intraday_alignment.INTRADAY_VOLATILITY_RANGE_THRESHOLD is config.INTRADAY_VOLATILITY_RANGE_THRESHOLD
+    assert intraday_alignment.INTRADAY_DIRECTION_RETURN_THRESHOLD is config.INTRADAY_DIRECTION_RETURN_THRESHOLD
+    assert intraday_alignment.INTRADAY_HIGH_RANGE_POSITION_THRESHOLD is config.INTRADAY_HIGH_RANGE_POSITION_THRESHOLD
+    assert intraday_alignment.INTRADAY_LOW_RANGE_POSITION_THRESHOLD is config.INTRADAY_LOW_RANGE_POSITION_THRESHOLD
+    assert intraday_alignment.INTRADAY_DIRECTION_MIN_AGREEMENT == config.INTRADAY_DIRECTION_MIN_AGREEMENT
 
 AS_OF = datetime(2026, 7, 6, 14, 30, 0)
 

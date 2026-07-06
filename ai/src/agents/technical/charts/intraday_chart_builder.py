@@ -13,19 +13,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ..config import INTRADAY_SHORT_MA_WINDOW
 from ..schemas.contracts import ChartPayload
 from ..schemas.enums import ChartPeriod
 from ..schemas.intraday import IntradayCandle, IntradayChartData, IntradayPoint
-
-# 분봉 단기 MA(봉 수). 정식 config화(config.md)는 후속 커밋 — 지금은 builder-local 명명 상수.
-DEFAULT_INTRADAY_SHORT_MA_WINDOW = 5
 
 
 def build_intraday_chart_payload(
     candles: Sequence[IntradayCandle],
     *,
     previous_close: float | None = None,
-    short_ma_window: int = DEFAULT_INTRADAY_SHORT_MA_WINDOW,
+    short_ma_window: int = INTRADAY_SHORT_MA_WINDOW,
 ) -> ChartPayload:
     """`list[IntradayCandle]` → period="1d"/candle_unit="1min" ChartPayload.
 

@@ -346,6 +346,31 @@ if ticker not in BATTERY_TICKERS:
 
 종목 마스터를 DB로 공유하는 것은 MVP 범위가 아니다 — allowlist는 자주 바뀌지 않는 **설정값**이므로 config에 둔다. 팀 공통 종목 마스터가 필요해지면 그것은 이 에이전트의 `schema.md`가 아니라 팀 공통 스키마 영역에서 다룬다.
 
+## 12. 1D intraday(Beta) 판단 상수
+
+1D 장중 분봉의 흐름 힌트·정합·보정·페이징에 쓰는 판단 상수. 이전에는 계산 모듈(`charts/`·`synthesis/`·`services/kis_client.py`)에 흩어져 있었으나 **정본을 `config.py` §14로 중앙화**했다. 각 모듈은 이 값을 import해서 쓰고 하드코딩하지 않는다. **아직 실측 튜닝 전(Beta)이며, 후속 튜닝 대상**이다 — 값 변경 시 이 표와 `config.py` §14만 고치면 된다.
+
+| 상수 | 기본값 | 단위 | 의미 | 소비 모듈 |
+|---|---|---|---|---|
+| `INTRADAY_SHORT_MA_WINDOW` | `5` | 분봉 개수 | 장중 단기 이동평균 창 | `charts/intraday_chart_builder.py`·`intraday_context_builder.py` |
+| `INTRADAY_VOLUME_SPIKE_MULTIPLIER` | `2.0` | 배수 | 직전 분봉 대비 volume_spike 판정 배수 | `charts/intraday_context_builder.py` |
+| `INTRADAY_VOLATILITY_RETURN_THRESHOLD` | `3.0` | %(등락률) | \|당일 등락률\| ≥ 3% → volatile | `synthesis/intraday_alignment.py` |
+| `INTRADAY_VOLATILITY_RANGE_THRESHOLD` | `0.05` | 비율 | 당일 레인지 폭 ≥ 전일종가 5% → volatile | `synthesis/intraday_alignment.py` |
+| `INTRADAY_DIRECTION_RETURN_THRESHOLD` | `0.5` | %(등락률) | \|등락률\| ≥ 0.5% → 방향 1표 | `synthesis/intraday_alignment.py` |
+| `INTRADAY_HIGH_RANGE_POSITION_THRESHOLD` | `0.66` | 비율 | 레인지 위치 ≥ 0.66 → 상방 1표 | `synthesis/intraday_alignment.py` |
+| `INTRADAY_LOW_RANGE_POSITION_THRESHOLD` | `0.34` | 비율 | 레인지 위치 ≤ 0.34 → 하방 1표 | `synthesis/intraday_alignment.py` |
+| `INTRADAY_DIRECTION_MIN_AGREEMENT` | `2` | 개수 | 최소 2개 지표 합의해야 방향 확정 | `synthesis/intraday_alignment.py` |
+| `INTRADAY_CONFIDENCE_ADJUSTMENT_CAP` | `0.05` | 절대값(±) | confidence·signal_score 보정 절대값 상한 | `synthesis/intraday_adjustment.py`·`schemas/intraday.py` |
+| `INTRADAY_RISK_NOTE_MAX_COUNT` | `3` | 개수 | intraday risk_notes 최대 개수 | `synthesis/intraday_adjustment.py`·`schemas/intraday.py` |
+| `INTRADAY_MINUTE_MAX_CALLS` | `20` | 호출 수 | 분봉 역방향 페이징 상한(무한 루프 방지) | `services/kis_client.py` |
+| `INTRADAY_MARKET_OPEN_HHMMSS` | `"090000"` | HHMMSS | 이 시각 이전으로는 더 역방향 조회하지 않음 | `services/kis_client.py` |
+
+> **단위 주의**: return 계열(`*_RETURN_THRESHOLD`)은 **퍼센트**(등락률 3.0 = 3%), range 계열(`*_RANGE_THRESHOLD`·`*_RANGE_POSITION_THRESHOLD`)은 **비율**(0.05 = 5%, 0.66 = 66%)이다. 값을 옮기거나 튜닝할 때 단위를 혼동하지 말 것.
+
+`INTRADAY_CONFIDENCE_ADJUSTMENT_CAP`·`INTRADAY_RISK_NOTE_MAX_COUNT`는 계산 상한일 뿐 아니라 **`IntradayContext` 스키마가 직접 강제하는 계약 경계**다(§ `contracts.md` "1D intraday"). `confidence_adjustment`·`signal_score_adjustment`는 `[-cap, +cap]`, `risk_notes`는 최대 `INTRADAY_RISK_NOTE_MAX_COUNT`개.
+
+*연결: `config.py` §14, `synthesis/intraday_alignment.py`·`intraday_adjustment.py`, `charts/intraday_*`, `services/kis_client.py`, `contracts.md` "1D intraday"*
+
 ---
 
 ## 값 조정 규약

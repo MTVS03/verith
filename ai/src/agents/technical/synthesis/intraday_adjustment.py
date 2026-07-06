@@ -13,12 +13,11 @@
 
 from __future__ import annotations
 
+from ..config import INTRADAY_CONFIDENCE_ADJUSTMENT_CAP, INTRADAY_RISK_NOTE_MAX_COUNT
 from ..schemas.intraday import IntradayContext
 
-# 보정 상한(정식 config화는 후속). aligned/counter일 때만 ±이 값.
-INTRADAY_CONFIDENCE_ADJUSTMENT_CAP = 0.05
-# risk_notes 최대 개수(차트 과밀·과잉 경고 방지).
-INTRADAY_MAX_RISK_NOTES = 3
+# 보정 상한·risk_notes 최대 개수는 config.py §14(config.md §12) 정본을 사용한다.
+# aligned/counter일 때만 ±INTRADAY_CONFIDENCE_ADJUSTMENT_CAP.
 
 
 def compute_intraday_confidence_adjustment(context: IntradayContext) -> float:
@@ -44,7 +43,7 @@ def compute_intraday_confidence_adjustment(context: IntradayContext) -> float:
 
 
 def build_intraday_risk_notes(context: IntradayContext) -> list[str]:
-    """중립 표현의 intraday 관찰 note(최대 INTRADAY_MAX_RISK_NOTES). status≠normal이면 빈 리스트."""
+    """중립 표현의 intraday 관찰 note(최대 INTRADAY_RISK_NOTE_MAX_COUNT). status≠normal이면 빈 리스트."""
     if context.status != "normal":
         return []
     notes: list[str] = []
@@ -59,7 +58,7 @@ def build_intraday_risk_notes(context: IntradayContext) -> list[str]:
             notes.append("현재가가 당일 고가 부근에 있습니다.")
         elif context.day_range_position <= 0.1:
             notes.append("현재가가 당일 저가 부근에 있습니다.")
-    return notes[:INTRADAY_MAX_RISK_NOTES]
+    return notes[:INTRADAY_RISK_NOTE_MAX_COUNT]
 
 
 def apply_intraday_adjustments(context: IntradayContext) -> IntradayContext:

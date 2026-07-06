@@ -24,6 +24,8 @@ import httpx
 from pydantic import ValidationError
 
 from ..config import (
+    INTRADAY_MARKET_OPEN_HHMMSS,
+    INTRADAY_MINUTE_MAX_CALLS,
     KIS_BACKOFF_SECONDS,
     KIS_FETCH_CHUNK_DAYS,
     KIS_FETCH_LOOKBACK_DAYS,
@@ -74,8 +76,8 @@ MINUTE_TR_ID = "FHKST03010200"  # 실전/모의 동일 (kis_mapping §12.2)
 # 아래 두 값의 정확한 코드는 §12.9 smoke 확인 대상(구조·필드명은 확정).
 MINUTE_PW_DATA_INCU_YN = "Y"  # FID_PW_DATA_INCU_YN
 MINUTE_ETC_CLS_CODE = ""      # FID_ETC_CLS_CODE
-MINUTE_MAX_CALLS = 20          # 30건×20 ≈ 600봉 (1일 1분봉 ~391) — 무한 루프 방지 상한
-MINUTE_MARKET_OPEN_HHMMSS = "090000"  # 이 시각 이전으로는 더 역방향 조회하지 않는다
+# 역방향 페이징 상한·장 시작 컷오프는 config.py §14(config.md §12) 정본을 사용한다:
+#   INTRADAY_MINUTE_MAX_CALLS · INTRADAY_MARKET_OPEN_HHMMSS.
 
 # output2 원본 필드 → IntradayCandle (kis_mapping §12.4). close는 분봉 현재가(stck_prpr)로,
 # 일봉의 stck_clpr과 다르다. trading_value는 매핑하지 않는다(acml_tr_pbmn은 누적).
@@ -690,7 +692,7 @@ def fetch_minute_ohlcv(
         by_ts: dict[str, IntradayCandle] = {}
         metadata: dict | None = None
         oldest_hour: str | None = None
-        for _ in range(MINUTE_MAX_CALLS):
+        for _ in range(INTRADAY_MINUTE_MAX_CALLS):
             data = _call_minute_chart(settings, token, ticker, cursor, client)
             if metadata is None:
                 metadata = _extract_output1(data)  # 첫 응답의 종목 요약을 메타데이터로
@@ -701,7 +703,7 @@ def fetch_minute_ohlcv(
                 by_ts[candle.timestamp] = candle
 
             batch_oldest_hour = min(c.timestamp[11:].replace(":", "") for c in candles)  # HHMMSS
-            if batch_oldest_hour <= MINUTE_MARKET_OPEN_HHMMSS:  # 장 시작 이전까지 확보
+            if batch_oldest_hour <= INTRADAY_MARKET_OPEN_HHMMSS:  # 장 시작 이전까지 확보
                 break
             if oldest_hour is not None and batch_oldest_hour >= oldest_hour:  # 정체
                 break
