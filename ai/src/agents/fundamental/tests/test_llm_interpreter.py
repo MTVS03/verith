@@ -4,6 +4,7 @@ import pytest
 
 from src.agents.fundamental.interpret import llm_interpreter
 from src.agents.fundamental.interpret.llm_interpreter import _parse_json_response, interpret
+from src.agents.fundamental.interpret.prompts import build_interpret_prompt
 
 
 def test_parse_json_response_reads_verdict_label() -> None:
@@ -56,3 +57,19 @@ async def test_interpret_uses_template_when_qwen_is_skipped_and_openai_key_missi
     assert result.verdict_label == "moderate"
     assert "LLM_FALLBACK_OPENAI" in result.flags
     assert "LLM_FALLBACK_TEMPLATE" in result.flags
+
+
+def test_interpret_prompt_exposes_allowed_numbers_and_market_metric_ban() -> None:
+    prompt = build_interpret_prompt(
+        "테스트",
+        45,
+        "moderate",
+        {"roe": {"value": -2.07, "unit": "%"}},
+        {"years": ["2025"], "roe": [-2.07]},
+        [],
+    )
+
+    assert "allowed_numbers" in prompt
+    assert "-2.07" in prompt
+    assert "주가" in prompt
+    assert "PER" in prompt
