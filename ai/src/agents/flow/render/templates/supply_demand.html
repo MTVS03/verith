@@ -172,7 +172,7 @@
 
   <header class="top">
     <div>
-      <h1>{{ meta.stock_name }}<span class="tkr">{{ meta.ticker }}</span><span class="mkt">{{ market }}</span></h1>
+      <h1>{{ meta.stock_name }}<span class="tkr">{{ meta.ticker }}</span>{% if market %}<span class="mkt">{{ market }}</span>{% endif %}</h1>
       <div class="date">기준일 {{ meta.base_date }}</div>
     </div>
     <div class="top-right">수급 검증 리포트</div>

@@ -51,6 +51,7 @@ class SupplyDemandState(BaseModel):
     base_date: Optional[date] = None
     raw: Optional[dict] = None
     gate1: Optional[GateResult] = None
+    market: Optional[str] = None   # KIS 대표 시장명 원본(예: 'KOSPI200') — 표시 전용, 검증 대상 아님
 
     # analyze
     signals: Optional[dict] = None

@@ -21,11 +21,15 @@ from .schemas import SupplyDemandState
 
 
 def _meta(state: SupplyDemandState) -> dict:
-    """표시·해석용 메타 조립. 전용 상태 필드 없이 input+base_date로 만든다."""
+    """표시·해석용 메타 조립. input+base_date+market 로 만든다.
+
+    ticker 후퇴 기본값 없음(조각2) — collect_node 가 진입에서 이미 보장했다.
+    """
     return {
         "stock_name": state.input.stock_name,
-        "ticker": state.input.ticker or config.TARGET_TICKER,
+        "ticker": state.input.ticker,
         "base_date": state.base_date.isoformat() if state.base_date else None,
+        "market": state.market,   # KIS 원본 그대로 — 없으면 None(템플릿이 칩 생략)
     }
 
 
@@ -37,15 +41,20 @@ def collect_node(state: SupplyDemandState) -> dict:
     한도소진율은 심화 축이라 ENABLE_ADVANCED 가 꺼져 있으면 아예 조회하지 않는다
     (추가 API 호출 절약 + 플래그 하나로 심화 전체가 꺼지는 단일 스위치).
     """
-    ticker = state.input.ticker or config.TARGET_TICKER
-    df = fetch_supply_demand(state.base_date, ticker)   # 검증 안 된 원재료 — 지역 한정
+    ticker = state.input.ticker
+    if not ticker:
+        # 조용한 기본값 대체 금지(조각2) — 엉뚱한 종목 데이터에 다른 제목이
+        # 붙는 사고를 구조로 차단. 종목명→티커 해석은 게이트1(조각3) 소관.
+        raise ValueError("ticker 가 없습니다 — 호출부가 6자리 종목코드를 지정해야 합니다.")
+    df, market = fetch_supply_demand(state.base_date, ticker)  # 원재료 — 지역 한정
     ownership = (
         fetch_foreign_ownership(state.base_date, ticker)
         if config.ENABLE_ADVANCED else None
     )
     signals = compute_signals(df, ownership)
     gate2 = verify_signals(df, signals, ownership)
-    return {"signals": signals, "gate2": gate2}          # 검증된 것만 상태로
+    # market 은 표시 전용 원본 문자열(숫자 아님) — 게이트2 대상이 아니다.
+    return {"signals": signals, "gate2": gate2, "market": market}
 
 
 def explain_node(state: SupplyDemandState) -> dict:

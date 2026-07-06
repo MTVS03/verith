@@ -40,8 +40,8 @@ def _get(final, key):
 
 
 def _fake_fetch(base_date, ticker):
-    """KIS 경계 대체 — 유효한 fixture df 반환(네트워크 회피)."""
-    return df_foreign_5day_streak
+    """KIS 경계 대체 — 유효한 fixture df + 시장명(원본 형식) 반환(네트워크 회피)."""
+    return df_foreign_5day_streak, "KOSPI200"
 
 
 def _fake_fetch_ownership(base_date, ticker):
