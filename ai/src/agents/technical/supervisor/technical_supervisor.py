@@ -58,13 +58,15 @@ from ..schemas.enums import (
 )
 from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
-from ..services.kis_client import fetch_multi_timeframe_ohlcv
+from ..services.kis_client import IntradayFetchResult, fetch_multi_timeframe_ohlcv
 from ..synthesis.confidence import ConfidenceResult
 from ..synthesis.intraday_adjustment import apply_intraday_adjustments
 from ..synthesis.intraday_alignment import apply_intraday_hint_to_context
 from ..synthesis.signal_score import IndicatorSignalResult, SignalScoreResult
 
 OhlcvFetcher = Callable[[str], dict[str, Sequence[OHLCV]]]
+# 1D 분봉 fetcher(선택 주입). (ticker, *, as_of) → IntradayFetchResult. 기본 None(주입 시에만 호출).
+MinuteFetcher = Callable[..., IntradayFetchResult]
 
 # 노드 1·2 LLM 호출 실패 시 내부 대체값(출력에 실리지 않는 orchestration 정보).
 _DEFAULT_FOCUS = ["trend", "momentum", "volume", "support_resistance", "risk"]
@@ -86,11 +88,14 @@ def run(
     fetcher: OhlcvFetcher = fetch_multi_timeframe_ohlcv,
     trace_id: str | None = None,
     intraday_candles: Sequence[IntradayCandle] | None = None,
+    intraday_fetcher: MinuteFetcher | None = None,
 ) -> TechnicalAgentOutput:
     """TechnicalAgentInput → 1~10 노드 조율 → TechnicalAgentOutput.
 
-    intraday_candles(선택)가 주어지면 1d 장중 차트·intraday_context를 조건부로 붙인다(KIS 호출 아님 —
-    이미 주어진 분봉만 사용). 없으면 기존 D/W/M 출력과 완전히 동일하다.
+    1D intraday(선택·best-effort): `intraday_candles`를 직접 주면 그대로 쓰고, 아니면 `intraday_fetcher`가
+    주어졌을 때만 `intraday_fetcher(ticker, as_of=as_of)`로 당일 분봉 snapshot을 1회 조회한다(KIS REST).
+    둘 다 없거나 fetch 실패·빈 응답이면 intraday를 붙이지 않고 **기존 D/W/M 출력과 동일**하게 동작한다.
+    intraday fetch 실패는 D/W/M 흐름과 분리해 흡수하며 전체 실패로 전파하지 않는다.
     """
     trace_id = trace_id or uuid.uuid4().hex
 
@@ -140,9 +145,13 @@ def run(
     technical_signals = _to_technical_signals(signal_result.technical_signals, result.details)
     data_status = _data_status(regime_result)
 
-    # 선택적 1D intraday 조립(입력 있을 때만). 실패는 흡수 — D/W/M 출력은 그대로 유지.
+    # 선택적 1D intraday: 직접 주입 candles 우선, 없으면 intraday_fetcher로 snapshot 조회(best-effort).
+    intra_candles, fetched_prev_close = _resolve_intraday(
+        intraday_candles, intraday_fetcher, agent_input.ticker, agent_input.as_of,
+    )
     intraday_charts, intraday_context = _assemble_intraday(
-        intraday_candles, daily=daily, as_of=agent_input.as_of, final_regime=regime.final_regime,
+        intra_candles, daily=daily, as_of=agent_input.as_of,
+        final_regime=regime.final_regime, previous_close=fetched_prev_close,
     )
 
     return TechnicalAgentOutput(
@@ -242,27 +251,51 @@ def _data_status(m: MultiframeRegimeResult) -> DataStatus:
     return DataStatus.NORMAL
 
 
+def _resolve_intraday(
+    intraday_candles: Sequence[IntradayCandle] | None,
+    intraday_fetcher: MinuteFetcher | None,
+    ticker: str,
+    as_of: datetime,
+) -> tuple[Sequence[IntradayCandle] | None, float | None]:
+    """intraday 입력 해석. (candles, previous_close) 반환.
+
+    직접 주입 candles(커밋 9)가 있으면 fetch하지 않고 그대로 쓴다(previous_close는 None → 일봉 fallback).
+    없고 intraday_fetcher가 주어졌을 때만 `intraday_fetcher(ticker, as_of=as_of)`로 조회한다.
+    fetch 실패는 D/W/M와 **분리**해 흡수 → `(None, None)`(intraday off). status 판정은 하지 않는다.
+    """
+    if intraday_candles is not None:
+        return intraday_candles, None
+    if intraday_fetcher is None:
+        return None, None
+    try:
+        result = intraday_fetcher(ticker, as_of=as_of)  # KIS REST 1회+제한 반복(fetcher 내부 정책)
+    except Exception:  # noqa: BLE001 - intraday fetch 실패는 D/W/M와 분리·흡수(전체 실패 아님)
+        return None, None
+    return result.candles, result.previous_close
+
+
 def _assemble_intraday(
     intraday_candles: Sequence[IntradayCandle] | None,
     *,
     daily: Sequence[OHLCV],
     as_of: datetime,
     final_regime: Regime,
+    previous_close: float | None = None,
 ) -> tuple[list[ChartPayload], IntradayContext | None]:
-    """선택적 1D intraday 조립. 이미 만든 builder/helper만 호출하고 KIS는 부르지 않는다.
+    """선택적 1D intraday 조립. 이미 만든 builder/helper만 호출한다.
 
     candles가 없으면 `([], None)` — D/W/M 출력과 완전히 동일하게 동작한다.
-    previous_close는 최근 일봉 종가에서 파생한다(정식 전일 종가 판정은 fetcher 도입 시 정교화).
+    previous_close는 **fetcher가 준 값(전일 종가)을 우선**하고, 없으면 최근 일봉 종가로 fallback한다.
     intraday 조립 중 어떤 예외든 흡수해 D/W/M 출력이 통째로 실패하지 않게 한다.
     final_regime은 읽기만 하며 절대 바꾸지 않는다(보정도 하지 않음).
     """
     if not intraday_candles:
         return [], None
     try:
-        previous_close = daily[-1].close if daily else None
-        payload = build_intraday_chart_payload(intraday_candles, previous_close=previous_close)
+        prev_close = previous_close if previous_close is not None else (daily[-1].close if daily else None)
+        payload = build_intraday_chart_payload(intraday_candles, previous_close=prev_close)
         context = build_intraday_context(
-            intraday_candles, previous_close=previous_close, as_of=as_of,
+            intraday_candles, previous_close=prev_close, as_of=as_of,
         )
         context = apply_intraday_hint_to_context(context, final_regime)
         context = apply_intraday_adjustments(context)  # confidence_adjustment·risk_notes(context 내부만)
