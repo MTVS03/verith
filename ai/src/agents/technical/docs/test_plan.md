@@ -358,6 +358,42 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 
 이는 "모든 문장 의미를 완벽히 검증한다"고 과장하지 않고, **확실히 잡을 수 있는 위반부터 결정론적으로 잡는다**는 honest scoping이다.
 
+### 5.9 전처리 노드(1·2) LLM 출력 검증
+
+**성격:** 위반 감지 확인. **대상:** 노드 1(`normalize_question`)·노드 2(`focus_analysis`)의 LLM 출력. **판정은 노드 로컬 검증**(trajectory_eval의 라벨 왜곡 로직과 별개, 금지어 사전만 재사용). 실패 시 재생성 없이 **template fallback**(노드 1·2는 재생성 프롬프트가 없다 — 10-R은 노드 10 전용).
+
+정본 출력(`prompts.md §2·§3`): 노드 1 = `{"normalized_question"}`만, 노드 2 = `{"analysis_focus", "focus_summary"}`만. 그 외 키(`removed_advice_intent`·`safety_notes`·`focus`·`focus_terms`·`time_horizon`·`signal_score` 등)는 계약 밖이라 거부한다.
+
+| ID | 상황 | 기대 결과 |
+| --- | --- | --- |
+| PRE-01 | 노드 1 정상 `{normalized_question}` | 파싱·통과, `source=llm` |
+| PRE-02 | 노드 1 출력에 추가 키(`safety_notes` 등) | 거부 → template fallback |
+| PRE-03 | 노드 1 JSON 파싱 실패 | template fallback (조용히 원문 사용 안 함) |
+| PRE-04 | 노드 1 `normalized_question`에 금지어(매수·목표가 등) | 거부 → template fallback |
+| PRE-05 | 노드 1 fallback | `BATTERY_TICKERS` 종목명 기반 보수적 문장, `source=template_fallback` |
+| PRE-06 | 노드 2 정상 `{analysis_focus, focus_summary}` | 파싱·통과, `source=llm` |
+| PRE-07 | 노드 2 `analysis_focus`에 허용값 밖(예: `macd`) | 거부 → fallback |
+| PRE-08 | 노드 2 `analysis_focus` 중복/빈 리스트 | 거부 → fallback |
+| PRE-09 | 노드 2 출력에 계산 필드(`signal_score`·`regime` 등) | 거부 → fallback |
+| PRE-10 | 노드 2 `focus_summary` 금지어 | 거부 → fallback |
+| PRE-11 | 노드 2 fallback | 정본 `analysis_focus` 5종 전체, `source=template_fallback` |
+| PRE-12 | 노드 2 입력 | **원본 query를 받지 않고 `normalized_question`만** 받는다(`prompts.md` 안전 가드) |
+| PRE-13 | `normalized_question`/`focus_summary`가 str 아님(list·dict·number) | 거부 → fallback (str 강제 변환 안 함) |
+| PRE-14 | `normalized_question`/`focus_summary`가 공백 문자열 | 거부 → fallback |
+| PRE-15 | `analysis_focus` 원소가 list/number(중첩·비-str) | 거부 → fallback (**TypeError를 밖으로 던지지 않음**) |
+| PRE-16 | 노드 1 출력에 구어체 행동 지시·미래 단정("지금 사세요"·"오를 것입니다") | 거부 → fallback (전처리 전용 금지어) |
+| PRE-17 | ticker 종목명이 `normalized_question`에 없음(또는 다른 종목명) | 거부 → fallback (종목 보존) |
+| PRE-18 | `normalized_question`에 기술적 분석 앵커 단어 0개("재무제표"·"hello") | 거부 → fallback (기술 앵커) |
+| PRE-19 | `client.complete()`가 TimeoutError 등 호출 예외 | **노드가 삼키지 않고 전파**(supervisor 책임) |
+
+**검증 규약:**
+- **타입 엄격(H1):** `normalized_question`·`focus_summary`는 `isinstance(x, str)`이고 공백이 아니어야 한다. `str(x)` 강제 변환하지 않는다.
+- **`analysis_focus`(H2):** 검사 순서 = ① list ② 비어있지 않음 ③ 각 원소 str ④ 허용값 ∈ `{trend, momentum, volume, support_resistance, risk}` ⑤ 중복 없음. **어떤 잘못된 값도 예외가 아니라 검증 실패(fallback)로 처리**한다(중첩 리스트에 `set()` 먼저 호출 금지).
+- **금지어(H3):** `keyword_rules.FORBIDDEN_TERMS` 재사용 + **전처리 전용 금지어 세트**(`nodes/_llm_utils.py`, 구어체 매수/매도·미래 단정)를 함께 검사한다. `keyword_rules.py`·`trajectory_eval.py`는 수정하지 않는다. 이 세트는 **완전 차단이 아니라 결정론 백스톱**이다(모든 패러프레이즈를 잡는다고 과장하지 않음, §5.8과 같은 honest scoping). 적용 대상: `normalized_question`·`focus_summary`.
+- **종목 보존·기술 앵커(M1):** ticker가 allowlist에 있으면 `normalized_question`은 `BATTERY_TICKERS[ticker]` 표준 종목명을 포함해야 하고, 기술적 분석 앵커 단어(시세·차트·추세·거래량·지지·저항·리스크·국면·신호·흐름·이동평균·RSI·패턴·기술적·모멘텀·거래대금) 중 최소 1개를 포함해야 한다. 별칭·약칭·오탈자까지는 보지 않는다(표준명 포함 여부만, 최소 백스톱).
+- **의미 일치는 검증하지 않음(M2):** `focus_summary`가 `analysis_focus`를 의미적으로 정확히 반영하는지는 **결정론 검증기를 만들지 않는다**(오탐 위험 큼). 프롬프트에는 반영 지시를 유지하되, 코드 검증은 위 항목까지만 한다.
+- **호출 실패 경계(M3):** 노드 1·2는 **LLM 응답이 도착한 뒤의 parse/schema/type/금지어/종목/앵커 검증 실패**에만 template fallback을 쓴다. `client.complete()` 자체의 예외(TimeoutError·RuntimeError·네트워크/API 장애)는 **노드에서 broad-catch로 삼키지 않고 상위(supervisor 또는 LLM client wrapper)로 전파**한다. fallback 사유 기록(`fallback_reason`)은 trace_logger/supervisor와 함께 설계할 후속 작업이다(이번 브랜치 미포함).
+
 ---
 
 ## 6. 차트 annotation 계산 테스트 (CHART-*)
