@@ -5,12 +5,12 @@
 
   KIS  : 실제 호출 (기존 kis_client/supervisor 경로만 — 이 스크립트는 KIS API를 직접 부르지 않음)
   LLM  : fake (payload-aware — 프롬프트의 코드 확정 라벨을 읽어 검증 ③ 1차 통과하는 문장 생성)
-  저장 : scripts/technical_smoke_output/ 에 UTF-8 JSON (secret 미저장)
+  저장 : src/agents/technical/scripts/technical_smoke_output/ 에 UTF-8 JSON (secret 미저장)
 
 실행:
   cd ai
-  uv run python scripts/smoke_technical_agent.py
-  uv run python scripts/smoke_technical_agent.py --ticker 373220 --as-of 2026-07-06
+  uv run python src/agents/technical/scripts/smoke_technical_agent.py
+  uv run python src/agents/technical/scripts/smoke_technical_agent.py --ticker 373220 --as-of 2026-07-06
 
 pytest/CI에는 포함하지 않는다(real KIS env 필요). 검증 로직은 우회하지 않으며 금지어를 쓰지 않는다.
 """
@@ -26,7 +26,8 @@ from datetime import datetime
 from pathlib import Path
 
 # 스탠드얼론 스크립트라 ai/ 를 sys.path에 올려 `src...` import가 되게 한다.
-_AI_ROOT = Path(__file__).resolve().parent.parent
+# 이 파일 위치: ai/src/agents/technical/scripts/ → parents[4] = ai/
+_AI_ROOT = Path(__file__).resolve().parents[4]
 if str(_AI_ROOT) not in sys.path:
     sys.path.insert(0, str(_AI_ROOT))
 
@@ -59,7 +60,7 @@ from src.agents.technical.schemas.enums import (  # noqa: E402
 
 _DEFAULT_TICKER = "373220"
 _DEFAULT_QUERY = "LG에너지솔루션 기술적 흐름을 분석해줘"
-_DEFAULT_OUT_DIR = _AI_ROOT / "scripts" / "technical_smoke_output"
+_DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "technical_smoke_output"
 
 _FOCUS_RESPONSE = json.dumps(
     {
