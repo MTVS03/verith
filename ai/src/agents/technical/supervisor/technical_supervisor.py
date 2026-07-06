@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from ..config import BATTERY_TICKERS, INTRADAY_FETCH_ENABLED, REGEN_MAX_COUNT
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
@@ -259,6 +259,21 @@ def _data_status(m: MultiframeRegimeResult) -> DataStatus:
     return DataStatus.NORMAL
 
 
+def _intraday_matches_as_of(
+    candles: Sequence[IntradayCandle], as_of: date | datetime | None,
+) -> bool:
+    """모든 intraday candle 의 날짜가 as_of.date() 와 같은지 (날짜 정합성 가드).
+
+    KIS 주식당일분봉조회는 **당일 데이터만** 제공하므로, 과거 `as_of` 리포트에 오늘 분봉이 결합되는 것을
+    막는다. `as_of` 가 None이면 True(기존 동작 유지), 빈 candles도 True(상위에서 intraday off 처리).
+    일부 candle만 날짜가 달라도 False(fail-safe로 intraday off).
+    """
+    if as_of is None or not candles:
+        return True
+    expected = (as_of.date() if isinstance(as_of, datetime) else as_of).isoformat()
+    return all(c.timestamp[:10] == expected for c in candles)
+
+
 def _resolve_intraday(
     intraday_candles: Sequence[IntradayCandle] | None,
     intraday_fetcher: MinuteFetcher | None,
@@ -270,16 +285,24 @@ def _resolve_intraday(
     직접 주입 candles(커밋 9)가 있으면 fetch하지 않고 그대로 쓴다(previous_close는 None → 일봉 fallback).
     없고 intraday_fetcher가 주어졌을 때만 `intraday_fetcher(ticker, as_of=as_of)`로 조회한다.
     fetch 실패는 D/W/M와 **분리**해 흡수 → `(None, None)`(intraday off). status 판정은 하지 않는다.
+    **날짜 정합성 가드**: candle 날짜가 as_of.date()와 다르면(당일분봉 today-only) intraday를 생략한다
+    — 직접 주입·fetcher 두 경로 모두에 적용된다.
     """
     if intraday_candles is not None:
-        return intraday_candles, None
-    if intraday_fetcher is None:
+        candles: Sequence[IntradayCandle] | None = intraday_candles
+        prev_close: float | None = None
+    elif intraday_fetcher is None:
         return None, None
-    try:
-        result = intraday_fetcher(ticker, as_of=as_of)  # KIS REST 1회+제한 반복(fetcher 내부 정책)
-    except Exception:  # noqa: BLE001 - intraday fetch 실패는 D/W/M와 분리·흡수(전체 실패 아님)
-        return None, None
-    return result.candles, result.previous_close
+    else:
+        try:
+            result = intraday_fetcher(ticker, as_of=as_of)  # KIS REST 1회+제한 반복(fetcher 내부 정책)
+        except Exception:  # noqa: BLE001 - intraday fetch 실패는 D/W/M와 분리·흡수(전체 실패 아님)
+            return None, None
+        candles, prev_close = result.candles, result.previous_close
+
+    if candles and not _intraday_matches_as_of(candles, as_of):
+        return None, None  # 과거 as_of 리포트에 오늘 분봉이 결합되는 것 방지
+    return candles, prev_close
 
 
 def _assemble_intraday(
