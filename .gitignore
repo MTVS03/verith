@@ -280,6 +280,19 @@ secrets.*
 credentials.json
 service-account*.json
 
+### Fundamental agent — 배치 데모 산출물 (samples/는 커밋) ###
+ai/src/agents/fundamental/api_test/out/
+ai/src/agents/fundamental/.cache/
+ai/src/agents/fundamental/data/.cache/
+ai/src/agents/fundamental/tests/snapshots/generated/
+
+### Local prompt/reference workspace ###
+codex-prompt/
+
+### Accidental local command artifacts ###
+how --stat HEAD
+tatus
+
 ### Docker (따로 관리 — 저장소에 올리지 않음) ###
 docker-compose.yml
 docker-compose.override.yml

@@ -9,7 +9,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from ..config import settings
+from ..core.config import settings
 from .cache import load_cached, save_cache
 
 _RETRYABLE = (httpx.TimeoutException, httpx.TransportError)

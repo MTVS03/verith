@@ -5,7 +5,7 @@ import zipfile
 
 import httpx
 
-from ..config import CORP_CODE_MAP, settings
+from ..core.config import CORP_CODE_MAP, STOCK_NAME_MAP, settings
 
 
 class UnknownStockCodeError(KeyError):
@@ -15,6 +15,13 @@ class UnknownStockCodeError(KeyError):
 def resolve(stock_code: str) -> str:
     try:
         return CORP_CODE_MAP[stock_code]
+    except KeyError:
+        raise UnknownStockCodeError(f"unsupported stock_code: {stock_code}") from None
+
+
+def resolve_name(stock_code: str) -> str:
+    try:
+        return STOCK_NAME_MAP[stock_code]
     except KeyError:
         raise UnknownStockCodeError(f"unsupported stock_code: {stock_code}") from None
 
