@@ -255,6 +255,20 @@ REGEN_MAX_COUNT = 1             # 검증 ③ 실패 시 재생성 최대 횟수
 *연결: `supervisor/technical_supervisor.py` 재생성 루프, `observability/trajectory_eval.py`, UseCase T6*
 *금융 리포트에서 LLM 라벨 왜곡 시 무한 재시도하지 않는다. 1회 재생성 후 실패하면 템플릿으로 안전하게 폴백한다.*
 
+### 9.1 1D intraday(Beta) 활성화 플래그
+
+```python
+INTRADAY_FETCH_ENABLED = False  # 1d 장중 분봉 default-on gate (기본 False)
+```
+
+- **`True`일 때만** supervisor가 `intraday_fetcher` 미주입 시 **기본 KIS 분봉 fetcher(`fetch_minute_ohlcv`)** 를 사용한다(default-on). D/W/M이 supervisor 계층에서 항상 fetch되는 것과 같은 방식이되, **flag로 gate**한다.
+- **`False`(기본)** 이면 intraday fetch off — **기존 D/W/M만 기본 실행**(현재 동작과 동일).
+- 우선순위: `intraday_candles` 직접 주입 > 명시 `intraday_fetcher` > (flag ON) `fetch_minute_ohlcv` > off.
+- **실험/Beta 성격.** ON 시 요청마다 분봉 조회가 추가되어 **호출량·rate limit 부담이 커진다**(1회 30건 페이징, `EGW00201` 재시도 — `kis_mapping.md §12`). 운영 default-on은 **smoke 결과·운영 정책을 보고 결정**한다.
+- plain 상수(기존 config 스타일). **새 KIS env key는 추가하지 않는다.** intraday fetch 실패·빈 응답은 D/W/M output에 전파되지 않는다.
+
+*연결: `supervisor/technical_supervisor.py` intraday 조립, `services/kis_client.py::fetch_minute_ohlcv`, `contracts.md` "1D intraday"*
+
 ## 10. 차트 (charts)
 
 ```python

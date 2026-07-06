@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..config import BATTERY_TICKERS, REGEN_MAX_COUNT
+from ..config import BATTERY_TICKERS, INTRADAY_FETCH_ENABLED, REGEN_MAX_COUNT
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
 from ..charts.intraday_context_builder import build_intraday_context
 from ..nodes import interpret_report as interp
@@ -58,7 +58,11 @@ from ..schemas.enums import (
 )
 from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
-from ..services.kis_client import IntradayFetchResult, fetch_multi_timeframe_ohlcv
+from ..services.kis_client import (
+    IntradayFetchResult,
+    fetch_minute_ohlcv,
+    fetch_multi_timeframe_ohlcv,
+)
 from ..synthesis.confidence import ConfidenceResult
 from ..synthesis.intraday_adjustment import apply_intraday_adjustments
 from ..synthesis.intraday_alignment import apply_intraday_hint_to_context
@@ -146,6 +150,10 @@ def run(
     data_status = _data_status(regime_result)
 
     # 선택적 1D intraday: 직접 주입 candles 우선, 없으면 intraday_fetcher로 snapshot 조회(best-effort).
+    # C안 gate: fetcher 미주입 + INTRADAY_FETCH_ENABLED=True 일 때만 기본 KIS 분봉 fetcher를 쓴다.
+    # 우선순위: intraday_candles > 명시 intraday_fetcher > (flag ON) fetch_minute_ohlcv > off.
+    if intraday_fetcher is None and INTRADAY_FETCH_ENABLED:
+        intraday_fetcher = fetch_minute_ohlcv
     intra_candles, fetched_prev_close = _resolve_intraday(
         intraday_candles, intraday_fetcher, agent_input.ticker, agent_input.as_of,
     )

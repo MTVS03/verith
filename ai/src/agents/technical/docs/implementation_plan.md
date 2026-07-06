@@ -246,6 +246,6 @@ Streamlit lab의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반�
 | supervisor의 optional 조립 — 직접 `intraday_candles` 주입 + optional `intraday_fetcher` 주입(둘 다 실패는 흡수) | `supervisor/technical_supervisor.py` |
 | 1D Intraday QA(fixture/manual) | `devtools/streamlit_technical_lab.py` |
 
-**production default-on은 아니다:** supervisor의 `intraday_fetcher` 기본값은 `None`이라, **기본 agent path는 기존 D/W/M과 동일**하다. 실 KIS 분봉을 쓰려면 호출부에서 `run(..., intraday_fetcher=fetch_minute_ohlcv)`로 **명시 주입**해야 한다(`agent.py`는 thin wrapper 유지 — 변경 없음). default-on을 어느 계층에서 켤지는 **별도 결정**이다. `kis_mapping.md §12.9`의 항목은 실 KIS **manual smoke**로 확인한다.
+**production default-on은 flag로 gate(기본 OFF):** `config.INTRADAY_FETCH_ENABLED`(기본 `False`)가 `True`이고 `intraday_fetcher`가 미주입일 때만 supervisor가 기본 `fetch_minute_ohlcv`를 쓴다(C안). 기본(False)에서는 **기본 agent path가 기존 D/W/M과 동일**하다. 우선순위: `intraday_candles` 직접 주입 > 명시 `intraday_fetcher` > (flag ON) `fetch_minute_ohlcv` > off. `agent.py`는 thin wrapper 유지(변경 없음). 운영에서 flag를 켤지는 smoke 결과·운영 정책을 보고 **별도 결정**한다. `kis_mapping.md §12.9`는 실 KIS **manual smoke**로 확인했다(핵심 항목 green).
 
 **불변식:** `charts`는 `{3m, 1y, 5y}`가 항상 존재하고 `1d`는 조건부(소비 측은 `len == 3`이 아닌 period 집합으로 처리). `OHLCV.date`는 날짜 전용 유지. intraday는 `final_regime`을 덮어쓰지 않고, top-level `confidence`/`signal_score`/`risk`도 이 단계에서 변경하지 않는다(`signal_score_adjustment`=0.0). intraday **마커 annotation은 Phase 3(Future Work)**.

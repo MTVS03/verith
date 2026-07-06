@@ -525,3 +525,84 @@ def test_final_regime_and_signal_unchanged_by_fetcher():
     assert with_fetch.signal == without.signal       # top-level confidence/signal_score 불변
     # 보정값은 context 내부에만
     assert with_fetch.intraday_context.signal_score_adjustment == 0.0
+
+
+# ── SUP intraday: INTRADAY_FETCH_ENABLED flag gate (C안) ─────────────────────
+def _default_minute_stub(called: dict, *, candles=None, previous_close=101.0):
+    """sup.fetch_minute_ohlcv 대체용 — 호출 카운트를 기록한다."""
+    def stub(ticker, *, as_of=None, **kw):
+        called["n"] += 1
+        return IntradayFetchResult(
+            candles=list(INTRADAY_CANDLES if candles is None else candles),
+            previous_close=previous_close, latest_price=None,
+            cumulative_volume=None, cumulative_trading_value=None,
+        )
+    return stub
+
+
+def test_flag_off_default_no_intraday(monkeypatch):
+    # flag 기본 False → 명시 fetcher/candles 없으면 기본 minute fetcher를 쓰지 않는다.
+    called = {"n": 0}
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    out = _run(_INTRA)
+    assert called["n"] == 0
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+    assert out.intraday_context is None
+
+
+def test_flag_on_uses_default_minute_fetcher(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    out = _run(_INTRA)  # fetcher·candles 미주입
+    assert called["n"] == 1  # flag ON → 기본 fetcher 호출
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
+    assert out.intraday_context is not None
+
+
+def test_flag_on_direct_candles_skip_default_fetcher(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert called["n"] == 0  # 직접 주입 우선 → 기본 fetcher 미호출
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
+
+
+def test_flag_on_explicit_fetcher_takes_precedence(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    out = _run(_INTRA, intraday_fetcher=_minute_fetcher(previous_close=200.0))
+    assert called["n"] == 0  # 명시 fetcher 우선 → 기본 미호출
+    assert out.intraday_context.previous_close == 200.0
+
+
+def test_flag_on_default_fetcher_exception_isolated(monkeypatch):
+    def boom(ticker, *, as_of=None, **kw):
+        raise RuntimeError("kis intraday down")
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", boom)
+    out = _run(_INTRA)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
+    assert out.intraday_context is None
+
+
+def test_flag_on_default_empty_candles_dwm_only(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called, candles=[]))
+    out = _run(_INTRA)
+    assert called["n"] == 1
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+    assert out.intraday_context is None
+
+
+def test_flag_on_final_regime_and_signal_unchanged(monkeypatch):
+    without = _run(_INTRA)
+    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub({"n": 0}))
+    with_flag = _run(_INTRA)
+    assert with_flag.regime == without.regime      # final_regime 등 불변
+    assert with_flag.signal == without.signal       # top-level confidence/signal_score 불변
+    assert with_flag.intraday_context.signal_score_adjustment == 0.0

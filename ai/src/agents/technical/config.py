@@ -266,3 +266,12 @@ ANNOTATION_DEDUP_BARS = {
 # 12. 검증·재생성 (config.md §9). supervisor의 interpret 재생성 루프가 사용한다.
 # ─────────────────────────────────────────────────────────────────────────────
 REGEN_MAX_COUNT = 1                     # 검증 ③ 실패 시 재생성 최대 횟수 (초과 시 template fallback)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. 1D intraday(Beta) 활성화 플래그 (chart_annotation_spec §3.1, kis_mapping §12)
+#     True면 supervisor가 intraday_fetcher 미주입 시 기본 KIS 분봉 fetcher(fetch_minute_ohlcv)를
+#     사용한다(C안 default-on gate). Beta·호출량/rate limit 부담 때문에 **기본 False**.
+#     새 KIS env key는 추가하지 않는다(기존 config 스타일대로 plain 상수).
+# ─────────────────────────────────────────────────────────────────────────────
+INTRADAY_FETCH_ENABLED: bool = False
