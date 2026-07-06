@@ -127,3 +127,19 @@ def test_diagnostics_reflects_5y_importance_retier():
     # 1y는 승격 대상 아님 — cup/breakout이 high로 집계되지 않는다(정책 5y 한정).
     p1 = periods["1y"]
     assert p1["annotation_count_by_kind"]["cup_handle_candidate"] >= 0  # 존재 확인(정책 미적용)
+
+
+# ── note가 현재 구현 상태와 정합(stale 문구 없음) ─────────────────────────────
+def test_notes_reflect_current_implementation():
+    periods = {p["period"]: p for p in _result()["periods"]}
+    for p in periods.values():
+        # unimplemented가 비었으므로 "미구현" 문구가 없어야 한다
+        assert p["missing_or_unimplemented_kinds"] == []
+        assert "미구현" not in p["capacity_check"]["cup_handle_note"]
+        assert "미구현" not in p["notes"]
+        # support/resistance를 "최신 구간만"이라고 말하면 안 된다(rolling 구현됨)
+        assert "최신 구간만" not in p["notes"]
+    # period별 cup_handle policy note
+    assert "제외" in periods["3m"]["capacity_check"]["cup_handle_note"]        # 3m 정책 제외
+    assert "120" in periods["1y"]["capacity_check"]["cup_handle_note"]         # 1y 일봉 120봉
+    assert "78" in periods["5y"]["capacity_check"]["cup_handle_note"]          # 5y 주봉 78봉
