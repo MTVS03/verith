@@ -126,12 +126,15 @@ def test_deadline_propagates_from_graph():
         tg.build_technical_graph().invoke(_state(_HAPPY, deadline=expired))
 
 
-# ── state 위생: raw prompt/response/secret 미저장 ─────────────────────────────
-def test_state_has_no_secret_keys():
-    final = tg.build_technical_graph().invoke(_state(_HAPPY))
-    for k in final:
-        assert not any(h in k.lower() for h in ("prompt", "response", "api_key", "token", "secret"))
-    # 저장된 llm_client는 주입 fake 그대로(내부에서 새 OpenAI client를 만들지 않음)
-    assert isinstance(final["llm_client"], st.ScriptedLlm)
-    # INTERP_BAD raw 문구가 output 직렬화에 남지 않음(template fallback으로 대체)
-    assert "흥미롭습니다" not in final["output"].model_dump_json()
+# ── state는 runtime-only(저장 전제 아님) — checkpointer 미사용 + raw 없음 ──────
+def test_state_is_runtime_only_not_persisted():
+    # 정직성: state는 secret-safe 저장 객체가 아니다 — payload(원본 query)·runtime client를 담는다.
+    # 지금 안전한 유일한 이유는 **checkpointer가 없어 저장/관측되지 않기 때문**이다.
+    compiled = tg.build_technical_graph()
+    assert getattr(compiled, "checkpointer", None) is None      # persistence 없음(정화 전까지 금지)
+    final = compiled.invoke(_state(_HAPPY))
+    assert isinstance(final["llm_client"], st.ScriptedLlm)      # runtime client가 state에 그대로 있음(런타임용)
+    assert final["payload"].query                               # 원본 query도 state에 있음(런타임용)
+    # 다만 새 raw prompt/response 필드를 만들지 않고, output 직렬화에 raw LLM 문구가 남지 않는다
+    assert not any(h in k.lower() for k in final for h in ("prompt", "response", "api_key", "token"))
+    assert "흥미롭습니다" not in final["output"].model_dump_json()  # INTERP_BAD raw → template fallback 대체

@@ -157,9 +157,11 @@ trace에서 쓰는 값 중 일부는 기존 문서의 enum을 그대로 재사�
 | 1 | 질문 안전 정규화 | `normalize_question` |
 | 2 | 분석 포커스 정리 | `focus_analysis` |
 | 3 | 데이터수집 | `data_collect` |
-| 4 | 지표계산 | `indicator_calculate` |
-| 5 | 국면분류 | `regime_classify` |
+| 4 | 신호용 지표계산(signal_score용 bundle) | `indicator_calculate` |
+| 5 | 국면분류(OHLCV 선판정·gate) | `regime_classify` |
 | 6 | 신호종합 | `signal_aggregate` |
+
+> **실행 순서 주의:** 노드 번호는 안정 ID이지만, **실제 실행은 국면분류(5·gate)가 지표계산(4)보다 먼저**다(`architecture.md` §10노드). regime은 지표 bundle을 쓰지 않는 OHLCV 선판정이고, indicator는 그 뒤 signal_score용 bundle이다.
 | 7 | 신뢰도계산 | `confidence_calculate` |
 | 8 | 리스크관찰점 | `risk_detect` |
 | 9 | 차트생성 | `chart_generate` |
@@ -184,7 +186,7 @@ trace에서 쓰는 값 중 일부는 기존 문서의 enum을 그대로 재사�
 
 ### 9.1 skipped 기록 규칙
 
-`regime_unavailable`이 발생하면 노드 6(`signal_aggregate`)·7(`confidence_calculate`)·8(`risk_detect`)은 실행하지 않고 **`status=skipped` 이벤트를 남긴다.** 이벤트를 생략하지 않는다 — 생략하면 "왜 신호 종합·신뢰도·리스크가 없었는지"를 trace에서 확인할 수 없기 때문이다.
+`regime_unavailable`이 발생하면 국면분류(노드 5·gate) 뒤로는 **노드 4(`indicator_calculate`)·6(`signal_aggregate`)·7(`confidence_calculate`)·8(`risk_detect`)을 실행하지 않고** 각각 **`status=skipped` 이벤트를 남긴다.** 국면분류(5·gate)를 신호용 지표계산(4)보다 먼저 실행하므로 지표계산도 스킵된다(`architecture.md` §10노드 — regime은 gate, indicator는 signal_score용 bundle). 신뢰도·리스크는 regime 결과에 의존하므로 어차피 실행 불가다. 이벤트를 생략하지 않는다 — 생략하면 "왜 지표·신호·신뢰도·리스크가 없었는지"를 trace에서 확인할 수 없기 때문이다.
 
 ```json
 {

@@ -213,7 +213,10 @@ def _build() -> object:
     g.add_edge("chart_generate", "interpret_report")
     g.add_edge("interpret_report", "build_output")
     g.add_edge("build_output", END)
-    return g.compile()  # checkpointer 없음(단일 요청)
+    # checkpointer 없음(단일 요청). **금지: state가 정화되기 전까지 checkpointer·persistent memory·
+    # LangSmith state tracing을 켜지 않는다** — state에 원본 query(PII)·runtime client가 있어 저장/관측
+    # 시 노출된다(langgraph_state.py 보안 경계). known debt: 결합·노드 분리는 후속 브랜치.
+    return g.compile()
 
 
 _COMPILED = None
