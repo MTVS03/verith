@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ meta.stock_name }} 수급 리포트</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb; --bg:#ffffff;
+          --pass:#0a7d32; --pass-bg:#e6f4ea; --fail:#b42318; --fail-bg:#fdecea;
+          --chip:#eef2ff; --chip-fg:#3730a3; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--fg);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
+         line-height:1.5; }
+  .report { max-width:760px; margin:0 auto; }
+  header.rpt { border-bottom:2px solid var(--line); padding-bottom:12px; margin-bottom:20px; }
+  header.rpt h1 { margin:0 0 4px; font-size:22px; }
+  header.rpt .tkr { color:var(--muted); font-size:16px; font-weight:500; }
+  header.rpt .sub { color:var(--muted); font-size:14px; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:6px 12px;
+           border-radius:999px; font-weight:600; font-size:14px; }
+  .badge.pass { background:var(--pass-bg); color:var(--pass); }
+  .badge.fail { background:var(--fail-bg); color:var(--fail); }
+  section { margin:20px 0; }
+  section h2 { font-size:14px; color:var(--muted); margin:0 0 10px; font-weight:600; }
+  ul.checks { margin:8px 0 0; padding-left:18px; font-size:13px; color:var(--muted); }
+  ul.checks li { margin:2px 0; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:13px; }
+  th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .chip { display:inline-block; margin-left:6px; padding:2px 8px; border-radius:6px;
+          font-size:12px; background:var(--chip); color:var(--chip-fg); font-weight:600; }
+  .chip.off { background:#f3f4f6; color:#9ca3af; }
+  .align { font-size:18px; font-weight:700; }
+  .placeholder { border:1px dashed var(--line); border-radius:10px; padding:20px;
+                 text-align:center; color:var(--muted); font-size:14px; }
+  footer.disc { margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
+                font-size:12px; color:var(--muted); }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e5e7eb; --muted:#9ca3af; --line:#374151; --bg:#111827;
+            --pass:#4ade80; --pass-bg:#0f2e1b; --fail:#f87171; --fail-bg:#3a1614;
+            --chip:#312e81; --chip-fg:#c7d2fe; }
+    .chip.off { background:#1f2937; color:#6b7280; }
+  }
+</style>
+</head>
+<body>
+<div class="report">
+
+  <header class="rpt">
+    <h1>{{ meta.stock_name }} <span class="tkr">{{ meta.ticker }}</span></h1>
+    <div class="sub">수급(자금흐름) 리포트 · 기준일 {{ meta.base_date }}</div>
+  </header>
+
+  {# ── 검증 배지 (게이트2) ── #}
+  <section>
+    {% if gate2.passed %}
+      <span class="badge pass">✓ 검증 통과 (게이트2)</span>
+    {% else %}
+      <span class="badge fail">✗ 검증 실패 (게이트2)</span>
+    {% endif %}
+    {% if gate2.checks %}
+      <ul class="checks">
+        {% for c in gate2.checks %}<li>{{ c }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% if gate2.failures %}
+      <ul class="checks">
+        {% for f in gate2.failures %}<li>⚠ {{ f }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  {# ── 팩트 표: signals가 낸 값 그대로(표시 포맷만) ── #}
+  <section>
+    <h2>투자자별 수급 팩트 (최근 5거래일)</h2>
+    <table>
+      <thead>
+        <tr><th>투자자</th><th class="num">연속 순매수</th><th class="num">순매수 강도</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td class="num">
+            {{ r.days }}일
+            {% if r.consec_signal %}<span class="chip">신호</span>{% else %}<span class="chip off">–</span>{% endif %}
+          </td>
+          <td class="num">
+            {{ "%.1f"|format(r.ratio * 100) }}%
+            {% if r.strong %}<span class="chip">강함</span>{% else %}<span class="chip off">–</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# ── 수급 구도(alignment) ── #}
+  <section>
+    <h2>외국인·기관 수급 구도</h2>
+    <div class="align">{{ alignment }}</div>
+  </section>
+
+  {# ── 결론 자리: LLM 해석 예정(placeholder) ── #}
+  <section>
+    <h2>해석</h2>
+    <div class="placeholder">해석 준비 중 — 검증된 팩트를 바탕으로 한 해석이 이 자리에 들어갑니다.</div>
+  </section>
+
+  <footer class="disc">{{ disclaimer }}</footer>
+
+</div>
+</body>
+</html>
