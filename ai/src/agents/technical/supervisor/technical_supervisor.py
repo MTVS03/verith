@@ -60,6 +60,7 @@ from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
 from ..services.kis_client import fetch_multi_timeframe_ohlcv
 from ..synthesis.confidence import ConfidenceResult
+from ..synthesis.intraday_adjustment import apply_intraday_adjustments
 from ..synthesis.intraday_alignment import apply_intraday_hint_to_context
 from ..synthesis.signal_score import IndicatorSignalResult, SignalScoreResult
 
@@ -264,6 +265,7 @@ def _assemble_intraday(
             intraday_candles, previous_close=previous_close, as_of=as_of,
         )
         context = apply_intraday_hint_to_context(context, final_regime)
+        context = apply_intraday_adjustments(context)  # confidence_adjustment·risk_notes(context 내부만)
         return [payload], context
     except Exception:  # noqa: BLE001 - intraday 실패가 D/W/M 전체를 깨지 않도록 흡수
         return [], None
