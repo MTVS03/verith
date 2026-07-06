@@ -128,6 +128,49 @@ def _daily_view(signals: dict) -> list[dict] | None:
     return view
 
 
+def _persistence_view(signals: dict) -> dict | None:
+    """지속성 팩트 → 표시용 뷰. 값 변형 없음 — 표시 스케일·포맷·문구 조립만.
+
+    막대 폭은 기간 내 최대 |합| 대비 상대 스케일(표시 스케일). verdict 문구는
+    persistence 의 검증된 부호·consistent 를 단어로 재표현해 조립할 뿐,
+    새 판정을 만들지 않는다(render 는 표시만).
+    """
+    persistence = signals.get("persistence")
+    if not persistence:
+        return None
+    vals = [
+        abs(v) for s in SUBJECTS
+        for v in (persistence.get(s, {}).get("sum_5"),
+                  persistence.get(s, {}).get("sum_20"))
+        if v is not None
+    ]
+    max_abs = max(vals, default=0.0)
+    rows = []
+    for s in SUBJECTS:
+        p = persistence.get(s, {})
+        row = {"name": s, "consistent": bool(p.get("consistent"))}
+        for key, out in (("sum_5", "d5"), ("sum_20", "d20")):
+            v = p.get(key) or 0.0
+            row[out] = {
+                "val": f"{v:+,.0f}",
+                "cls": "buy" if v > 0 else "sell" if v < 0 else "mut",
+                "w": round(abs(v) / max_abs * 100.0, 1) if max_abs else 0.0,
+            }
+        rows.append(row)
+    # verdict: 검증된 부호·consistent 의 재표현(문구 조립만).
+    cons_buy = [r["name"] for r in rows if r["consistent"] and r["d20"]["cls"] == "buy"]
+    cons_sell = [r["name"] for r in rows if r["consistent"] and r["d20"]["cls"] == "sell"]
+    inconsistent = [r["name"] for r in rows if not r["consistent"]]
+    parts = []
+    if cons_buy:
+        parts.append(f"{'·'.join(cons_buy)}은 5일·20일 모두 순매수")
+    if cons_sell:
+        parts.append(f"{'·'.join(cons_sell)}은 5일·20일 모두 순매도")
+    if inconsistent:
+        parts.append(f"{'·'.join(inconsistent)}은 5일과 20일 방향이 다름")
+    return {"rows": rows, "verdict": " · ".join(parts)}
+
+
 def _headline(rows: list[dict]) -> str:
     """요약 헤드라인 — 각 주체 direction(이미 확정된 부호의 단어)을 문구로 조립.
 
@@ -166,6 +209,7 @@ def build_report(
         "headline": _headline(rows),
         "interpretation": interpretation,   # None이면 템플릿이 placeholder로 후퇴
         "daily": _daily_view(signals),      # None이면 템플릿이 placeholder로 후퇴
+        "persistence": _persistence_view(signals),  # None이면 placeholder로 후퇴
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",

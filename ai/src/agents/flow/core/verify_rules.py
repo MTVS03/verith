@@ -156,6 +156,39 @@ def verify_signals(df: pd.DataFrame, signals: dict) -> GateResult:
         else:
             checks.append(f"일별-강도 교차 정합: 3주체 {len(recent)}일 합 일치")
 
+    # ── 규칙 5: 지속성 정합 ───────────────────────────────
+    # 대조 원칙: calc_persistence 를 다시 부르지 않고, df 에서 두 창의 합을
+    # 독립적으로 구해 주장(sum_5·sum_20)과 대조한다. consistent 는 '주장된
+    # 합'이 아니라 df 유도값의 부호로 판정해 비교한다 — 주장으로 주장을
+    # 검증하는 순환을 막고, 값뿐 아니라 판정까지 독립 검증한다.
+    persistence = signals.get("persistence")
+    trend = df.tail(config.TREND_DAYS)
+    if persistence is None:
+        failures.append("지속성 정합: persistence 가 신호에 없음")
+    else:
+        for subject in sig.SUBJECTS:
+            claim = persistence.get(subject) or {}
+            exp5 = float(recent[subject].sum())
+            exp20 = float(trend[subject].sum())
+            exp_consistent = (exp5 > 0 and exp20 > 0) or (exp5 < 0 and exp20 < 0)
+            c5 = claim.get("sum_5")
+            c20 = claim.get("sum_20")
+            if c5 is None or not math.isclose(c5, exp5, rel_tol=1e-9, abs_tol=1e-6):
+                failures.append(
+                    f"지속성 정합: {subject} sum_5={c5} 가 원본 대조값 {exp5:.1f} 과 불일치"
+                )
+            elif c20 is None or not math.isclose(c20, exp20, rel_tol=1e-9, abs_tol=1e-6):
+                failures.append(
+                    f"지속성 정합: {subject} sum_20={c20} 가 원본 대조값 {exp20:.1f} 과 불일치"
+                )
+            elif bool(claim.get("consistent")) != exp_consistent:
+                failures.append(
+                    f"지속성 판정 정합: {subject} consistent={claim.get('consistent')} 가 "
+                    f"원본 부호 판정 {exp_consistent} 과 불일치"
+                )
+            else:
+                checks.append(f"지속성 정합: {subject} 5일·20일 합과 일관 판정이 원본과 일치")
+
     return GateResult(
         gate=2,
         passed=(len(failures) == 0),

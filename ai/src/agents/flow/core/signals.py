@@ -120,6 +120,26 @@ def calc_alignment(df: pd.DataFrame) -> str:
     return "엇갈림"
 
 
+def calc_persistence(df: pd.DataFrame) -> dict[str, dict[str, object]]:
+    """3주체 각각의 5일 vs 20일 순매수 합과 방향 일관 여부.
+
+    sum_5 / sum_20 : 최근 RECENT_DAYS / TREND_DAYS 일 순매수 합 (단위는 df 그대로).
+    consistent    : 두 합의 부호가 같고 둘 다 0이 아님 — "최근 흐름(5일)이
+                    20일 방향과 일관"의 최소 정의. 하루치 반짝과 꾸준한
+                    매집·매도를 가르는 축. 창 상수는 강도·daily 와 같은
+                    config 를 쓰므로 어긋날 수 없다.
+    """
+    recent = df.tail(config.RECENT_DAYS)
+    trend = df.tail(config.TREND_DAYS)
+    result: dict[str, dict[str, object]] = {}
+    for subject in SUBJECTS:
+        s5 = float(recent[subject].sum())
+        s20 = float(trend[subject].sum())
+        consistent = (s5 > 0 and s20 > 0) or (s5 < 0 and s20 < 0)
+        result[subject] = {"sum_5": s5, "sum_20": s20, "consistent": consistent}
+    return result
+
+
 def extract_daily(df: pd.DataFrame) -> list[dict]:
     """최근 TREND_DAYS일의 일별 순매수 팩트 목록 (오름차순, 최근이 마지막).
 
@@ -150,4 +170,5 @@ def compute_signals(df: pd.DataFrame) -> dict[str, object]:
         "strength": calc_strength(df),
         "alignment": calc_alignment(df),
         "daily": extract_daily(df),          # M2: 일별 순매수 팩트(차트용)
+        "persistence": calc_persistence(df),  # M2: 지속성 5일 vs 20일
     }
