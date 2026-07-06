@@ -452,6 +452,10 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 
 `agent.py` 허용 import: `schemas.contracts`(In/Out)·`supervisor.technical_supervisor`·typing. `llm_client`는 외부 주입(생성·API key·네트워크 코드 없음).
 
+### 5.12 수동 end-to-end smoke (pytest 밖)
+
+`ai/scripts/smoke_technical_agent.py`는 **수동 실행용** smoke script다. `run_technical_agent()`를 **real KIS + fake LLM**으로 호출해 전체 흐름과 `TechnicalAgentOutput` 생성을 확인하고 결과 JSON을 저장한다. real KIS env(`KIS_API_KEY`/`SECRET`/`BASE_URL`)가 필요하므로 **pytest·CI 기본 흐름에는 포함하지 않는다**. 파이프라인 정확성 자체는 `test_technical_supervisor.py`(fake fetcher + fake LLM)가 이미 결정론으로 커버한다 — smoke는 실제 KIS 시세로 도는지를 사람이 확인하는 보완재다.
+
 ---
 
 ## 6. 차트 annotation 계산 테스트 (CHART-*)
