@@ -150,7 +150,7 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 | --- | --- | --- |
 | `indicator` | **코드** | 지표 종류 (moving_average·rsi·volume·support_resistance·pattern) |
 | `signal` | **코드** | 긍정/중립/부정 판정 (`enums.md` signal). LLM이 바꿀 수 없다 |
-| `value` | **코드** | 대표 수치 (결정론 계산 결과) |
+| `value` | **코드** | 대표 수치 (결정론 계산 결과). **계산 가능하면 숫자, 데이터 부족 등으로 계산 불가하면 `null`** (`float \| None`). `null`은 0을 의미하지 않는다 — 계산 불가를 정직히 표현한다(예: 봉 부족으로 거래량비 산출 불가). |
 | `metrics[]` | **코드** | 화면 표시용 계산 수치 칩 배열 (예: `"5MA 82,900"`). 결정론 산출물 |
 | `detail` | **LLM** | 위 확정값(signal·value·metrics)을 자연어로 푼 설명 문장 |
 | `detail_source` | — | `detail`의 최종 출처: `llm` / `llm_regenerated` / `template_fallback` |

@@ -81,12 +81,16 @@ def build_payload(
     signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult],
     risks: Sequence[RiskItem],
+    analysis_focus: Sequence[str] | None = None,
+    focus_summary: str | None = None,
 ) -> dict:
     """코드 확정값 → 프롬프트 입력 payload(prompts.md §4). LLM은 이 값을 읽기만 한다.
 
     `weight`는 넣지 않는다(LLM 서술에 불필요). `value`는 None이면 그대로 null로 흘린다(확정 4).
+    `analysis_focus`·`focus_summary`(노드 2 산출)는 **설명 강조 힌트**로만 넣는다 — LLM은 이 힌트로
+    어떤 관점을 더 풀지 정할 뿐, 확정 라벨·수치는 바꾸지 않는다(prompts.md §3·§4).
     """
-    return {
+    payload: dict = {
         "daily_regime": regime.daily_regime.value,
         "final_regime": regime.final_regime.value,
         "weekly_trend": regime.weekly_trend.value,
@@ -109,6 +113,11 @@ def build_payload(
         ],
         "risk_items": [{"flag": r.flag.value, "note": r.note} for r in risks],
     }
+    if analysis_focus is not None:
+        payload["analysis_focus"] = list(analysis_focus)
+    if focus_summary:
+        payload["focus_summary"] = focus_summary
+    return payload
 
 
 def render_prompt(template: str, payload: dict) -> str:

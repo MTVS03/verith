@@ -21,6 +21,7 @@ from ..schemas.enums import GenerationSource
 from ._llm_utils import (
     LlmClient,
     LlmOutputParseError,
+    call_llm,
     load_prompt,
     parse_json_object,
     render_prompt,
@@ -64,8 +65,8 @@ def run_normalize_question(
 
     prompt = render_prompt(load_prompt(NORMALIZE_PROMPT),
                            build_payload(ticker=ticker, query=query, as_of=as_of))
-    # LLM 호출 자체의 예외(TimeoutError 등)는 삼키지 않고 전파한다(supervisor 책임, M3).
-    raw = client.complete(prompt)
+    # LLM 호출 자체의 예외는 LlmCallError로 전파(supervisor가 잡아 fallback). 파싱/검증 실패는 내부 fallback.
+    raw = call_llm(client, prompt)
     try:
         parsed = parse_json_object(raw, allowed_keys=_ALLOWED_KEYS)
     except LlmOutputParseError:

@@ -53,6 +53,7 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
 - `consensus`·`signal_score`·`confidence`·`confidence_level`·`confidence_basis`: 신호 종합·신뢰도(확정).
 - `technical_signals[]`: 각 지표의 `indicator`·`signal`·`value`·`metrics`(전부 확정). 당신은 여기에 **설명 문장만** 붙입니다.
 - `risk_items[]`: 확인된 위험 요인(`flag`·`note`, 확정).
+- `analysis_focus`·`focus_summary`(있을 수 있음): 노드 2가 정리한 **설명 강조 힌트**. 어떤 관점을 더 풀어 설명할지 참고만 합니다. **이 힌트로 확정 라벨·수치·신호를 바꾸지 마세요.** 힌트에 없는 지표도 확정값은 그대로 서술합니다.
 
 # 출력 형식 (문장만 반환)
 

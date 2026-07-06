@@ -129,9 +129,13 @@ Prompt 10은 이미 확정된 값을 **입력으로 받아 문장만 반환**한
   ],
   "risk_items": [
     { "flag": "volume_not_confirmed", "note": "거래량 확인이 약해 현재 신호의 강도는 제한적입니다." }
-  ]
+  ],
+  "analysis_focus": ["trend", "momentum"],
+  "focus_summary": "추세와 모멘텀을 중심으로 확인합니다."
 }
 ```
+
+> **`analysis_focus`·`focus_summary`(노드 2 산출)는 선택적 설명 강조 힌트다.** supervisor가 노드 2 결과를 payload에 넣어 준다. LLM은 이 힌트로 **어떤 관점을 더 풀어 설명할지**만 참고하고, **확정 라벨·수치·신호는 바꾸지 않는다**(prompts.md §3의 "설명 강조 관점"을 노드 10에서 실제 활용하는 연결 지점). 힌트가 없어도(축약·데이터 부족) Prompt 10은 정상 동작한다.
 
 > `daily_regime`·`weekly_trend`·`monthly_trend`·`alignment_flag`를 입력에 명시하는 이유: LLM은 라벨을 만들지 않지만, 코드가 확정한 멀티프레임 맥락을 문장으로 풀려면 이 값들이 입력에 있어야 한다. 특히 검증 ③은 `alignment_flag=counter_trend`인데 해석이 역행 맥락을 누락하면 실패시키므로, LLM이 `regime_context`만 보고 추론하게 두지 않고 `alignment_flag`를 직접 준다.
 
