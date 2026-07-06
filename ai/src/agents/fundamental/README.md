@@ -20,13 +20,35 @@ response = await analyze_fundamental(
 )
 ```
 
-Supported failures:
+Unsupported ticker or empty DART data no longer raises from the graph. The
+workflow returns a valid `insufficient_data` response through the collect →
+report branch.
+
+External API failures can still surface when no cache fallback is available:
 
 | exception | meaning |
 | --- | --- |
-| `ValueError("UNSUPPORTED_TICKER")` | ticker is outside the fixed 10-company universe |
-| `RuntimeError("DART_EMPTY_DATA")` | DART returned no usable rows |
 | `DartApiError` | DART returned a non-success status |
+
+## 기술스택 지도
+
+| stack | implementation | role |
+| --- | --- | --- |
+| LangGraph `StateGraph` | `nodes/workflow.py` | collect 이후 `data_status`에 따라 report 직행 또는 normalize→calculate→evidence→interpret→verify→report 실행 |
+| pydantic v2 contract | `core/contract.py` | `FundamentalRequest`, `FundamentalResponse`, 계정 단위 `EvidenceAccount` 계약 |
+| Deterministic scoring | `ratios/calculators.py`, `ratios/scorer.py` | DART 원문 기반 지표 계산, 보간식 점수, 라벨 결정 |
+| Evidence graph | `evidence/graph_builder.py` | filing/account/metric/claim nodes와 edges로 수치 근거 경로 구성 |
+| LLM fallback chain | `interpret/llm_interpreter.py`, `nodes/verify_node.py` | Qwen → OpenAI → template, guard/retry 후 안전 착지 |
+| TTL cache/source policy | `retrieval/source_policy.py`, `data/latest_report.py` | 24h 재무제표 TTL, latest probe 기록, stale fallback |
+| Observability trace | `core/observability.py` | 노드별 started_at/duration/status를 `meta.node_trace`에 기록 |
+| Storage preview | `report/schema_builder.py` | 백엔드 ERD 대상 payload를 `meta.erd_payload`로 노출 |
+| HTML/report emitter | `emit/html_builder.py` | 검수용 HTML, section order, evidence Mermaid, 인쇄 스타일 |
+
+Graph export:
+
+```bat
+C:\verith\.venv\Scripts\python.exe -m src.agents.fundamental.api_test.export_graph --skip-evidence
+```
 
 ## Supported Universe
 
@@ -140,7 +162,7 @@ Freshness modes:
 | --- | --- |
 | default | Uses annual report mode and may reuse local DART cache |
 | `--no-cache` | Uses annual report mode but bypasses cache |
-| `--latest` | Discovers the newest available DART filing code and bypasses cache |
+| `--latest` | Discovers the newest available DART filing code, records probe sources, and bypasses cache only for the selected latest year |
 
 `api_test/out/` is throwaway batch output. `api_test/samples/` is the stable
 handoff payload for backend/frontend integration.
@@ -183,7 +205,7 @@ HTML and summaries display Korean labels such as `양호/중립/주의`.
 Financial statement retrieval uses `retrieval/source_policy.py`:
 
 - annual mode: 24-hour TTL cache
-- latest mode: currently bypasses cache for all analyzed years
+- latest mode: uses a 6-hour latest-report selection cache and bypasses cache only for the selected latest year
 - stale cache fallback is allowed when refresh fails
 - correction-filing invalidation is not implemented yet; TTL is the current approximation
 
