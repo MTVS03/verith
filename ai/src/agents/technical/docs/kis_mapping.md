@@ -285,9 +285,10 @@ per, eps, pbr, itewhol_loan_rmnd_ratem
 
 ### 12.1 범위·용어
 
-- **1D intraday = 당일 장중 분봉**(요청 시점까지 쌓인 봉)이다. **KIS Daily(`D`, 일봉)와 다르다**(§4).
-- 조회 방식은 **on-demand intraday snapshot** — 사용자 요청 시점에 **REST로 (필요 시 반복) 조회**한다.
-  WebSocket 틱 스트리밍·자동 polling은 범위 밖(`chart_annotation_spec.md §3.1`, `technical_coding_guidelines.md`).
+- **1D intraday = 당일 장중 분봉**(리포트 생성 시점까지 쌓인 봉)이다. **KIS Daily(`D`, 일봉)와 다르다**(§4).
+- 조회 시점은 **technical report 생성 시** — D/W/M(3m/1y/5y)과 **함께** 서버가 REST로 (필요 시 반복) 조회한다.
+  **프론트 1d 탭 클릭 시 따로 부르는 구조가 아니다.** WebSocket 틱 스트리밍·자동 polling도 범위 밖
+  (`chart_annotation_spec.md §3.1`, `technical_coding_guidelines.md`).
 - 정식 위치: `charts[].period == "1d"`(조건부 포함), `candle_unit == "1min"`. 판단(`final_regime` 등)에는
   직접 반영하지 않고 보조로만 쓴다(`chart_annotation_spec.md §3.1`).
 
