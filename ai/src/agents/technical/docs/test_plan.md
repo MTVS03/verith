@@ -571,3 +571,9 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 | `config.md` | 검증 ①·복원력 테스트의 수치 기준 |
 | `usecase.md` | T5(검증 ②)·T6(검증 ③) 시나리오 |
 | `chart_annotation_spec.md` | 차트 annotation 계산 테스트(CHART-*) 기준 |
+
+---
+
+## 11. 수동 시각 QA 도구 (자동 테스트 아님)
+
+`devtools/streamlit_technical_lab.py` 는 **pytest/CI 대상이 아니다**. real KIS + fake LLM 으로 `run_technical_agent()` 출력과 chart payload 를 화면에서 사람이 눈으로 검수하는 **수동 도구**다(real KIS env 필요). Streamlit `session_state` 는 production cache 가 아니라 수동 QA 용 임시 상태이며, secret 값은 화면에 표시하지 않는다(존재 여부만 OK/MISSING). 실행법은 `implementation_plan.md` §8 참고.
