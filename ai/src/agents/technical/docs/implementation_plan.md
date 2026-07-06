@@ -92,7 +92,9 @@ src/ai/
         │   ├── chart_generate.py        # 9. 차트생성 (코드)
         │   └── interpret_report.py      # 10. 국면해석·리포트 (LLM). prompts/*.md + trajectory_eval 사용
         ├── supervisor/
-        │   └── technical_supervisor.py # 10노드 실행 순서 조율, trace_id 생성, 예외 분기, 재생성 루프
+        │   ├── technical_supervisor.py # run() 진입점(allowlist·trace_start/end) + 노드 helper 소유
+        │   ├── technical_graph.py      # LangGraph StateGraph 조율(node=helper wrapper, conditional edge 2개)
+        │   └── langgraph_state.py      # TechnicalGraphState(주입 의존성+중간 산출 채널, secret 미저장)
         └── tests/                    # test_plan.md 기준 단위테스트
 ```
 
@@ -139,7 +141,8 @@ src/ai/
 | `observability/trajectory_eval.py` | 검증 ③ LLM 라벨 왜곡 판정 | `test_plan.md`, `trace_schema.md` |
 | `observability/keyword_rules.py` | 검증 ③ 키워드 사전(금지어·라벨 충돌) | `test_plan.md`, `prompts.md` |
 | `nodes/*.py` | LangGraph 노드 어댑터(state 받아 모듈·프롬프트 호출 → state에 결과 얹음). 계산 로직은 옆 모듈, 순서 조율은 supervisor. `nodes/interpret_report.py`가 **10번 노드**(prompts/*.md·trajectory_eval 사용, 재생성 루프는 supervisor) | `architecture.md`, `prompts.md`, `contracts.md` |
-| `supervisor/technical_supervisor.py` | 10노드 실행 순서 조율, trace_id 생성, 예외 상태 분기, 검증 ③ 재생성 루프(REGEN_MAX_COUNT=1)→template fallback | `architecture.md`, `trace_schema.md`, `contracts.md` |
+| `supervisor/technical_supervisor.py` | `run()` 진입점(allowlist 선검증·trace_start/end·예외 분기) + 노드 계산 helper 소유. **노드 1~10 실행 순서는 `technical_graph`(LangGraph)가 조율**한다. trace_id 생성, 검증 ③ 재생성 루프(REGEN_MAX_COUNT=1)→template fallback도 helper에 유지 | `architecture.md`, `trace_schema.md`, `contracts.md` |
+| `supervisor/technical_graph.py` | **LangGraph StateGraph 조율**(`feat/technical-langgraph-orchestration`). 각 node는 기존 helper를 호출하는 얇은 wrapper — 계산·output schema 무변경. conditional edge 2개(빈 일봉→data_limited, regime unavailable→안전 착지). checkpointer 미사용, 요청별 client/state는 graph에 담지 않음(module-level 캐시). `run()`이 allowlist·trace_start 뒤 `graph.invoke(state)`로 호출 | `architecture.md`, `trace_schema.md` |
 | `agent.py` | 외부 진입점(얇은 wrapper) `run_technical_agent(payload, *, llm_client, fetcher=None, trace_id=None, trace_sink=None)`: 입력 검증(`TechnicalAgentInput` \| dict) → `technical_supervisor.run` 위임 → `TechnicalAgentOutput` 반환. `trace_sink`는 생성하지 않고 그대로 통과(경로·config 모름). node/KIS/LLM/계산 로직을 직접 호출하지 않는다 | `contracts.md` |
 | *(상위)* `src/api/technical.py` | `/internal/technical/analyze`·`/health` FastAPI 라우터(구현). 의존성 주입(`src/api/dependencies.py`: OpenAI client·KIS fetcher·Redis cache·trace sink) → `run_technical_agent` 위임 → §9 error envelope(`src/api/errors.py`). sync agent는 `run_in_threadpool`로 실행. 인증·전체 deadline·PostgreSQL 저장은 후속 | `api_spec.md`, `contracts.md` |
 
@@ -163,7 +166,7 @@ src/ai/
 10. `observability/trace_logger.py`(sink 주입식·secret-safe·**MVP**). supervisor·agent에 `trace_sink` 배선(미주입=Noop → 출력 불변, 경미한 오버헤드만). trace_schema 전체 상세 필드·운영 sink 생성·JSONL 경로·config 결선은 후속 AI endpoint/production 통합으로 이연.
 11. `prompts/*.md`(interpret_report.md·regenerate_report.md 등 텍스트 자원) + `nodes/*.py`(LLM 노드 어댑터) 연결
 12. `observability/trajectory_eval.py` + `keyword_rules.py` (검증 ③). 노드 10(`nodes/interpret_report.py`)의 문장 검증이 이걸 호출한다
-13. `supervisor/technical_supervisor.py` — 노드 1~10 실행 순서 조율, trace_id 생성(주입 없으면 uuid4), 예외 분기, **검증 ③ 재생성 루프(1회)→template fallback**, 그리고 **로컬 dataclass → `contracts.*` 최종 조립**(여기서 처음으로 `TechnicalAgentOutput`을 만든다). 조립 규약:
+13. `supervisor/technical_supervisor.py` + `supervisor/technical_graph.py`(LangGraph) — 노드 1~10 실행 순서는 **LangGraph StateGraph**(`technical_graph`)가 조율하고, `run()`은 allowlist·trace_start/end로 감싼다. trace_id 생성(주입 없으면 uuid4), 예외 분기, **검증 ③ 재생성 루프(1회)→template fallback**, **로컬 dataclass → `contracts.*` 최종 조립**(`build_output` 노드에서 `TechnicalAgentOutput` 생성)은 helper에 유지. 조립 규약:
     - `MultiframeRegimeResult`→`RegimeResult`(1:1), `SignalScoreResult`+`ConfidenceResult`→`SignalSummary`, `IndicatorSignalResult`+`DetailResult`→`TechnicalSignal`(`value=None` 보존), `risk_detect`·`chart_generate` 반환은 그대로(`RiskSummary(items=…)`·`charts`).
     - **LLM 호출 자체 예외(normalize·focus·interpret·regenerate의 `client.complete`)는 supervisor가 잡아 template fallback으로 진행**(사용자 응답 생성). **fetcher/KIS 실패·OHLCV envelope 불량·계약 조립 불가·예상 못한 계산 오류는 전파**(조용히 삼키지 않음).
     - `data_status`: 정상=`normal`, 일봉 빈 데이터=`data_limited`(안전 착지), 봉 부족으로 `final_regime=unavailable`=`regime_unavailable`(6~8 스킵), W/M 부족=`data_limited`(일봉 분석 계속). **`stale_cache`·`source="KIS (stale)"`는 `services/cache_service.py`(Redis) + supervisor 폴백으로 구현됐다**(`feat/technical-cache-service`, config.md §7·§8): fresh 캐시 hit이면 KIS 없이 사용, miss/만료면 KIS 후 write. **stale 폴백은 KIS 통신 실패(`KisApiError`)에만** 적용하고 envelope/타입/as_of 오류는 전파(fail-fast). KIS 실패 시 **per-timeframe 재구성**(D 필수·W/M optional-empty)으로 복원 가능한 만큼 분석을 계속한다(하나라도 stale이면 `data_status=stale_cache`·`source="KIS (stale)"`). cache는 supervisor **주입식**(기본 None=미사용, 기존 동작), Redis 장애·entry 무결성(ticker/timeframe/as_of/fetched_at)은 cache_service가 miss/no-op으로 흡수한다. **official runtime wiring(agent.py/AI router에서 `default_cache()` 주입)은 후속 브랜치**, 1D 분봉 캐시는 범위 밖.
