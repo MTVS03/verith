@@ -39,6 +39,6 @@ def test_unknown_value_warns_and_false(monkeypatch, raw):
     assert result is False  # 조용한 True 금지 — 운영 안전
 
 
-def test_module_default_is_false():
-    # 기본 개발/CI 환경(.env에 flag 미설정)에서는 반드시 False.
-    assert config.INTRADAY_FETCH_ENABLED is False
+# 주: 모듈 상수 config.INTRADAY_FETCH_ENABLED 는 import 시 ambient env로 1회 계산되므로,
+# "기본 False" 는 env 를 명시적으로 지운 뒤 파서로 검증한다(test_unset_returns_default).
+# ambient env(INTRADAY_FETCH_ENABLED=true)에서 깨지던 모듈 상수 직접 단언 테스트는 제거했다.

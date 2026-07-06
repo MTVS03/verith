@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, timedelta
 
 import pytest
@@ -683,3 +684,40 @@ def test_intraday_direct_candles_use_candle_fallback():
     assert ctx.latest_price == pytest.approx(100.0 + 9 * 0.1)  # 마지막 candle close
     assert ctx.cumulative_volume == 120 * 9 + 600              # sum(candle volume)
     assert ctx.cumulative_trading_value is None                 # metadata 없음 → None
+
+
+# ── SUP intraday: best-effort 실패 로깅 (원인 기록, D/W/M 정상) ──────────────
+def _intraday_warnings(caplog):
+    return [r for r in caplog.records
+            if r.levelno == logging.WARNING and r.getMessage().startswith("intraday_")]
+
+
+def test_intraday_fetch_failure_logs_warning(caplog):
+    def boom(ticker, *, as_of=None, **kw):
+        raise RuntimeError("kis intraday down")
+    with caplog.at_level(logging.WARNING, logger="src.agents.technical.supervisor.technical_supervisor"):
+        out = _run(_INTRA, intraday_fetcher=boom)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
+    assert out.intraday_context is None
+    recs = _intraday_warnings(caplog)
+    assert any(r.getMessage() == "intraday_fetch_failed" for r in recs)  # 원인 기록됨
+    rec = next(r for r in recs if r.getMessage() == "intraday_fetch_failed")
+    assert rec.exc_info is not None                      # exc_info 포함
+    assert rec.stage == "resolve_intraday" and rec.ticker == TICKER
+    # secret/token/account 미포함(로그 extra에 그런 필드 자체가 없어야 함)
+    for attr in ("appkey", "appsecret", "api_key", "api_secret", "token", "account_no"):
+        assert not hasattr(rec, attr)
+
+
+def test_intraday_assemble_failure_logs_warning(monkeypatch, caplog):
+    def boom(*a, **k):
+        raise RuntimeError("assemble boom")
+    monkeypatch.setattr(sup, "build_intraday_chart_payload", boom)
+    with caplog.at_level(logging.WARNING, logger="src.agents.technical.supervisor.technical_supervisor"):
+        out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
+    assert out.intraday_context is None
+    recs = _intraday_warnings(caplog)
+    assert any(r.getMessage() == "intraday_assemble_failed" for r in recs)
+    rec = next(r for r in recs if r.getMessage() == "intraday_assemble_failed")
+    assert rec.exc_info is not None and rec.stage == "assemble_intraday"
