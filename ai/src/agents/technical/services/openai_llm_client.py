@@ -23,10 +23,9 @@ import openai
 
 from ..config import (
     OPENAI_MAX_OUTPUT_TOKENS,
-    OPENAI_MODEL,
     OPENAI_TEMPERATURE,
     OPENAI_TIMEOUT_SECONDS,
-    load_openai_api_key,
+    load_openai_settings,
 )
 from ..nodes._llm_utils import LlmCallError
 
@@ -44,7 +43,7 @@ class OpenAiLlmClient:
         self,
         client: Any,
         *,
-        model: str = OPENAI_MODEL,
+        model: str,  # 코드 기본값 없음 — .env가 단일 출처(default_openai_client가 주입)
         temperature: float | None = OPENAI_TEMPERATURE,
         max_output_tokens: int = OPENAI_MAX_OUTPUT_TOKENS,
         timeout: float = OPENAI_TIMEOUT_SECONDS,
@@ -108,16 +107,17 @@ def default_openai_client(
     max_output_tokens: int = OPENAI_MAX_OUTPUT_TOKENS,
     timeout: float = OPENAI_TIMEOUT_SECONDS,
 ) -> OpenAiLlmClient:
-    """운영용 OpenAI client 생성. **API key 누락은 여기서 fail-fast**(config error, LlmCallError 아님).
+    """운영용 OpenAI client 생성. **API key·model 누락은 여기서 fail-fast**(config error, LlmCallError 아님).
 
-    key 값은 `config.load_openai_api_key()`가 .env/환경변수에서 읽는다(코드/로그/trace 미저장).
-    `run_technical_agent`는 이걸 자동 호출하지 않는다 — endpoint 통합에서 주입한다(A안).
+    api_key·model은 `config.load_openai_settings()`가 .env/환경변수에서 읽는다(코드/로그/trace 미저장).
+    `model` 인자를 명시하면 .env 값 대신 그것을 쓴다(테스트/실험용). `run_technical_agent`는 이걸
+    자동 호출하지 않는다 — endpoint 통합에서 주입한다(A안).
     """
-    api_key = load_openai_api_key()  # 누락 시 RuntimeError(어디에 무엇을 넣을지 명시)
-    sdk_client = openai.OpenAI(api_key=api_key, timeout=timeout)
+    settings = load_openai_settings()  # api_key·model 누락 시 RuntimeError(어디에 무엇을 넣을지 명시)
+    sdk_client = openai.OpenAI(api_key=settings.api_key, timeout=timeout)
     return OpenAiLlmClient(
         sdk_client,
-        model=model or OPENAI_MODEL,
+        model=model or settings.model,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         timeout=timeout,

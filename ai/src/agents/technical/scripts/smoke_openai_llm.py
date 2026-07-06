@@ -19,7 +19,6 @@ pytest/CI에는 포함하지 않는다(real OpenAI env 필요·비용 발생). O
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
@@ -30,7 +29,7 @@ _AI_ROOT = Path(__file__).resolve().parents[4]
 if str(_AI_ROOT) not in sys.path:
     sys.path.insert(0, str(_AI_ROOT))
 
-from src.agents.technical.config import OPENAI_API_KEY_ENV, OPENAI_MODEL  # noqa: E402
+from src.agents.technical.config import OPENAI_API_KEY_ENV, OPENAI_MODEL_ENV  # noqa: E402
 from src.agents.technical.nodes._llm_utils import LlmCallError  # noqa: E402
 from src.agents.technical.services.openai_llm_client import default_openai_client  # noqa: E402
 
@@ -40,21 +39,20 @@ _DEFAULT_PROMPT = "연결 확인용입니다. '연결 확인 완료'라고만 �
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="OpenAI LLM adapter 단독 smoke")
-    parser.add_argument("--model", default=None, help=f"모델 override(기본: {OPENAI_MODEL})")
+    parser.add_argument("--model", default=None, help=f"모델 override(기본: .env의 {OPENAI_MODEL_ENV})")
     parser.add_argument("--prompt", default=_DEFAULT_PROMPT, help="테스트 프롬프트(내용은 출력하지 않음)")
     args = parser.parse_args()
 
-    if not (os.getenv(OPENAI_API_KEY_ENV) or "").strip():
-        print(f"[smoke] {OPENAI_API_KEY_ENV} 가 없습니다. ai/.env 에 설정한 뒤 다시 실행하세요.")
-        print(f"        예: {OPENAI_API_KEY_ENV}=sk-... uv run python {Path(__file__).name}")
-        return 0  # 키 없음은 실패가 아니라 skip
-
-    print("⚠️  실제 OpenAI API를 호출합니다(토큰 비용 발생).")
+    # client 생성이 .env를 로드하고 OPENAI_API_KEY/OPENAI_MODEL 누락을 fail-fast로 알려준다
+    # (os.getenv 직접 확인은 .env 로드 전이라 부정확 — 로더에 맡긴다). 누락은 실패가 아니라 skip.
     try:
         client = default_openai_client(model=args.model)
-    except RuntimeError as exc:  # config error(키 누락 등) — 메시지엔 secret 없음
-        print(f"[smoke] client 생성 실패(config): {exc}")
-        return 1
+    except RuntimeError as exc:  # config error(키/모델 누락 등) — 메시지엔 secret 없음
+        print(f"[smoke] 설정 누락으로 skip: {exc}")
+        print(f"        ai/.env 에 {OPENAI_API_KEY_ENV}=... 와 {OPENAI_MODEL_ENV}=... 를 설정 후 재실행.")
+        return 0
+
+    print("⚠️  실제 OpenAI API를 호출합니다(토큰 비용 발생).")
 
     started = time.perf_counter()
     try:
