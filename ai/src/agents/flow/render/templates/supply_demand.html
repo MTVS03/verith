@@ -63,6 +63,22 @@
   .placeholder { border:1.5px dashed #E5E8EB; border-radius:14px; padding:34px 20px;
                  text-align:center; color:#8B95A1; font-size:13.5px; }
 
+  /* 일별 차트 */
+  .chart { position:relative; display:flex; gap:6px; height:230px; margin-top:4px; }
+  .chart .base { position:absolute; left:0; right:0; top:50%; height:2px; background:#D1D6DB; }
+  .dgroup { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .dtracks { flex:1; display:flex; gap:2px; justify-content:center; }
+  .dtrack { width:9px; position:relative; }
+  .dtrack.shade { background:#F7F8FA; border-radius:3px; }   /* 음영=개인 */
+  .dbar { position:absolute; left:0; right:0; border-radius:3px 3px 0 0; }
+  .dbar.buy  { bottom:50%; background:#F04452; }
+  .dbar.sell { top:50%; background:#3182F6; border-radius:0 0 3px 3px; }
+  .dlabel { text-align:center; font-size:9.5px; color:#B0B8C1; margin-top:6px;
+            white-space:nowrap; overflow:hidden; }
+  .legend { display:flex; gap:14px; margin-top:12px; font-size:12px; color:#8B95A1; }
+  .legend .dot { display:inline-block; width:9px; height:9px; border-radius:3px;
+                 margin-right:5px; vertical-align:-1px; }
+
   /* 해석 신호 3카드 */
   .sigrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
   @media (max-width: 720px) { .sigrid { grid-template-columns:1fr; } }
@@ -160,11 +176,35 @@
       </div>
     </section>
 
-    {# ── [B] 투자자별 일별 순매수 차트 — M2 ── #}
+    {# ── [A] 투자자별 일별 순매수 — daily 팩트(게이트2 규칙4 검증분)를 그리기만 ── #}
     <section class="card" id="daily">
       <h2>투자자별 일별 순매수</h2>
-      <div class="cap">일별 막대 차트 · 개인·외국인·기관</div>
-      <div class="placeholder">데이터 준비 중 (M2) — 일별 순매수 시계열 차트가 이 자리에 들어갑니다.</div>
+      <div class="cap">최근 {{ trend_days }}거래일 · 막대 순서 개인·외국인·기관(음영은 개인) · 단위 백만원 · +매수 −매도</div>
+      {% if daily %}
+      <div class="chart">
+        <div class="base"></div>
+        {% for day in daily %}
+        <div class="dgroup">
+          <div class="dtracks">
+            {% for b in day.bars %}
+            <div class="dtrack{{ ' shade' if loop.first }}"
+                 title="{{ day.iso }} {{ b.subject }} {{ b.val }} (백만원)">
+              {% if b.h %}<div class="dbar {{ b.cls }}" style="height:{{ b.h }}%"></div>{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          <div class="dlabel">{{ day.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:#F04452"></span>순매수</span>
+        <span><span class="dot" style="background:#3182F6"></span>순매도</span>
+        <span><span class="dot" style="background:#F7F8FA;border:1px solid #E5E8EB"></span>개인 트랙 음영</span>
+      </div>
+      {% else %}
+      <div class="placeholder">데이터 준비 중 — 일별 순매수 시계열이 아직 없습니다.</div>
+      {% endif %}
     </section>
 
     {# ── [B] 지속성 5일 vs 20일 — M2 ── #}
