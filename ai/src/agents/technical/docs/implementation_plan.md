@@ -131,7 +131,7 @@ src/ai/
 | `observability/keyword_rules.py` | 검증 ③ 키워드 사전(금지어·라벨 충돌) | `test_plan.md`, `prompts.md` |
 | `nodes/*.py` | LangGraph 노드 어댑터(state 받아 모듈·프롬프트 호출 → state에 결과 얹음). 계산 로직은 옆 모듈, 순서 조율은 supervisor. `nodes/interpret_report.py`가 **10번 노드**(prompts/*.md·trajectory_eval 사용, 재생성 루프는 supervisor) | `architecture.md`, `prompts.md`, `contracts.md` |
 | `supervisor/technical_supervisor.py` | 10노드 실행 순서 조율, trace_id 생성, 예외 상태 분기, 검증 ③ 재생성 루프(REGEN_MAX_COUNT=1)→template fallback | `architecture.md`, `trace_schema.md`, `contracts.md` |
-| `agent.py` | 외부 진입점(얇은 wrapper): 입력 검증 → supervisor 호출 → 출력 반환 | `contracts.md` |
+| `agent.py` | 외부 진입점(얇은 wrapper) `run_technical_agent(payload, *, llm_client, fetcher=None, trace_id=None)`: 입력 검증(`TechnicalAgentInput` \| dict) → `technical_supervisor.run` 위임 → `TechnicalAgentOutput` 반환. node/KIS/LLM/계산 로직을 직접 호출하지 않는다 | `contracts.md` |
 | *(상위)* `src/ai/api/internal.py` | `/internal/technical/analyze` HTTP 라우터 (AI 서버 공통, technical 밖) | `api_spec.md`, `contracts.md` |
 
 백엔드(리포트 저장·조회 API, PostgreSQL)는 팀 백엔드 담당 영역이며, 이 에이전트는 `agent.py`가 JSON을 반환하는 데까지 책임진다. HTTP 경계(`src/ai/api/internal.py`)와 에이전트 라우팅(`supervisor/router.py`)은 AI 서버 상위 영역이다.
