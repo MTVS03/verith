@@ -45,6 +45,7 @@ class FundamentalAgentState(TypedDict, total=False):
     confidence: float
     meta: dict[str, Any]
     response: FundamentalResponse
+    node_trace: list[dict[str, Any]]
 
 
 def extend_unique(target: list[str], values: list[str]) -> list[str]:

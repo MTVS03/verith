@@ -32,6 +32,7 @@ def report_node(state: FundamentalAgentState) -> dict[str, Any]:
         "corp_code": state["corp_code"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "trace_id": request.trace_id,
+        "node_trace": state.get("node_trace", []),
         "workflow": ["collect", "normalize", "calculate", "evidence", "interpret", "verify", "report"],
     }
     erd_payload = build_erd_payload(
