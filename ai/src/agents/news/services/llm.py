@@ -79,16 +79,20 @@ def _completions_url() -> str:
 # Qwen3 클라이언트 (테스트 시임: _chat_completion 을 mock 한다)
 # ---------------------------------------------------------------------------
 def _chat_completion(messages: list[dict], tools: list[dict] | None = None,
-                     tool_choice: str = "auto") -> dict:
+                     tool_choice: str = "auto", *,
+                     temperature: float | None = None,
+                     max_tokens: int | None = None) -> dict:
     """chat.completions 1회 호출 → 응답 JSON(OpenAI 형태) 반환. 타임아웃·재시도 적용(CLAUDE.md §7).
 
+    temperature/max_tokens 를 넘기지 않으면 추출용 기본값(LLM_TEMPERATURE/LLM_MAX_TOKENS)을 쓴다.
+    질의 흐름(TASK 09)은 QUERY_ANSWER_* 값을 넘겨 서술형 답변에 맞게 조절한다.
     테스트는 이 함수를 monkeypatch 해 실제 네트워크 없이 고정 응답을 돌려준다.
     """
     payload: dict = {
         "model": LLM_MODEL,
         "messages": messages,
-        "temperature": LLM_TEMPERATURE,
-        "max_tokens": LLM_MAX_TOKENS,
+        "temperature": LLM_TEMPERATURE if temperature is None else temperature,
+        "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
     }
     if tools:
         payload["tools"] = tools
@@ -108,6 +112,29 @@ def _chat_completion(messages: list[dict], tools: list[dict] | None = None,
                 continue
             raise
     raise last_exc  # 도달 불가(방어)
+
+
+# ---------------------------------------------------------------------------
+# 질의 흐름(TASK 09) 재사용 진입점 — 범용 chat 텍스트 + JSON 오브젝트 추출
+# 배치 추출과 질의(질문이해·답변생성)가 같은 Qwen3 클라이언트를 공유한다(§0.1). 툴 없이 텍스트만 받는다.
+# ---------------------------------------------------------------------------
+def complete(messages: list[dict], *, temperature: float | None = None,
+             max_tokens: int | None = None) -> str | None:
+    """chat 1회 호출 → assistant content(텍스트) 반환. 툴은 쓰지 않는다(질의는 텍스트만, 절대규칙 4).
+
+    타임아웃·재시도는 _chat_completion 재사용. 질의 서비스는 이 함수를 mock 해 네트워크 없이 테스트한다.
+    """
+    resp = _chat_completion(messages, tools=None, tool_choice="none",
+                            temperature=temperature, max_tokens=max_tokens)
+    return resp["choices"][0]["message"].get("content")
+
+
+def coerce_json(text: str | None) -> dict | None:
+    """모델 출력 텍스트에서 JSON 오브젝트 하나를 뽑는다(코드펜스·앞뒤 잡텍스트 제거). 실패 시 None.
+
+    질문이해·답변생성이 LLM 원출력을 Pydantic 모델로 파싱하기 전에 쓴다(CLAUDE.md §2-3).
+    """
+    return _coerce_json(text)
 
 
 # ---------------------------------------------------------------------------

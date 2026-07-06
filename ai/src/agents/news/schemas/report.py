@@ -23,6 +23,8 @@ class ArticleRef(BaseModel):
 
 class ReportEvent(BaseModel):
     """리포트에 노출되는 이벤트 한 건."""
+    # 근거 이슈 칩(Answer.cited_event_ids)→이벤트 링크의 키(= Event.canonical_id, §0.2). 없으면 None.
+    canonical_id: str | None = None
     canonical_title: str
     importance: float
     gauge: SentimentGauge
@@ -34,6 +36,7 @@ class ReportModel(BaseModel):
     """종목(입력) + 생성 시각 + 전체 게이지 + TOP 이벤트 리스트."""
     subject: str                       # 입력 종목/섹터
     generated_at: datetime
+    period_days: int | None = None     # 집계 기간(헤더 표시용). 없으면 표기 생략(지어내지 않음)
     overall_gauge: SentimentGauge
     top_events: list[ReportEvent] = Field(default_factory=list)
     data_limited: bool = False         # 데이터 부족 시 True("데이터 제한" 표기, 절대규칙 5)
