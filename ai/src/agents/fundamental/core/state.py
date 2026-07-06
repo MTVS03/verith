@@ -19,6 +19,8 @@ class FundamentalAgentState(TypedDict, total=False):
     dart_calls: int
     source_records: list[Any]
     retrieval_summary: dict[str, Any]
+    data_status: str
+    data_status_reason: str
     risk_flags: list[str]
     yearly_metrics: dict[str, dict[str, Any]]
     share_count: Any

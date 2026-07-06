@@ -40,6 +40,7 @@ def build_interpret_prompt(
         "corp_name": corp_name,
         "score": score,
         "verdict_label": label,
+        "intent": (analyst_plan or {}).get("score_context", {}).get("intent", "fundamental_health"),
         "ratios": ratios,
         "trend": trend,
         "insights": insights or {},
@@ -58,6 +59,7 @@ def build_interpret_prompt(
         "Write a professional but cautious Korean fundamental analyst interpretation for the following payload. "
         "Follow analyst_plan.section_order and use retrieval_context.ordered_evidence_briefs as the reasoning backbone. "
         "Cover profitability, stability, growth, valuation basis, shareholder context, and data limits when relevant. "
+        "Treat payload.intent as the user's emphasis and lead with that section when possible. "
         "Respect period_basis exactly; if it is an interim report, never describe the numbers as full-year results. "
         "Return only one final JSON object with keys verdict_label, verdict, and interpretation. "
         "Do not include <think>, reasoning, markdown, or any text outside JSON.\n"

@@ -8,7 +8,7 @@ class FundamentalRequest(BaseModel):
     trace_id: str
     ticker: str
     corp_name: str | None = None
-    intent: str = "fundamental_health"
+    intent: Literal["fundamental_health", "profitability", "stability", "growth", "valuation"] = "fundamental_health"
     fs_div: Literal["CFS", "OFS"] = "CFS"
     report_mode: Literal["annual", "latest"] = "annual"
     years: int = Field(default=4, ge=1, le=6)

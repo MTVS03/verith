@@ -24,7 +24,11 @@ def build_fundamental_workflow():
     workflow.add_node("report", traced_node("report", report_node))
 
     workflow.set_entry_point("collect")
-    workflow.add_edge("collect", "normalize")
+    workflow.add_conditional_edges(
+        "collect",
+        lambda state: "report" if state.get("data_status") in {"unsupported_ticker", "empty_data"} else "normalize",
+        {"report": "report", "normalize": "normalize"},
+    )
     workflow.add_edge("normalize", "calculate")
     workflow.add_edge("calculate", "evidence")
     workflow.add_edge("evidence", "interpret")

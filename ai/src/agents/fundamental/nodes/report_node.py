@@ -10,7 +10,72 @@ from ..report.schema_builder import build_erd_payload
 from ..core.state import FundamentalAgentState
 
 
+def _insufficient_response(state: FundamentalAgentState) -> dict[str, Any]:
+    request = state["request"]
+    reason = state.get("data_status_reason", "분석 가능한 데이터가 부족합니다.")
+    risk_flags = state.get("risk_flags", [])
+    meta = {
+        "llm_provider": "template",
+        "llm_model": "rule-based",
+        "llm_guard_violations": [],
+        "latency_ms": 0,
+        "dart_calls": state.get("dart_calls", 0),
+        "fs_div": state.get("fs_div", request.fs_div),
+        "reprt_code": state.get("reprt_code", ""),
+        "reprt_name": state.get("reprt_name", ""),
+        "report_mode": state.get("report_mode", request.report_mode),
+        "period_basis": state.get("period_basis", {}),
+        "fresh_dart": request.report_mode == "latest",
+        "retrieval_summary": state.get("retrieval_summary", {}),
+        "verification_summary": {
+            "binding_passed": True,
+            "consistency_passed": True,
+            "guard_passed": True,
+            "verdict_stable": True,
+            "outcome": "insufficient_data",
+            "reasons": [state.get("data_status", "insufficient_data")],
+            "regen_count": 0,
+        },
+        "cost_summary": {"llm_calls": 0, "prompt_tokens": None, "completion_tokens": None, "dart_network_calls": 0, "probe_calls": 0},
+        "corp_code": state.get("corp_code", ""),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "trace_id": request.trace_id,
+        "node_trace": state.get("node_trace", []),
+        "workflow": ["collect", "report"],
+    }
+    verdict = f"{reason} 현재 입력만으로 재무 상태를 판정하지 않습니다."
+    response = FundamentalResponse(
+        request_id=request.request_id,
+        ticker=request.ticker,
+        corp_name=state.get("corp_name", request.corp_name or request.ticker),
+        verdict=verdict,
+        verdict_label="insufficient_data",
+        confidence=0.3,
+        score=0,
+        score_breakdown={
+            "score_type": "absolute_financial_health",
+            "label_display": "데이터 제한",
+            "score_explanation": reason,
+        },
+        analyst_plan={"section_order": ["data_limits"], "section_briefs": {"data_limits": reason}},
+        evidence_graph={"nodes": [], "edges": [], "sections": []},
+        retrieval_context={"ordered_evidence_briefs": [reason], "metric_claims": []},
+        ratios={},
+        trend={"years": [], "revenue": [], "op_income": [], "roe": []},
+        insights={},
+        interpretation=reason,
+        evidence=[],
+        risk_flags=risk_flags,
+        report_html=f"<section><h2>{state.get('corp_name', request.ticker)}</h2><p>{reason}</p></section>",
+        meta=meta,
+    )
+    return {"meta": meta, "response": response}
+
+
 def report_node(state: FundamentalAgentState) -> dict[str, Any]:
+    if state.get("data_status") in {"unsupported_ticker", "empty_data"}:
+        return _insufficient_response(state)
+
     request = state["request"]
     ratios = state["ratios"]
     trend = state["trend"]

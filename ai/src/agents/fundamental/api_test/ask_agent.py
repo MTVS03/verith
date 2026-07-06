@@ -248,6 +248,7 @@ async def ask_once(
     years: int | None,
     use_cache: bool,
     latest: bool = False,
+    intent: str = "fundamental_health",
 ) -> tuple[FundamentalResponse, Path, Path]:
     resolved_ticker = resolve_ticker_from_question(question, ticker)
     resolved_years = years if years is not None else resolve_years_from_question(question)
@@ -259,6 +260,7 @@ async def ask_once(
         corp_name=DISPLAY_NAMES.get(resolved_ticker),
         years=resolved_years,
         report_mode="latest" if latest_mode else "annual",
+        intent=intent,
     )
     response = await analyze_fundamental(request, use_cache=False if latest_mode else use_cache)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -287,6 +289,7 @@ async def interactive_loop(args: argparse.Namespace) -> int:
                 years=args.years,
                 use_cache=not args.no_cache,
                 latest=args.latest,
+                intent=args.intent,
             )
         except Exception as exc:
             print(f"[ERROR] {type(exc).__name__}: {exc}")
@@ -323,6 +326,12 @@ def main() -> int:
     parser.add_argument("--years", type=int, default=None, help="Optional analysis years, 1-6")
     parser.add_argument("--no-cache", action="store_true", help="Bypass local DART cache")
     parser.add_argument("--latest", action="store_true", help="Discover the newest available DART filing and bypass cache")
+    parser.add_argument(
+        "--intent",
+        default="fundamental_health",
+        choices=["fundamental_health", "profitability", "stability", "growth", "valuation"],
+        help="Analysis emphasis",
+    )
     parser.add_argument("question_parts", nargs="*", help="Question words, useful when CMD quoting breaks")
     args, unknown = parser.parse_known_args()
 
@@ -340,6 +349,7 @@ def main() -> int:
                 years=args.years,
                 use_cache=not args.no_cache,
                 latest=args.latest,
+                intent=args.intent,
             )
         )
         print_response_summary(response, md_path, html_path)
