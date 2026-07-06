@@ -200,7 +200,7 @@ def test_sup12_regime_unavailable_skips_signal():
     assert out.signal is None
     assert out.risk is None
     assert out.technical_signals == []
-    assert len(out.charts) == 3  # 차트는 가능분 생성
+    assert {"3m", "1y", "5y"} <= {p.period.value for p in out.charts}  # D/W/M 3종 존재(1d는 조건부)
 
 
 def test_sup13_wm_short_data_limited_but_analyzes():

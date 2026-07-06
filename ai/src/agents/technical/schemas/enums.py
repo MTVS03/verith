@@ -94,6 +94,7 @@ class ChartPeriod(str, Enum):
     THREE_MONTHS = "3m"
     ONE_YEAR = "1y"
     FIVE_YEARS = "5y"
+    ONE_DAY = "1d"  # 장중 분봉(Beta) — chart_annotation_spec §3.1. intraday 가용 시 조건부 포함.
 
 
 class VerificationOutcome(str, Enum):
