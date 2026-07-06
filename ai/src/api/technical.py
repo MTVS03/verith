@@ -12,54 +12,75 @@ endpoint는 runtime 의존성(OpenAI client·KIS fetcher·Redis cache·trace sin
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 
 from src.agents.technical.agent import run_technical_agent
-from src.agents.technical.nodes._llm_utils import LlmCallError, LlmClient
+from src.agents.technical.config import TECHNICAL_AGENT_TIMEOUT_SECONDS
+from src.agents.technical.nodes._llm_utils import LlmCallError
 from src.agents.technical.observability.trace_logger import TraceSink
+from src.agents.technical.runtime.deadline import Deadline, DeadlineExceeded
 from src.agents.technical.schemas.contracts import TechnicalAgentInput, TechnicalAgentOutput
 from src.agents.technical.services.cache_service import OhlcvCache
 from src.agents.technical.services.kis_client import KisApiError, OutOfScopeTickerError
 from src.agents.technical.supervisor.technical_supervisor import OhlcvFetcher
-from src.api.dependencies import get_cache, get_fetcher, get_llm_client, get_trace_sink
-from src.api.errors import AppError, ai_unavailable, internal_error, out_of_scope_ticker
+from src.api.dependencies import (
+    LlmClientFactory,
+    get_cache,
+    get_fetcher,
+    get_llm_client,
+    get_trace_sink,
+)
+from src.api.errors import AppError, ai_timeout, ai_unavailable, internal_error, out_of_scope_ticker
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal/technical", tags=["technical-internal"])
 
+_SERVICE_VERSION = "0.1.0"  # api_spec §7.2 health version
+
 
 @router.get("/health")
 def health() -> dict[str, str]:
     """router liveness — 실 연결(OpenAI/KIS/Redis) 검사 없음, 네트워크 호출 없음(api_spec §7.2)."""
-    return {"status": "ok", "service": "technical-agent"}
+    return {"status": "ok", "service": "technical-agent", "version": _SERVICE_VERSION}
 
 
 @router.post("/analyze", response_model=TechnicalAgentOutput)
 async def analyze(
     body: TechnicalAgentInput,
-    llm_client: LlmClient = Depends(get_llm_client),
+    make_llm: LlmClientFactory = Depends(get_llm_client),
     fetcher: OhlcvFetcher | None = Depends(get_fetcher),
     cache: OhlcvCache | None = Depends(get_cache),
     trace_sink: TraceSink | None = Depends(get_trace_sink),
 ) -> TechnicalAgentOutput:
-    """분석 실행(api_spec §7.1). 요청은 `TechnicalAgentInput`(request_id 필수)으로 검증된다.
+    """분석 실행(api_spec §7.1). 요청은 `TechnicalAgentInput`(request_id 필수·6자리 ticker 등)으로 검증된다.
 
-    KIS 개별 실패·재생성·폴백은 agent 내부에서 흡수돼 200(stale_cache/data_limited)으로 나간다.
+    전체 실행을 `TECHNICAL_AGENT_TIMEOUT_SECONDS` 예산의 Deadline으로 묶는다: agent가 stage마다
+    cooperative check하고(초과 시 DeadlineExceeded), endpoint는 `asyncio.wait_for`로 응답 시간까지
+    바운딩한다(둘 다 504 AI_TIMEOUT). KIS 개별 실패·재생성·폴백은 agent 내부에서 흡수돼 200으로 나가고,
     endpoint까지 전파되는 예외만 §9 error envelope로 매핑한다.
     """
+    deadline = Deadline.after(TECHNICAL_AGENT_TIMEOUT_SECONDS)
+    llm_client = make_llm(deadline)  # config 오류면 여기서 AppError(502)
     try:
-        return await run_in_threadpool(
-            run_technical_agent,
-            body,
-            llm_client=llm_client,
-            fetcher=fetcher,
-            cache=cache,
-            trace_sink=trace_sink,
+        return await asyncio.wait_for(
+            run_in_threadpool(
+                run_technical_agent,
+                body,
+                llm_client=llm_client,
+                fetcher=fetcher,
+                cache=cache,
+                trace_sink=trace_sink,
+                deadline=deadline,
+            ),
+            timeout=TECHNICAL_AGENT_TIMEOUT_SECONDS,
         )
+    except (TimeoutError, DeadlineExceeded):
+        raise ai_timeout(body.request_id) from None               # 504 AI_TIMEOUT
     except OutOfScopeTickerError:
         raise out_of_scope_ticker(body.request_id) from None      # 422 OUT_OF_SCOPE_TICKER
     except (LlmCallError, KisApiError):

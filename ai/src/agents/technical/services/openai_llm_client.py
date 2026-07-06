@@ -37,6 +37,7 @@ from ..config import (
     load_openai_settings,
 )
 from ..nodes._llm_utils import LlmCallError
+from ..runtime.deadline import Deadline, DeadlineExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class OpenAiLlmClient:
         max_output_tokens: int = OPENAI_MAX_OUTPUT_TOKENS,
         timeout: float = OPENAI_TIMEOUT_SECONDS,
         store: bool = OPENAI_STORE,
+        deadline: Deadline | None = None,
     ) -> None:
         self._client = client
         self.model = model
@@ -64,6 +66,7 @@ class OpenAiLlmClient:
         self._max_output_tokens = max_output_tokens
         self._timeout = timeout
         self._store = store  # False면 OpenAI 측 application state 미저장(stateless)
+        self._deadline = deadline  # 있으면 per-call timeout을 남은 예산 이하로 줄인다(60초 계약 보호)
         # 후속 trace 배선용 best-effort 노출 — **마지막 성공 호출**의 토큰 사용량(실패/미호출 시 None).
         # 동시 실행에서 request-scoped state로 신뢰하지 말 것(공유 client면 다른 요청이 덮을 수 있음).
         self.last_usage: dict[str, int] | None = None
@@ -75,11 +78,18 @@ class OpenAiLlmClient:
         OpenAI 예외는 chain을 끊어(`from None`) raw 오류가 상위 traceback에 노출되지 않게 한다.
         """
         self.last_usage = None  # 진입 시 리셋 — 어떤 실패든 last_usage=None 보장
+        # deadline이 있으면 per-call timeout을 남은 예산 이하로 줄인다. 남은 예산이 없으면 호출 안 함.
+        timeout = self._timeout
+        if self._deadline is not None:
+            remaining = self._deadline.remaining_seconds()
+            if remaining <= 0.0:
+                raise DeadlineExceeded("deadline exceeded before openai call")
+            timeout = min(timeout, remaining)
         request: dict[str, Any] = {
             "model": self.model,
             "input": prompt,
             "max_output_tokens": self._max_output_tokens,
-            "timeout": self._timeout,
+            "timeout": timeout,
             "store": self._store,  # OpenAI 측 저장 여부(기본 False=stateless)
         }
         if self._temperature is not None:  # None이면 파라미터 생략(모델별 미허용 대비)
@@ -133,6 +143,7 @@ def default_openai_client(
     timeout: float = OPENAI_TIMEOUT_SECONDS,
     max_retries: int = OPENAI_MAX_RETRIES,
     store: bool = OPENAI_STORE,
+    deadline: Deadline | None = None,
 ) -> OpenAiLlmClient:
     """운영용 OpenAI client 생성. **API key·model 누락은 여기서 fail-fast**(config error, LlmCallError 아님).
 
@@ -150,4 +161,5 @@ def default_openai_client(
         max_output_tokens=max_output_tokens,
         timeout=timeout,
         store=store,
+        deadline=deadline,
     )

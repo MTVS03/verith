@@ -247,7 +247,13 @@ MVP는 전체 JSONL 원문이 아니라 요약만 반환한다. 전체 trace log
 
 ## 7. Backend → AI Agent 내부 API
 
-> **구현 상태(`feat/technical-ai-endpoint`):** §7.1·§7.2가 `src/api/technical.py`(FastAPI router, `main.py`에 등록)로 구현됐다. runtime 의존성은 `src/api/dependencies.py`가 주입한다 — OpenAI client(`default_openai_client()`)·KIS fetcher(기본 None=실 KIS)·Redis cache(`default_cache()`, `REDIS_URL` 없으면 None=비활성)·trace sink(이번 브랜치는 Noop). 에러는 §9 envelope로 매핑(`src/api/errors.py`, secret-free 고정 메시지). sync agent는 `run_in_threadpool`로 실행한다. **인증 미구현**(내부망/후속 gateway 전제, §7.1 "내부망 또는 내부 토큰"). **전체 60초 deadline 강제·PostgreSQL 저장/조회는 후속**(§10·§11 backend integration). OpenAI `store=False`(stateless)이며 분석 이력·follow-up context는 backend PostgreSQL이 관리한다(이 브랜치 미구현).
+> **구현 상태(`feat/technical-ai-endpoint` + hardening):** §7.1·§7.2가 `src/api/technical.py`(FastAPI router, `main.py`에 등록)로 구현됐다. runtime 의존성은 `src/api/dependencies.py`가 주입한다 — OpenAI client 팩토리(`default_openai_client(deadline=…)`)·KIS fetcher(기본 None=실 KIS)·Redis cache(`default_cache()`, `REDIS_URL` 없으면 None=비활성)·trace sink(이번 브랜치는 Noop). 에러는 §9 envelope로 매핑(`src/api/errors.py`, secret-free 고정 메시지). sync agent는 `run_in_threadpool`로 실행한다.
+>
+> - **입력 검증**: `TechnicalAgentInput`이 ticker 6자리·query/request_id 비어있지 않음·as_of 미래 금지를 validator로 강제한다(형식 오류 → 422 VALIDATION_ERROR, OpenAI/KIS 이전 차단).
+> - **allowlist 선검증**: MVP 범위(BATTERY_TICKERS) 밖 ticker는 `supervisor.run` 시작부에서 즉시 `OutOfScopeTickerError` → 422 OUT_OF_SCOPE_TICKER. **OpenAI·cache·KIS 이전**에 항상 검사되어 fetcher/cache 주입으로 우회되지 않는다(전 진입 경로 보호).
+> - **deadline**: `TECHNICAL_AGENT_TIMEOUT_SECONDS`(기본 55초 < 60초 계약)로 `Deadline`을 만들어 agent→supervisor에 전달, stage마다 cooperative check(초과 시 `DeadlineExceeded`). endpoint는 `asyncio.wait_for`로 응답 시간까지 바운딩. OpenAI 어댑터는 per-call timeout을 남은 예산 이하로 줄인다. 둘 다 초과 시 504 AI_TIMEOUT. **협조적이라 실행 중 sync 작업을 즉시 죽이진 못하고 다음 check에서 멈춘다** — 진짜 강제 취소(스레드 종료)는 후속.
+> - **인증 미구현**(§7.1 "내부망 또는 내부 토큰" 전제). **이 endpoint는 절대 공개 노출 금지 — production 배포 전 네트워크 격리 또는 내부 인증(gateway/internal token) 필수**. 임의 header는 backend/gateway와 조율해 후속에서 도입.
+> - **후속**: client lifecycle(app lifespan singleton for OpenAI·Redis pool)·PostgreSQL 저장/조회는 backend integration 범위. OpenAI `store=False`(stateless)이며 분석 이력·follow-up context는 backend PostgreSQL이 관리한다(이 브랜치 미구현).
 
 ### 7.1 분석 실행
 
@@ -305,16 +311,22 @@ GET /internal/technical/health
 
 > `data_limited`는 특히 주의: **에러(502/504)가 아니라 정상 응답**이다. W/M만 미확보된 경우 일봉 기준 분석 결과가 정상적으로 담겨 나가므로, 백엔드·프론트는 이를 실패로 처리하지 말고 "일부 데이터 제한" 상태로 렌더링한다(`frontend_mapping.md` §13.4). D도 미확보된 경우만 분석 불가 형태로 안전 착지한다.
 
+> **KIS 실패 vs 데이터 부족 구분(정합화):** 둘은 다르게 처리한다.
+> - **KIS 응답은 왔으나 데이터가 부족/일부 비어 있음**(빈 일봉·W/M 미확보) → **200** `data_limited`/`regime_unavailable`. 일부라도 확보된 경우.
+> - **KIS transport/API 장애 + 쓸 수 있는 stale cache 없음**(아무 데이터도 못 받음) → supervisor가 `KisApiError`를 재전파(`_stale_reconstruct`가 D 재구성 불가 시) → endpoint **502 AI_UNAVAILABLE**.
+> 이유: 인프라 장애를 200 `data_limited`로 감싸면 장애 탐지가 어렵다. `data_limited`는 "데이터가 일부라도 확보된" 경우에만 쓴다. (복구 가능한 KIS 실패 + stale cache 있음 → 200 `stale_cache`는 위 표대로.)
+
 **아래는 API 실패로 처리한다:**
 
 | 상황 | HTTP | 설명 |
 | --- | --- | --- |
 | 요청 JSON 오류 | 400 | JSON 파싱 실패 |
-| 필수값 누락 | 422 | ticker/query 누락 |
-| 종목 코드 형식 오류 | 422 | 지원하지 않는 ticker 형식 |
-| MVP 범위 밖 종목 | 422 | allowlist(2차전지 10종목) 밖 → OUT_OF_SCOPE_TICKER |
-| AI 서버 응답 없음 | 502/504 | AI 서버 장애 또는 timeout |
-| DB 저장 실패 | 500 | 리포트 저장 실패 |
+| 필수값 누락/형식 오류 | 422 | ticker/query/request_id 누락·ticker 6자리 아님·as_of 미래 |
+| MVP 범위 밖 종목 | 422 | allowlist(2차전지 10종목) 밖 → OUT_OF_SCOPE_TICKER(OpenAI/KIS 이전 차단) |
+| KIS 통신 장애 + stale 없음 / LLM 호출·설정 오류 | 502 | AI_UNAVAILABLE (아무 데이터도 못 받은 인프라 장애) |
+| 전체 처리 시간 초과(내부 55초 budget·응답 wait_for) | 504 | AI_TIMEOUT |
+| 예상 못한 내부 오류 | 500 | INTERNAL_ERROR |
+| DB 저장 실패 | 500 | 리포트 저장 실패(backend 범위) |
 
 ---
 

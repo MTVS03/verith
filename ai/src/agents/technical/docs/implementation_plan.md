@@ -78,6 +78,8 @@ src/ai/
         │   ├── kis_client.py         # KIS REST 클라이언트
         │   ├── cache_service.py      # OHLCV 캐시(Redis-like 주입)
         │   └── openai_llm_client.py  # OpenAI LLM 어댑터(complete(prompt)->str, Responses API)
+        ├── runtime/
+        │   └── deadline.py           # cooperative 실행 예산(Deadline/DeadlineExceeded, endpoint→supervisor)
         ├── nodes/                    # LangGraph 노드 = 얇은 어댑터(state→모듈 호출→state)
         │   ├── normalize_question.py    # 1. 질문 안전 정규화 (LLM)
         │   ├── focus_analysis.py        # 2. 분석 포커스 정리 (LLM)

@@ -416,3 +416,12 @@ def load_openai_settings() -> OpenAiSettings:
             f"[OpenAI config] 필수 설정 누락: {missing}. {where} 에 {', '.join(missing)} 를 설정하세요."
         )
     return OpenAiSettings(api_key=api_key, model=model)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 16. Technical Agent 전체 실행 예산 (api_spec.md §10). AI endpoint가 Deadline으로 사용한다.
+#     Backend→AI 계약 timeout은 60초 — 그보다 먼저 AI가 504를 돌려주도록 내부 예산은 55초로 둔다
+#     (직렬화·error response 여유). cooperative deadline이라 실행 중 sync 작업을 즉시 죽이진 못하고
+#     다음 stage check 지점에서 멈춘다(endpoint의 asyncio.wait_for가 응답 시간까지 바운딩).
+# ─────────────────────────────────────────────────────────────────────────────
+TECHNICAL_AGENT_TIMEOUT_SECONDS: float = 55.0  # 내부 budget(< 60초 계약). endpoint Deadline.after()에 사용
