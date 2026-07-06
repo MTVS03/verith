@@ -19,7 +19,7 @@ import logging
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from ..config import BATTERY_TICKERS, INTRADAY_FETCH_ENABLED, REGEN_MAX_COUNT
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
@@ -59,10 +59,12 @@ from ..schemas.enums import (
 )
 from ..schemas.intraday import IntradayCandle, IntradayContext
 from ..schemas.ohlcv import OHLCV
+from ..services.cache_service import OhlcvCache, as_of_identity
 from ..services.kis_client import (
     IntradayFetchResult,
     fetch_minute_ohlcv,
     fetch_multi_timeframe_ohlcv,
+    normalize_end_date,
 )
 from ..synthesis.confidence import ConfidenceResult
 from ..synthesis.intraday_adjustment import apply_intraday_adjustments
@@ -94,6 +96,7 @@ def run(
     llm_client: interp.LlmClient,
     fetcher: OhlcvFetcher = fetch_multi_timeframe_ohlcv,
     trace_id: str | None = None,
+    cache: OhlcvCache | None = None,
     intraday_candles: Sequence[IntradayCandle] | None = None,
     intraday_fetcher: MinuteFetcher | None = None,
 ) -> TechnicalAgentOutput:
@@ -109,16 +112,18 @@ def run(
     # 노드 1·2 (LLM 전처리). 최종 output엔 싣지 않지만, focus는 노드 10 설명 강조 힌트로 쓴다(H1).
     _normalized, focus = _preprocess(llm_client, agent_input)
 
-    # 노드 3 데이터수집. as_of를 KIS 조회 종료일로 스레딩(kis_mapping §8.2). 실패는 전파.
-    ohlcv = run_data_collect(agent_input.ticker, as_of=agent_input.as_of, fetcher=fetcher)
+    # 노드 3 데이터수집(cache-aware). as_of를 KIS 조회 종료일로 스레딩(kis_mapping §8.2). 실패는 전파.
+    # cache 주입 시: fresh 캐시 사용 / miss·만료면 KIS 후 write / KIS 실패면 stale 폴백(config.md §7·§8).
+    ohlcv, used_stale = _collect_ohlcv(agent_input.ticker, agent_input.as_of, fetcher, cache)
     daily, weekly, monthly = ohlcv["D"], ohlcv["W"], ohlcv["M"]
+    source = "KIS (stale)" if used_stale else "KIS"  # stale 폴백 시 시세 출처 라벨(test_plan §7)
 
     # 일봉 빈 데이터 → 안전 착지(data_limited-B).
     if not daily:
         return _unavailable_output(
             agent_input, trace_id, DataStatus.DATA_LIMITED,
             regime=_empty_regime("시세 데이터를 확보하지 못해 국면을 판정하지 않습니다."),
-            charts=[],
+            charts=[], source=source,
         )
 
     # 노드 5 국면분류. 일봉 부족 시 final_regime=unavailable.
@@ -127,7 +132,7 @@ def run(
         return _unavailable_output(
             agent_input, trace_id, DataStatus.REGIME_UNAVAILABLE,
             regime=_to_regime_result(regime_result),
-            charts=run_chart_generate(daily, weekly, monthly),
+            charts=run_chart_generate(daily, weekly, monthly), source=source,
         )
 
     # 노드 4·6·7·8 (코드 확정 계산).
@@ -150,7 +155,8 @@ def run(
     )
 
     technical_signals = _to_technical_signals(signal_result.technical_signals, result.details)
-    data_status = _data_status(regime_result)
+    # stale 폴백을 썼으면 data_status로도 드러낸다(정상 완료 경로). 데이터 부족 경로는 위 early-return이 우선.
+    data_status = DataStatus.STALE_CACHE if used_stale else _data_status(regime_result)
 
     # 선택적 1D intraday: 직접 주입 candles 우선, 없으면 intraday_fetcher로 snapshot 조회(best-effort).
     # C안 gate: fetcher 미주입 + INTRADAY_FETCH_ENABLED=True 일 때만 기본 KIS 분봉 fetcher를 쓴다.
@@ -168,7 +174,7 @@ def run(
         request_id=agent_input.request_id,
         ticker=agent_input.ticker,
         as_of=agent_input.as_of,
-        source="KIS",
+        source=source,
         trace_id=trace_id,
         data_status=data_status,
         regime=regime,
@@ -498,16 +504,65 @@ def _empty_regime(context: str) -> RegimeResult:
     )
 
 
+_DWM = ("D", "W", "M")
+
+
+def _collect_ohlcv(
+    ticker: str, as_of: object, fetcher: OhlcvFetcher, cache: OhlcvCache | None,
+) -> tuple[dict[str, Sequence[OHLCV]], bool]:
+    """cache-aware D/W/M 수집 → (dict, used_stale). config.md §7·§8 폴백 분기.
+
+    cache=None이면 캐시 없이 `run_data_collect` 그대로(기존 동작). 캐시가 있으면:
+      1. D/W/M **모두 fresh** → KIS 없이 캐시 사용(used_stale=False)
+      2. 아니면 KIS(`run_data_collect`) → 성공 시 3종 write 후 사용
+      3. KIS 실패 → D/W/M **모두 stale**(fresh 포함) 있으면 stale 사용(used_stale=True),
+         하나라도 없으면 예외 전파(기존 KIS 실패 흐름 유지)
+    Redis 장애는 cache_service가 miss/no-op으로 흡수하므로 여기서 전파되지 않는다.
+    """
+    if cache is None:
+        return run_data_collect(ticker, as_of=as_of, fetcher=fetcher), False
+    now = datetime.now(timezone.utc)
+    as_of_id = as_of_identity(normalize_end_date(as_of))
+
+    fresh = _cache_collect(cache, ticker, as_of_id, now, statuses=("fresh",))
+    if fresh is not None:
+        return fresh, False
+    try:
+        data = run_data_collect(ticker, as_of=as_of, fetcher=fetcher)
+    except Exception:
+        stale = _cache_collect(cache, ticker, as_of_id, now, statuses=("fresh", "stale"))
+        if stale is not None:
+            return stale, True  # KIS 실패 + stale 있음 → stale 폴백
+        raise  # stale 불완전 → 기존 KIS 실패 전파
+    for tf in _DWM:
+        cache.set(ticker, tf, as_of_id, list(data[tf]), now=now)
+    return {tf: list(data[tf]) for tf in _DWM}, False
+
+
+def _cache_collect(
+    cache: OhlcvCache, ticker: str, as_of_id: str, now: datetime, *, statuses: tuple[str, ...],
+) -> dict[str, Sequence[OHLCV]] | None:
+    """D/W/M 3종을 **모두** 지정 status로 캐시에서 얻으면 dict, 하나라도 없으면 None(부분 사용 금지)."""
+    out: dict[str, Sequence[OHLCV]] = {}
+    for tf in _DWM:
+        look = cache.get(ticker, tf, as_of_id, now=now)
+        if look.status in statuses and look.candles is not None:
+            out[tf] = look.candles
+        else:
+            return None
+    return out
+
+
 def _unavailable_output(
     agent_input: TechnicalAgentInput, trace_id: str, data_status: DataStatus,
-    *, regime: RegimeResult, charts: Sequence[ChartPayload],
+    *, regime: RegimeResult, charts: Sequence[ChartPayload], source: str = "KIS",
 ) -> TechnicalAgentOutput:
     """regime 판단 불가 → signal·risk null, technical_signals=[], interpretation=template fallback."""
     return TechnicalAgentOutput(
         request_id=agent_input.request_id,
         ticker=agent_input.ticker,
         as_of=agent_input.as_of,
-        source="KIS",
+        source=source,
         trace_id=trace_id,
         data_status=data_status,
         regime=regime,

@@ -201,7 +201,11 @@ CACHE_KEY_MINUTE = "ohlcv:minute:{ticker}"  # 1d 정식 지원 시 사용 (chart
 ```
 
 *연결: `services/cache_service.py`. 일봉·주봉·월봉은 KIS D/W/M 원본을 각각 캐시한다(리샘플 파생 없음).*
-*`CACHE_TTL_* = None`은 Redis expire를 설정하지 않는다는 의미다(만료 없이 보관, 오늘 일봉만 갱신).*
+
+**구현 매핑(`feat/technical-cache-service`):** 전체 D/W/M **시계열 하나**를 timeframe별 key(`ohlcv:daily|weekly|monthly:{ticker}`)에 캐시한다. key에 as_of를 넣지 않고 **entry에 `as_of`를 저장**해, 요청 as_of와 다르면 fresh/stale 모두 쓰지 않고 miss 처리한다. entry는 `fetched_at`도 저장한다.
+- **fresh(primary 서빙)** = `fetched_at` 나이 ≤ `CACHE_FRESH_TTL_SECONDS`(=`CACHE_TTL_TODAY` 15분). 시계열이 오늘/당주/당월 봉을 포함해 가변이므로 "오늘 15분" 갱신을 freshness로 쓴다.
+- **Redis expire** = `STALE_CACHE_MAX_AGE_BY_PERIOD[tf] × 86400`(D=1일·W=7일·M=31일). 그 안엔 stale 폴백으로 재사용 가능하게 보존한다. (위 `CACHE_TTL_*=None`은 *historical-only key* 가정이라 full-series에는 이 매핑을 쓴다.)
+- **stale 폴백** = KIS 실패 시 D/W/M 모두 stale(fresh 포함)이 있으면 사용, `data_status=stale_cache`·`source="KIS (stale)"`.
 
 ## 8. 복원력 (resilience)
 
