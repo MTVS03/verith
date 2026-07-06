@@ -161,7 +161,7 @@ src/ai/
     - `normalize_question` 결과는 노드 2 입력으로만 쓰고 출력에 싣지 않는다. **`focus_analysis`의 `analysis_focus`·`focus_summary`는 노드 10 payload에 "설명 강조 힌트"로 전달**한다(interpret가 이 관점을 문장에 반영, 확정값은 불변 — prompts.md §4). `schemas/state.py`는 만들지 않고 supervisor 내부 로컬 흐름으로 둔다.
     - **재생성/부분 폴백:** 1차 interpret 후 `REGEN_MAX_COUNT`(config.py)만큼 재생성한다. 소진 후에도 실패하면 **granular fallback** — `interpretation.text`가 통과하면 유지하고 실패한 지표의 `detail`만 template로 대체한다(REGEN-04). 구조 자체를 못 믿으면(파싱 실패·details 개수/코드값 불일치·확정값 재생성 필드) 전체 폴백. 재생성 횟수는 코드 하드코딩이 아니라 `config.py REGEN_MAX_COUNT`(정본 `config.md §9`)에서 가져온다.
     - **LLM 호출 실패 경계(typed):** `nodes/_llm_utils.LlmCallError`로 `client.complete` 실패만 감싼다. supervisor는 이 타입만 잡아 fallback하고, 프롬프트 파일 로딩·타입·프로그래밍 오류는 전파한다.
-    - **as_of 한계(현행):** supervisor는 `as_of`를 출력 기준 시각으로만 쓰고 **KIS 조회 end_date로 스레딩하지 않는다**(기본 fetcher는 현재 날짜 기준 조회). 과거 `as_of` 기준 재현 조회는 `fetcher`·`kis_client`·`data_collect`까지 확장하는 별도 작업(예: `refactor/technical-as-of-data-fetch`)으로 분리한다. MVP 라이브 요청(as_of≈현재)에서는 무해하다.
+    - **as_of → KIS 조회 종료일(완료 — `refactor/technical-as-of-data-fetch`):** supervisor가 `as_of`를 `run_data_collect(as_of=…)`로 넘기고, `data_collect`가 `kis_client.normalize_end_date`로 `end_date`(date)로 정규화해 `fetch_multi_timeframe_ohlcv(end_date=…)`→`fetch_ohlcv(end_date=…)`→`FID_INPUT_DATE_2`까지 스레딩한다(D/W/M 동일 기준일). 생략 시 오늘 기준(하위 호환). **미래 `as_of`는 ValueError**(tz-안전 비교). `fetch_ohlcv_range`·pagination은 무변경 재사용. 상세: `kis_mapping.md §8.2`.
 14. `agent.py` (얇은 wrapper) + 상위 `src/ai/api/internal.py` 라우터 연결 — router→agent→supervisor 흐름 완성
 15. `test_plan.md` 기준 단위테스트 작성 (검증 ①②③ 케이스). `technical_supervisor.run()`을 mock 입력으로 직접 호출해 HTTP 없이 end-to-end 검증
 

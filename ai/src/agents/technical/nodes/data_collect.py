@@ -10,12 +10,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import date, datetime
 
 from ..schemas.ohlcv import OHLCV
-from ..services.kis_client import ALLOWED_PERIODS, fetch_multi_timeframe_ohlcv
+from ..services.kis_client import (
+    ALLOWED_PERIODS,
+    fetch_multi_timeframe_ohlcv,
+    normalize_end_date,
+)
 
-# 주입 가능한 fetcher 타입: ticker → {"D": [...], "W": [...], "M": [...]}
-OhlcvFetcher = Callable[[str], dict[str, Sequence[OHLCV]]]
+# 주입 가능한 fetcher 타입: (ticker, *, end_date) → {"D": [...], "W": [...], "M": [...]}
+OhlcvFetcher = Callable[..., dict[str, Sequence[OHLCV]]]
 
 _EXPECTED_PERIODS = frozenset(ALLOWED_PERIODS)  # {"D", "W", "M"} (config 상수 재사용, 하드코딩 금지)
 
@@ -23,17 +28,19 @@ _EXPECTED_PERIODS = frozenset(ALLOWED_PERIODS)  # {"D", "W", "M"} (config 상수
 def run_data_collect(
     ticker: str,
     *,
+    as_of: datetime | date | str | None = None,
     fetcher: OhlcvFetcher = fetch_multi_timeframe_ohlcv,
 ) -> dict[str, Sequence[OHLCV]]:
     """ticker의 D/W/M OHLCV를 수집해 dict로 반환한다(키 = D/W/M).
 
-    fetcher는 기본값이 실제 KIS 호출이며, 테스트는 fake fetcher를 주입한다.
-    반환 전에 출력 envelope(정확히 D/W/M 키, 각 값이 OHLCV 시퀀스)을 검증한다 — 잘못된
-    fetcher 결과를 조용히 하류로 흘리지 않는다(fail-fast, technical_coding_guidelines §8.3·§9.1).
+    `as_of`를 KIS 조회 종료일(`end_date`)로 번역해 fetcher에 넘긴다(kis_mapping §8.2) — 없으면
+    fetcher의 기본(오늘 기준) 동작. fetcher는 기본값이 실제 KIS 호출이며 테스트는 fake를 주입한다.
+    반환 전에 출력 envelope(정확히 D/W/M 키, 각 값이 OHLCV 시퀀스)을 검증한다(fail-fast).
     """
     if not ticker:
         raise ValueError("ticker is required for data_collect")
-    result = fetcher(ticker)
+    end_date = normalize_end_date(as_of)  # as_of → end_date(date|None). 미래/형식 오류는 여기서 ValueError
+    result = fetcher(ticker, end_date=end_date)
     _validate_collection_envelope(result)
     return result
 

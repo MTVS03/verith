@@ -33,7 +33,7 @@ Top Supervisor가 쿼리를 도메인별로 변형해 넘긴다. 에이전트는
 | `ticker` | string | ✅ | 종목 코드 (6자리) |
 | `query` | string | ✅ | 변형된 도메인 질의 (기술적 분석 관점) |
 | `request_id` | string | ✅ | 요청 추적용 ID (trace 연결). **런타임 필드** — 출력 JSON에 그대로 되돌려주지만 DB에 저장하지 않는다(영구 추적은 `trace_id`·`report_id` 기준). 따라서 저장된 리포트 조회 응답에는 없을 수 있다. |
-| `as_of` | ISO8601 | ✅ | 분석 기준 시점 |
+| `as_of` | ISO8601 | ✅ | 분석 기준 시점. **리포트 표시 기준일이자 KIS 조회 종료일(`end_date`)로도 사용된다** — supervisor가 `data_collect`에 넘겨 KIS D/W/M 조회의 종료일로 스레딩한다(생략 불가한 입력이라 항상 존재). **미래 `as_of`는 거부**(ValueError). 자세한 흐름은 `kis_mapping.md §8.2`. |
 
 *에이전트는 다른 에이전트의 존재를 모른다. 위 4개만 받으면 독립 동작한다.*
 

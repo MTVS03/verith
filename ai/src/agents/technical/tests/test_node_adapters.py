@@ -61,63 +61,84 @@ MONTHLY = _series(36, day_stride=28, start="2020-01-06")
 # ── data_collect (3) ─────────────────────────────────────────────────────────
 def test_data_collect_passes_through_fetcher():
     canned = {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
-    result = run_data_collect("373220", fetcher=lambda ticker: canned)
+    result = run_data_collect("373220", fetcher=lambda ticker, *, end_date=None: canned)
     assert result is canned  # 그대로 통과(재가공 없음)
 
 
 def test_data_collect_has_dwm_keys():
-    result = run_data_collect("373220", fetcher=lambda t: {"D": DAILY, "W": WEEKLY, "M": MONTHLY})
+    result = run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY})
     assert set(result) == {"D", "W", "M"}
 
 
 def test_data_collect_empty_ticker_raises():
     with pytest.raises(ValueError):
-        run_data_collect("", fetcher=lambda t: {})
+        run_data_collect("", fetcher=lambda t, *, end_date=None: {})
 
 
 def test_data_collect_propagates_fetcher_error():
-    def boom(_ticker):
+    def boom(_ticker, *, end_date=None):
         raise RuntimeError("KIS down")
     with pytest.raises(RuntimeError):
         run_data_collect("373220", fetcher=boom)
+
+
+# ── DATE-07: as_of → fetcher end_date ────────────────────────────────────────
+def test_data_collect_passes_as_of_as_end_date():
+    seen = {}
+
+    def fake(ticker, *, end_date=None):
+        seen["end_date"] = end_date
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    run_data_collect("373220", as_of="2025-06-01", fetcher=fake)
+    assert seen["end_date"] == date(2025, 6, 1)  # 정규화된 date 전달
+
+
+def test_data_collect_as_of_none_passes_none():
+    seen = {}
+
+    def fake(ticker, *, end_date=None):
+        seen["end_date"] = end_date
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    run_data_collect("373220", fetcher=fake)
+    assert seen["end_date"] is None  # 생략 시 None(오늘 기준)
 
 
 # ── data_collect envelope 검증 (F3) ──────────────────────────────────────────
 def test_data_collect_rejects_missing_period():
     # {"D": []} — W/M 누락
     with pytest.raises(ValueError):
-        run_data_collect("373220", fetcher=lambda t: {"D": DAILY})
+        run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": DAILY})
 
 
 def test_data_collect_rejects_extra_key():
     with pytest.raises(ValueError):
-        run_data_collect("373220", fetcher=lambda t: {"D": DAILY, "W": WEEKLY, "M": MONTHLY, "X": []})
+        run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY, "X": []})
 
 
 def test_data_collect_rejects_string_value():
     with pytest.raises(ValueError):
-        run_data_collect("373220", fetcher=lambda t: {"D": "not-bars", "W": WEEKLY, "M": MONTHLY})
+        run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": "not-bars", "W": WEEKLY, "M": MONTHLY})
 
 
 def test_data_collect_rejects_wrong_value_type():
     # dict은 Sequence가 아니므로 거부
     with pytest.raises(ValueError):
-        run_data_collect("373220", fetcher=lambda t: {"D": {}, "W": WEEKLY, "M": MONTHLY})
+        run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": {}, "W": WEEKLY, "M": MONTHLY})
 
 
 def test_data_collect_rejects_non_ohlcv_item():
     with pytest.raises(ValueError):
-        run_data_collect("373220", fetcher=lambda t: {"D": [123], "W": WEEKLY, "M": MONTHLY})
+        run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": [123], "W": WEEKLY, "M": MONTHLY})
 
 
 def test_data_collect_rejects_non_dict_result():
     with pytest.raises(ValueError):
-        run_data_collect("373220", fetcher=lambda t: ["not", "a", "dict"])
+        run_data_collect("373220", fetcher=lambda t, *, end_date=None: ["not", "a", "dict"])
 
 
 def test_data_collect_allows_empty_sequences():
     # 빈 리스트는 구조상 유효(경계 검증은 비어있음을 막지 않음 — 하류 노드가 예외 처리)
-    result = run_data_collect("373220", fetcher=lambda t: {"D": [], "W": [], "M": []})
+    result = run_data_collect("373220", fetcher=lambda t, *, end_date=None: {"D": [], "W": [], "M": []})
     assert set(result) == {"D", "W", "M"}
 
 

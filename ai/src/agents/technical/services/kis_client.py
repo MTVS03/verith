@@ -263,6 +263,35 @@ def _ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
+def normalize_end_date(value: datetime | date | str | None) -> date | None:
+    """`as_of`/`end_date` 입력을 KIS 조회 종료일(date)로 정규화한다 (kis_mapping §8.2).
+
+    None→None(오늘 기준), datetime→date(), date→그대로, 'YYYYMMDD'/'YYYY-MM-DD'→date.
+    문자열 파싱은 `_normalize_to_date` 재사용. 잘못된 형식·미지원 타입·**미래 날짜**는 ValueError.
+    미래 판정은 tz-aware datetime이면 그 tz 기준 오늘과 비교해, 타임존 차이로 정상 '오늘' 요청을
+    미래로 오판하지 않는다.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):  # datetime은 date의 하위 클래스라 먼저 검사
+        result = value.date()
+        today = datetime.now(value.tzinfo).date()
+    elif isinstance(value, date):
+        result = value
+        today = date.today()
+    elif isinstance(value, str):
+        try:
+            result = _normalize_to_date(value)  # 'YYYYMMDD'/'YYYY-MM-DD' + 달력 검증 재사용
+        except KisFieldError as exc:
+            raise ValueError(str(exc)) from exc
+        today = date.today()
+    else:
+        raise ValueError(f"지원하지 않는 end_date 타입: {type(value).__name__}")
+    if result > today:
+        raise ValueError(f"미래 as_of/end_date는 허용되지 않습니다: {result.isoformat()} > {today.isoformat()}")
+    return result
+
+
 def _sleep_backoff(attempt: int) -> None:
     """재시도 사이 지수 백오프(config KIS_BACKOFF_SECONDS). 무한 재시도 없음."""
     idx = min(attempt, len(KIS_BACKOFF_SECONDS) - 1)
@@ -413,23 +442,31 @@ def fetch_ohlcv_range(
             client.close()
 
 
-def fetch_ohlcv(ticker: str, period: str, *, client: httpx.Client | None = None) -> list[OHLCV]:
+def fetch_ohlcv(
+    ticker: str, period: str,
+    *, end_date: datetime | date | str | None = None, client: httpx.Client | None = None,
+) -> list[OHLCV]:
     """한 종목·한 타임프레임(D/W/M)의 내부 표준 OHLCV(과거→최신)를 반환한다.
 
     KIS 단일 호출 100건 제한을 넘기기 위해 period별 KIS_FETCH_LOOKBACK_DAYS 만큼
-    구간 분할 조회한다(kis_mapping §8.1). 소비자(chart_builder·regime)는 시그니처 변경 없이 충분한 기간을 받는다.
+    구간 분할 조회한다(kis_mapping §8.1). `end_date`(조회 종료일 = FID_INPUT_DATE_2)를 주면 그
+    날짜 기준, 없으면 오늘 기준으로 조회한다(kis_mapping §8.2). 미래 end_date는 ValueError.
     """
     validate_ticker(ticker)
     validate_period(period)
-    end = datetime.now().date()
+    end = normalize_end_date(end_date) or datetime.now().date()
     start = end - timedelta(days=KIS_FETCH_LOOKBACK_DAYS[period])
     return fetch_ohlcv_range(ticker, period, _ymd(start), _ymd(end), client=client)
 
 
-def fetch_multi_timeframe_ohlcv(ticker: str) -> dict[str, list[OHLCV]]:
+def fetch_multi_timeframe_ohlcv(
+    ticker: str, *, end_date: datetime | date | str | None = None,
+) -> dict[str, list[OHLCV]]:
     """한 종목의 D/W/M 세 타임프레임을 각각 KIS에서 직접 받아 dict로 반환한다.
 
     일봉에서 주/월봉을 리샘플하지 않는다 — 세 타임프레임 모두 KIS 원본(kis_mapping §3).
+    `end_date`는 한 번 정규화해 **D/W/M 모두 같은 종료일**로 조회한다(kis_mapping §8.2).
     """
     validate_ticker(ticker)
-    return {period: fetch_ohlcv(ticker, period) for period in ALLOWED_PERIODS}
+    end = normalize_end_date(end_date)  # 한 번 정규화 → 세 타임프레임 동일 기준일
+    return {period: fetch_ohlcv(ticker, period, end_date=end) for period in ALLOWED_PERIODS}

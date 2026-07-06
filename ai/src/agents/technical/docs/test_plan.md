@@ -96,6 +96,16 @@
 | PAGE-12 | 예외 메시지 | requested 범위·oldest_fetched 포함 |
 | PAGE-13 | `start_date > end_date` | 토큰/네트워크 호출 전 fail-fast |
 | PAGE-14 | 날짜 입력 형식 | `YYYYMMDD`·`YYYY-MM-DD`만 허용, `2026--07-04`·`20-2607-04`·`2026/07/04`·존재하지 않는 날짜 거부 |
+| DATE-01 | `fetch_ohlcv(end_date="2025-06-01")` | `FID_INPUT_DATE_2=20250601`로 조회(종료일 반영) |
+| DATE-02 | `end_date`가 `date`/`datetime`(tz 포함) | 모두 `date`만 사용해 동일 처리 |
+| DATE-03 | `fetch_multi_timeframe_ohlcv(end_date=…)` | D/W/M **모두 같은 end_date** 사용 |
+| DATE-04 | `end_date` 잘못된 문자열 / 미지원 타입 | `ValueError` |
+| DATE-05 | 미래 `end_date`/`as_of` | `ValueError`(tz-aware면 그 tz 오늘 기준 비교) |
+| DATE-06 | `end_date`/`as_of` 생략 | 기존 current-date 동작 유지 |
+| DATE-07 | `run_data_collect(as_of=…)` | fetcher에 `end_date`(정규화된 date) 전달, envelope 검증은 그대로 |
+| DATE-08 | supervisor `agent_input.as_of` | fetcher `end_date`로 전달되고 `output.as_of`와 일치, as_of 바뀌면 end_date도 바뀜 |
+
+*DATE-*는 `kis_mapping.md §8.2`의 `end_date` 스레딩 정본을 검증한다. `normalize_end_date`는 `services/kis_client.py`에 있고 문자열 파싱은 `_normalize_to_date`를 재사용한다. 전부 `_call_chart` mock으로 실 KIS 호출 없이 검증한다.*
 
 *allowlist·period 검증, output2 키 부재/비-list fail-fast, `_to_iso_date` 달력 검증, 리샘플 금지 등 기존 정책은 pagination 후에도 유지된다. `fetch_ohlcv_range`는 요청 범위를 완전히 확보하지 못하면 partial 결과를 정상 반환하지 않는다.*
 
