@@ -35,6 +35,7 @@
   .align { font-size:18px; font-weight:700; }
   .placeholder { border:1px dashed var(--line); border-radius:10px; padding:20px;
                  text-align:center; color:var(--muted); font-size:14px; }
+  .interp { margin:0; font-size:15px; line-height:1.7; }
   footer.disc { margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
                 font-size:12px; color:var(--muted); }
   @media (prefers-color-scheme: dark) {
@@ -103,10 +104,14 @@
     <div class="align">{{ alignment }}</div>
   </section>
 
-  {# ── 결론 자리: LLM 해석 예정(placeholder) ── #}
+  {# ── 해석: 게이트3 통과분만 그래프가 넘긴다. render는 있으면 그리고 없으면 placeholder ── #}
   <section>
     <h2>해석</h2>
-    <div class="placeholder">해석 준비 중 — 검증된 팩트를 바탕으로 한 해석이 이 자리에 들어갑니다.</div>
+    {% if interpretation %}
+      <p class="interp">{{ interpretation }}</p>
+    {% else %}
+      <div class="placeholder">해석 생략 — 검증을 통과한 해석이 없어 팩트만 표시합니다.</div>
+    {% endif %}
   </section>
 
   <footer class="disc">{{ disclaimer }}</footer>

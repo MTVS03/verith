@@ -52,16 +52,23 @@ def _fact_rows(signals: dict) -> list[dict]:
     return rows
 
 
-def build_report(signals: dict, gate2: GateResult, meta: dict) -> str:
-    """신호·게이트2·메타를 받아 HTML 리포트 문자열을 반환한다.
+def build_report(
+    signals: dict,
+    gate2: GateResult,
+    meta: dict,
+    interpretation: str | None = None,
+) -> str:
+    """신호·게이트2·메타(+선택적 해석)를 받아 HTML 리포트 문자열을 반환한다.
 
-    render는 표시 전용: signals/gate2가 준 값을 재배치·포맷만 하고 그대로 그린다.
+    render는 표시 전용: interpretation은 '있으면 그대로 그리고 없으면 placeholder'.
+    "게이트3 통과분만 넘긴다"는 판정은 그래프가 하고, 여기선 내용을 판단·가공하지 않는다.
     """
     context = {
         "meta": meta,                       # stock_name, ticker, base_date
         "gate2": gate2,                     # passed / checks / failures (그대로 표시)
         "rows": _fact_rows(signals),        # 3주체 팩트 표
         "alignment": signals.get("alignment"),
+        "interpretation": interpretation,   # None이면 템플릿이 placeholder로 후퇴
         "disclaimer": "본 리포트는 투자 자문이 아니며 과거 수급 데이터 기반 참고 자료입니다.",
     }
     template = _env.get_template(_TEMPLATE_NAME)
