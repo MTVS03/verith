@@ -137,3 +137,48 @@ def test_agent_required_imports_present():
     mods = _imported_modules()
     assert "schemas.contracts" in mods                     # TechnicalAgentInput/Output
     assert {"supervisor", "supervisor.technical_supervisor"} & mods  # supervisor 위임
+
+
+# ── AGENT-E2E: chart annotation이 agent output까지 보존되는지 (전달 경로 회귀) ──
+from typing import get_args  # noqa: E402
+
+from src.agents.technical.config import REGEN_MAX_COUNT  # noqa: E402
+from src.agents.technical.schemas.chart import AnnotationKind  # noqa: E402
+from src.agents.technical.tests import test_technical_supervisor as st  # noqa: E402
+from src.agents.technical.tests.test_chart_builder import _cup_series  # noqa: E402
+
+_TEN_KINDS = set(get_args(AnnotationKind))
+
+
+def _e2e_responses():
+    # NORM/FOCUS 통과 + interpret는 regen 소진 후 template fallback → 유효 output(charts 포함).
+    return [st.NORM_OK, st.FOCUS_OK] + [st.INTERP_BAD] * (REGEN_MAX_COUNT + 1)
+
+
+def test_agent_output_preserves_chart_annotations():
+    # 실제 supervisor를 fake fetcher/LLM으로 실행 → agent output까지 annotation이 보존되는지
+    out = agent.run_technical_agent(
+        st._input(),
+        llm_client=st.ScriptedLlm(_e2e_responses()),
+        fetcher=lambda t, *, end_date=None: {"D": st.DAILY, "W": st.WEEKLY, "M": st.MONTHLY},
+    )
+    assert {"3m", "1y", "5y"} <= {c.period.value for c in out.charts}   # D/W/M 3종 존재
+    all_anns = [a for c in out.charts for a in c.chart_data.annotations]
+    assert all_anns                                                     # annotation 실제로 실려 나옴
+    assert {a.kind for a in all_anns} <= _TEN_KINDS                     # 허용 10종 안
+    assert {a.importance for a in all_anns} <= {"low", "medium", "high"}
+    out.model_dump_json()                                              # 직렬화 무오류(kind/meta 포함)
+
+
+def test_5y_cup_importance_high_survives_agent_output():
+    # 5y 주봉 컵 시계열 주입 → output 5y chart의 cup_handle_candidate가 high(retier 생존)
+    cup_weekly = _cup_series(78, step_days=7)
+    out = agent.run_technical_agent(
+        st._input(),
+        llm_client=st.ScriptedLlm(_e2e_responses()),
+        fetcher=lambda t, *, end_date=None: {"D": st.DAILY, "W": cup_weekly, "M": st.MONTHLY},
+    )
+    chart_5y = next(c for c in out.charts if c.period.value == "5y")
+    cups = [a for a in chart_5y.chart_data.annotations if a.kind == "cup_handle_candidate"]
+    assert cups                                                        # 5y 컵 후보 생성
+    assert all(a.importance == "high" for a in cups)                   # 5y retier 생존(medium→high)
