@@ -389,6 +389,53 @@ if ticker not in BATTERY_TICKERS:
 
 ---
 
+## 15. OpenAI LLM client (`feat/technical-openai-client`)
+
+> **문서 번호 주의**: 이 절은 `config.py` §15·`implementation_plan.md`와 번호를 맞춰 **§15**로 둔다(config.md 자체 순번 11·12와는 별개 — 앞 §11은 "MVP 종목 범위"). "§15 = OpenAI"로 세 문서에서 일치시킨다.
+
+실 LLM 어댑터(`services/openai_llm_client.py`)가 기존 `complete(prompt) -> str` 계약을 OpenAI **Responses API**(`responses.create`→`output_text`)로 구현할 때 쓰는 설정. **`.env` = secret + 환경별 선택값(API key·MODEL), config.py = 튜닝/안전 상수**로 나눈다. 값의 단일 출처가 겹치지 않게 한다(`technical_coding_guidelines §2.2·§13.2`).
+
+**.env에서 읽는 값(`load_openai_settings()`, fail-fast — 코드에 기본값 두지 않음)**
+
+| 항목 | 환경변수 | 필수 | 의미 |
+|---|---|---|---|
+| API key | `OPENAI_API_KEY` | ✅ | 값은 `.env`에만. 코드/로그/trace/repr 미저장 |
+| 모델 | `OPENAI_MODEL` | ✅ | **단일 출처=.env**(예: `OPENAI_MODEL=gpt-5.4-mini`). 환경/실험별 교체는 `.env`만 변경. **코드 기본값 없음** — import 시점이 아니라 `.env` 로드 후 읽어야 override가 실제로 먹기 때문 |
+
+> `OPENAI_API_KEY_ENV`·`OPENAI_MODEL_ENV`는 환경변수 "이름" 상수일 뿐(값 아님). 모델은 코드에 기본값을 두면 import 시점 평가라 `.env`를 무시하므로, 일부러 `load_openai_settings()`에서 읽고 누락 시 fail-fast한다.
+
+**config.py 튜닝/안전 상수(코드 — secret도 환경차도 아님, `KIS_TIMEOUT_SECONDS`와 같은 급. `.env`에 넣지 않는다)**
+
+| 상수 | 기본값 | 단위 | 의미 |
+|---|---|---|---|
+| `OPENAI_TIMEOUT_SECONDS` | `20.0` | 초 | 1회 호출 timeout — 60초 계약 안에서 보수적 하향 |
+| `OPENAI_MAX_RETRIES` | `0` | 회 | **SDK 재시도 끔** — SDK 기본(2회)은 60초 계약 초과 위험·agent 재생성과 중복 |
+| `OPENAI_TEMPERATURE` | `0.0` | — | 재현성 위해 0. **`None`이면 요청 파라미터에서 생략**(모델별 미허용 대비) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | `1200` | 토큰 | 응답 최대 토큰(보수적 기본) |
+| `OPENAI_STORE` | `False` | bool | **OpenAI 측 application state 저장 끔**(stateless). 분석 이력은 우리 backend DB가 관리 |
+
+- **환경변수(.env 필수)**: `OPENAI_API_KEY`, `OPENAI_MODEL`.
+- **timeout/retry 안전**: `OpenAI(timeout=20.0, max_retries=0)`. SDK-level 재시도를 끄고 **agent-level 재생성/template fallback**을 쓴다(SDK retry는 중복이자 60초 계약 초과 위험). 총 60초 deadline **완전** 보장(호출 간 deadline 전파)은 supervisor/endpoint 레벨 작업으로 **후속 AI endpoint integration 범위** — 이 브랜치는 per-call timeout/retry만 안전화한다.
+- **예외 정책**: OpenAI SDK 예외(timeout·rate limit·auth·connection·API·BadRequest)는 모두 `LlmCallError`로 변환(메시지는 type 이름만). **`raise ... from None`으로 exception chain을 끊어** 원본 OpenAIError가 상위 `logger.exception` traceback에 raw로 노출되지 않게 한다. 실패 시 안전 breadcrumb(`error_type`·`model`·`duration_ms`)만 로깅한다. `OPENAI_API_KEY`·`OPENAI_MODEL` 누락은 `default_openai_client()` 생성 시점의 **config error(fail-fast)** 로 `LlmCallError`와 구분한다.
+- **last_usage**: `complete()` 진입 시 `None`으로 리셋하고 **text 추출 성공 후에만** 저장한다 → 어떤 실패(빈 output·SDK 예외)든 `last_usage=None`. best-effort 메타데이터이며 동시 실행에서 request-scoped state로 신뢰하지 않는다(공유 client면 다른 요청이 덮을 수 있음).
+- **secret/trace**: raw prompt·raw response·API key·Authorization 헤더를 로그·trace·test snapshot에 남기지 않는다. 어댑터는 `model`·`last_usage`(토큰수)를 optional 노출하지만, **trace sink 배선은 이 브랜치 밖**(후속 AI endpoint 통합).
+- **테스트/실행**: `pytest`는 **network-free**(fake SDK 주입). 실제 연결은 수동 smoke(`scripts/smoke_openai_llm.py`, 비용 발생)로만 확인한다.
+- **runtime wiring**: `run_technical_agent`는 이 client를 **자동 생성하지 않는다**(계속 주입식, A안). 운영에서는 endpoint가 `default_openai_client()`를 주입한다.
+
+### 15.1 분석 이력 저장 정책 (store=False + backend DB)
+
+- **`store=False`의 의미**: OpenAI Responses **application state에 저장하지 않는다**(stateless 호출). "우리 서비스가 기억하지 말자"는 뜻이 **아니다**.
+- **분석 이력·follow-up context·report retrieval은 우리 backend DB(PostgreSQL)가 관리**한다 — OpenAI가 아니다. Technical Agent의 OpenAI 어댑터는 **stateless 호출만** 담당한다.
+
+  > Technical Agent uses OpenAI in stateless mode by default (`store=False`). Analysis history, follow-up context, and report retrieval are stored and managed by our backend database, not by OpenAI Responses application state.
+
+- **저장 후보 데이터(예시 — 이 브랜치에서 구현하지 않음, 후속 backend/AI endpoint 범위)**: `user_id`·`session_id`·`ticker`·`as_of`·`original_query`·`normalized_question`·`analysis_focus`·`data_status`·`source`·`final_regime`·`signal_score`·`confidence`·`risk_flags`·`technical_signals`·chart summaries·annotation summaries·LLM final report·`model`·`created_at`.
+- **금지**: 이 브랜치에서 PostgreSQL 저장 구현 금지. raw prompt·raw response·API key/token 저장 금지.
+
+*연결: `config.py` §15(`load_openai_settings`), `services/openai_llm_client.py`, `nodes/_llm_utils.py`(`LlmCallError`·`complete` 계약)*
+
+---
+
 ## 값 조정 규약
 
 1. **구조는 코드, 수치는 config.** 로직(어떤 지표를 조합하는가)은 코드에, 임계값·기간·가중치는 여기에. 튜닝이 config 수정만으로 끝나게 한다.
