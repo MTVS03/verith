@@ -133,6 +133,36 @@ MERGE_THRESHOLD: float = 0.7                    # 미만이면 신규 이벤트(
 MERGE_CANDIDATE_WINDOW_DAYS: int = 7            # 후보: 동일 회사·최근 N일(event_merge.md §5)
 MERGE_TIME_DECAY_DAYS: float = 7.0             # time_proximity 감쇠 스케일(며칠 차이까지 가깝게 볼지) — 튜닝 대상
 
+# ---------------------------------------------------------------------------
+# 중요도(importance) 설정 — TASK 06. importance = 기사 개수 + 언론사 가중치 + 감성 절대값
+# (pipeline_spec §9 / erd.dbml). LLM이 지어내는 값이 아니라 객관 신호의 '결정적 계산'이다
+# (CLAUDE.md §2-4/§2-5). 아래 값·테이블은 전부 실데이터 튜닝 대상이며(주석 표기), 계산 코드
+# (services/importance.py)는 이 값을 읽기만 한다(하드코딩 금지, CLAUDE.md §7).
+# ---------------------------------------------------------------------------
+# 세 신호 가중치. 하위 점수는 스케일이 서로 다를 수 있어(volume=log 스케일, publisher=가중치 합,
+# sentiment=0~1 평균) 가중치로 스케일을 흡수한다 — 계수 자체가 튜닝 대상(pipeline_spec §9).
+IMPORTANCE_W_VOLUME: float = 0.5       # 기사 개수(노출량) 가중 — 튜닝 대상
+IMPORTANCE_W_PUBLISHER: float = 0.3    # 언론사(출처) 가중 — 튜닝 대상
+IMPORTANCE_W_SENTIMENT: float = 0.2    # 감성 절대값(사건 강도) 가중 — 튜닝 대상
+
+# 기사 수 변환 방식: "log1p" | "sqrt" | "linear". bool 토글이 아니라 '문자열 모드'로 둔다 —
+# 나중에 감쇠 함수를 값 하나로 갈아끼우기 위함(§2). 기본 log1p(근접 중복 홍수가 순위를 독점하지
+# 못하게 체감 반영). 미지원 값이면 services/importance.py가 로깅 후 log1p로 폴백 — 튜닝/실험 대상.
+IMPORTANCE_VOLUME_MODE: str = "log1p"
+
+# ⚠️ 언론사 가중치 테이블: 미확정(CLAUDE.md §8) — 아래는 '임시값'이다. 확정값처럼 굳히지 않는다.
+#    키는 RSS_CANDIDATES(§5)의 언론사명과 정합을 맞춘다(표기 흔들림 주의). 실데이터로 확정.
+#    (확정 전 운용 정책: 이 표를 비우고 전 매체를 IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT로 운용해도
+#     된다 — 그러면 언론사 항이 상수화되어 랭킹은 volume·감성이 결정한다. TASK 06 §3.1.)
+IMPORTANCE_PUBLISHER_WEIGHTS: dict[str, float] = {
+    "매일경제": 1.0, "한국경제": 1.0,                                # 주요 경제지(임시)
+    "조선일보": 0.9, "동아일보": 0.9, "경향신문": 0.9, "한겨레": 0.9,  # 종합지(임시)
+    "세계일보": 0.8,                                                # 종합지(임시)
+    "디지털타임스": 0.8, "아시아경제": 0.8, "파이낸셜뉴스": 0.8,        # 경제·IT 매체(임시)
+}
+# 테이블에 없는 언론사 / publisher=None 의 기본 가중치(누락돼도 계산이 죽지 않게 방어) — 튜닝 대상.
+IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT: float = 0.5
+
 # 추출 지시 + 출력 스키마. 감성·영향도를 요청하지 않는다(§2-4). 본문/제목은 신뢰 불가 외부 입력이므로
 # 구획(delimiter)으로 감싸 '데이터'로만 취급하고, 구획 내부의 어떤 지시·명령·URL 요청도 따르지 않는다(§3.1-6).
 EXTRACT_SYSTEM_PROMPT: str = """당신은 한국어 경제 뉴스에서 구조화된 정보를 추출하는 도구다.
