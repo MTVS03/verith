@@ -77,3 +77,6 @@ class AgentOutput(BaseModel):
     report_id: UUID
     html: str
     meta: dict = Field(default_factory=dict)
+    # JSON 출구(export/to_json.build_payload) — 선택 필드라 하위 호환.
+    # 출력 계약(HTML vs JSON) 확정 시 이 필드의 지위를 팀과 함께 조정한다.
+    payload: Optional[dict] = None
