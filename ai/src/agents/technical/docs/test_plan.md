@@ -586,3 +586,7 @@ annotation은 전부 코드가 계산하며 `source=code`다. LLM은 좌표·발
 `devtools/streamlit_technical_lab.py` 는 **pytest/CI 대상이 아니다**. real KIS + fake LLM 으로 `run_technical_agent()` 출력과 chart payload 를 화면에서 사람이 눈으로 검수하는 **수동 도구**다(real KIS env 필요). Streamlit `session_state` 는 production cache 가 아니라 수동 QA 용 임시 상태이며, secret 값은 화면에 표시하지 않는다(존재 여부만 OK/MISSING). 실행법은 `implementation_plan.md` §8 참고.
 
 이 도구의 **1D Intraday QA** 섹션은 **fixture/수동 입력** 기반이다 — KIS 호출·자동 refresh·WebSocket·polling 없이 이미 만든 intraday 빌더/헬퍼(chart payload·context·hint/alignment·adjustment)를 호출해 표시만 한다. KIS 분봉 fetcher 미구현 상태에서 1d 조립·렌더를 눈으로 확인하기 위한 것이다(`implementation_plan.md` §9).
+
+### 11.1 chart annotation 진단 도구 (read-only 계측)
+
+`scripts/diagnose_chart_annotations.py` 는 **"차트 전략(annotation)이 잘 안 보인다"의 원인을 숫자로 가르는** read-only 계측 도구다(기능 구현 아님, 프로덕션 무변경). `build_chart_payloads`(post-dedup 정본)와 chart_builder 내부 생성기(`_cross_annotations` 등)를 읽기 전용으로 호출해 period(3m/1y/5y)별로 다음을 계측한다: annotation kind별/importance별 개수, **dedup 전/후 개수**(pre−post = 줄어든 수), **capacity check**(각 detector 필요 봉 vs 확보 봉 → 봉 부족인지 조건 불충족인지), `box_breakout_candidate`·`cup_handle_candidate`의 **"contract exists but generator missing"** 표시. 기본은 **fixture mode**(합성 OHLCV·KIS 호출 없음, `--fixture`), real KIS mode는 `--ticker`로만 켜지며 env 없으면 graceful skip한다. 출력 JSON은 gitignore된 `scripts/chart_annotation_diagnostics_output/`에 저장. 도구 계약(출력 shape·미구현 kind 표시·capacity·production 무변경)은 `test_chart_annotation_diagnostics.py`(fixture 기반)가 고정한다.
