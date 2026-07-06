@@ -200,6 +200,28 @@ KIS_MAX_CHUNKS = 10                   # 무한 루프 방지 상한
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7.2 데이터 캐시 (Redis) 상수 (config.md §7·§8). services/cache_service.py가 사용한다.
+#     D/W/M OHLCV 원본을 timeframe별로 캐시한다(리샘플 파생 없음). 1D 분봉 캐시는 범위 밖.
+#     key는 as_of를 포함하지 않는다(문서 계약) — as_of 정합은 entry에 저장한 as_of 비교로 보장한다.
+# ─────────────────────────────────────────────────────────────────────────────
+CACHE_KEY_BY_PERIOD = {               # Redis key 패턴(ticker만 포맷). D/W/M → daily/weekly/monthly
+    "D": "ohlcv:daily:{ticker}",
+    "W": "ohlcv:weekly:{ticker}",
+    "M": "ohlcv:monthly:{ticker}",
+}
+# primary(fresh) 서빙 판정: fetched_at 나이 ≤ 이 값이면 KIS 없이 캐시를 그대로 쓴다.
+# 시계열이 오늘/당주/당월 봉을 포함해 가변이므로 "오늘 일봉 15분"(config.md §7 CACHE_TTL_TODAY)을 쓴다.
+CACHE_FRESH_TTL_SECONDS = 60 * 15     # 15분
+# stale 폴백 허용 기간(일). Redis expire도 이 값으로 두어 그 안엔 stale로 재사용 가능하게 한다.
+STALE_CACHE_MAX_AGE_BY_PERIOD = {     # config.md §8
+    "D": 1,     # 1거래일
+    "W": 7,     # 약 1주
+    "M": 31,    # 약 1개월
+}
+CACHE_SECONDS_PER_DAY = 86400         # stale 일수 → Redis expire 초 환산
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 8. 신호 종합 상수 (config.md §4). synthesis/signal_score.py가 사용한다.
 # ─────────────────────────────────────────────────────────────────────────────
 INDICATOR_WEIGHTS = {                # 지표별 가중치 (합 = 1.0)
