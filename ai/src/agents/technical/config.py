@@ -367,3 +367,52 @@ INTRADAY_RISK_NOTE_MAX_COUNT: int = 3             # intraday risk_notes 최대 �
 # services/kis_client.py — 분봉 역방향 페이징 상한
 INTRADAY_MINUTE_MAX_CALLS: int = 20               # 30건×20 ≈ 600봉(1일 ~391) — 무한 루프 방지 상한
 INTRADAY_MARKET_OPEN_HHMMSS: str = "090000"       # 이 시각 이전으로는 더 역방향 조회하지 않는다
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. OpenAI LLM client 설정 (services/openai_llm_client.py가 사용한다).
+#     .env(배포/실험별) = API key(secret) + MODEL(환경마다 갈리는 선택값). 코드에 값을 박제하지
+#     않고 반드시 .env/환경변수에서 읽는다(technical_coding_guidelines §2.2·§13.2). MODEL은
+#     import 시점이 아니라 load_openai_settings()에서 .env 로드 후 읽어야 실제로 override가 먹는다.
+#     아래 timeout/max_retries/temperature/max_tokens/store는 secret도 환경차도 아닌 "튜닝/안전 상수"
+#     이므로 여기(코드)에 둔다 — KIS_TIMEOUT_SECONDS와 같은 급이다(.env에 넣지 않는다).
+#     안전 정책: SDK 재시도는 끄고(max_retries=0) agent-level 재생성/fallback을 쓴다 — SDK retry는
+#     중복이자 60초 API 계약(api_spec §)을 초과할 위험이 있다. store=False로 OpenAI 측 저장을 끈다
+#     (stateless). 총 60초 deadline 완전 보장(호출 간 deadline 전파)은 후속 AI endpoint 범위.
+#     runtime wiring(run_technical_agent 자동 생성)은 이 브랜치 범위 밖 — 후속 AI endpoint에서 주입.
+# ─────────────────────────────────────────────────────────────────────────────
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"    # 키 "이름"만(값 아님) — 값은 .env
+OPENAI_MODEL_ENV = "OPENAI_MODEL"        # 모델 "이름"만 — 값은 .env(단일 출처, 코드에 기본값 없음)
+OPENAI_TIMEOUT_SECONDS: float = 20.0     # 1회 호출 timeout(초) — 60초 계약 안에서 보수적 하향
+OPENAI_MAX_RETRIES: int = 0              # SDK 재시도 끔 — agent-level 재생성/template fallback 우선
+OPENAI_TEMPERATURE: float | None = 0.0   # None이면 요청 파라미터에서 생략 — 튜닝 상수(코드)
+OPENAI_MAX_OUTPUT_TOKENS: int = 1200     # 응답 최대 토큰(보수적 기본) — 튜닝 상수(코드)
+OPENAI_STORE: bool = False               # OpenAI 측 application state 저장 끔(stateless). 분석 이력은 backend DB.
+
+
+@dataclass(frozen=True)
+class OpenAiSettings:
+    """.env에서 읽는 OpenAI 설정. api_key는 repr에서 제외(로그/repr 노출 방지, §13.2)."""
+    api_key: str = field(repr=False)
+    model: str
+
+
+def load_openai_settings() -> OpenAiSettings:
+    """.env(또는 환경변수)에서 OpenAI api_key·model을 읽어 반환한다(fail-fast).
+
+    KIS(§4)와 동일하게 코드에 하드코딩하지 않는다. **model도 .env가 단일 출처**이며 코드 기본값을
+    두지 않는다(중복 방지). 누락 시 어디에 무엇을 넣어야 하는지 명시하며 즉시 실패한다 —
+    이 config error는 client 생성 시점 오류이며 LlmCallError(호출 실패)와 구분된다.
+    반환값(키 문자열)은 로그·trace·repr 어디에도 남기지 않는다(dataclass repr에서 제외)."""
+    env_path = _find_env_file()
+    if env_path is not None:
+        load_dotenv(env_path, override=False)  # 실제 환경변수가 .env보다 우선
+    api_key = (os.getenv(OPENAI_API_KEY_ENV) or "").strip()
+    model = (os.getenv(OPENAI_MODEL_ENV) or "").strip()
+    missing = [name for name, val in ((OPENAI_API_KEY_ENV, api_key), (OPENAI_MODEL_ENV, model)) if not val]
+    if missing:
+        where = f"{env_path}" if env_path else "환경변수(.env 파일 미발견)"
+        raise RuntimeError(
+            f"[OpenAI config] 필수 설정 누락: {missing}. {where} 에 {', '.join(missing)} 를 설정하세요."
+        )
+    return OpenAiSettings(api_key=api_key, model=model)
