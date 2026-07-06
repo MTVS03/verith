@@ -324,3 +324,27 @@ EXTRACT_SYSTEM_PROMPT: str = """당신은 한국어 경제 뉴스에서 구조�
 아래 형태의 JSON 하나만 출력한다(설명·코드펜스 없이 JSON만):
 {"summary": "...", "companies": [], "people": [], "industries": [], "events": [{"title": "...", "confidence": 0.0}], "countries": [], "keywords": [], "event_date": null}
 """
+
+# ---------------------------------------------------------------------------
+# 스케줄 설정 — TASK 10. "언제 도는가"(주기·타임존·겹침·misfire·기동정책)만 소유한다.
+# 수집·크롤·모델·backend 접속 설정은 각 TASK(02/03/08) 값을 재사용하고 여기서 다시 정의하지 않는다.
+# 주기·타임존은 운영 환경 튜닝 대상이므로 코드에 박지 않고 env/config 에서 읽는다(CLAUDE.md §7).
+# 스케줄러는 이 값들로 배치 파이프라인(TASK 11 배치 앱)·삭제 트리거(save_client.request_cleanup)를
+# 주기 실행할 뿐, 실제 로직(크롤·LLM·저장·삭제 판정)은 nodes/services/backend 소유다(절대규칙 2).
+# ---------------------------------------------------------------------------
+# 주기(분) — 매시간 배치, 매시간 삭제 트리거(pipeline_spec §2·§10). ⚠️ 운영 튜닝 대상.
+BATCH_INTERVAL_MINUTES: int = int(os.getenv("BATCH_INTERVAL_MINUTES") or 60)     # 배치(수집·분석·저장) 실행 주기
+CLEANUP_INTERVAL_MINUTES: int = int(os.getenv("CLEANUP_INTERVAL_MINUTES") or 60)  # 7일 롤링 삭제 트리거 주기
+# 스케줄 기준 타임존 — published_at KST-aware 와 정합(TASK 02). 배포 서버 로컬 타임존에 흔들리지 않게
+# 여기서 고정한다. 값은 IANA 이름(예: "Asia/Seoul").
+SCHEDULER_TIMEZONE: str = (os.getenv("SCHEDULER_TIMEZONE") or "").strip() or "Asia/Seoul"
+# 겹침 방지 — 이전 배치가 아직 도는 중이면 이번 주기를 skip(중복 수집·병합 경쟁·부하 폭증 방지, §2).
+BATCH_MAX_INSTANCES: int = int(os.getenv("BATCH_MAX_INSTANCES") or 1)            # 동시 실행 상한(1=겹치면 skip)
+BATCH_MISFIRE_GRACE_SEC: int = int(os.getenv("BATCH_MISFIRE_GRACE_SEC") or 300)  # 이 시간 넘겨 놓친 실행은 skip
+# 삭제도 동일 정책(겹침 방지·misfire). 기본은 배치 값과 동일하게 둔다.
+CLEANUP_MAX_INSTANCES: int = int(os.getenv("CLEANUP_MAX_INSTANCES") or 1)
+CLEANUP_MISFIRE_GRACE_SEC: int = int(os.getenv("CLEANUP_MISFIRE_GRACE_SEC") or 300)
+# 기동 정책 — 프로세스 기동 즉시 1회 배치 실행(개발·초기 적재용). 운영 기본은 False(다음 정시부터).
+BATCH_RUN_ON_START: bool = (os.getenv("BATCH_RUN_ON_START") or "").strip().lower() in ("1", "true", "yes")
+# 시작 시각 분산(초) — 여러 인스턴스의 동시 부하 완화(선택). 0이면 분산 없음.
+SCHEDULER_JITTER_SEC: int = int(os.getenv("SCHEDULER_JITTER_SEC") or 0)
