@@ -191,10 +191,10 @@ MVP 차트 기간은 다음을 기준으로 한다. 각 봉은 KIS `inquire-dail
 | `rsi_overbought` | RSI 과열 | RSI가 과열 기준 이상 | ✅ |
 | `rsi_oversold` | RSI 과매도 | RSI가 과매도 기준 이하 | ✅ |
 | `box_range_candidate` | 박스권 후보 | 일정 기간 가격이 제한된 범위에서 움직임 | ✅ |
-| `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 | ⏳ 후속 |
+| `box_breakout_candidate` | 박스권 이탈 관찰 | 박스권 상단/하단을 이탈한 후보 | ✅ |
 | `cup_handle_candidate` | 컵앤핸들 후보 | 컵앤핸들 형태로 볼 수 있는 후보 구간 | ⏳ 후속 |
 
-크로스 kind는 MVP 구현에서 `golden_cross`/`dead_cross`로 확정한다(§8은 이동평균선 크로스 규칙을 정의한다). `box_breakout_candidate`·`cup_handle_candidate`는 오탐 가능성이 크고 구현 난도가 높아 **MVP 구현 범위에서 제외**하고 후속 단계에서 별도 문서·테스트 보강 후 구현한다(§12.2·§13 규칙은 정본으로 유지).
+크로스 kind는 MVP 구현에서 `golden_cross`/`dead_cross`로 확정한다(§8은 이동평균선 크로스 규칙을 정의한다). `box_breakout_candidate`는 **rolling box_range 이후 상/하단 이탈 후보로 구현됐다**(§12.2). `cup_handle_candidate`는 오탐 가능성이 크고 구현 난도가 높아 **아직 후속**으로 남긴다(§13 규칙은 정본으로 유지).
 
 패턴 관련 annotation은 확정이 아니라 **후보(candidate)**로 표기한다. 패턴 탐지는 오탐 가능성이 높으므로 "확정" 표현을 쓰지 않는다(honest scoping).
 
@@ -325,7 +325,9 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 
 ### 12.2 박스권 이탈 후보
 
-현재 종가가 박스권 상단/하단을 이탈하고 거래량이 최근 평균 대비 증가하면 `box_breakout_candidate`를 생성한다. "돌파 확정"이 아니라 **"이탈 관찰"**로 표시한다.
+박스권(§12.1 `box_range_candidate`)이 **먼저 형성된 뒤 그다음 봉**에서 종가가 박스 상단 위/하단 아래로 마감하면 `box_breakout_candidate`를 생성한다. "돌파 확정"이 아니라 **"이탈 관찰"**로 표시한다.
+
+**v1 구현(`chart_builder._box_breakout_annotations`)**: 봉 i에서 **현재봉을 제외한 직전 박스**(`_box_range_at(source, i-1)`, bars ≤ i-1 — look-ahead 없음)를 구하고 `close[i]`가 박스 상단/하단을 벗어나면 생성한다. 방향은 `meta.direction`(`"up"`/`"down"`), 표시는 rolling. **거래량은 생성 조건(gate)이 아니라 confirmation 정보**로 `meta.volume_confirmed`(현재 거래량 ≥ 20봉 평균 × `VOLUME_SPIKE_MULTIPLIER`)·`meta.volume_ratio`에 기록한다 — v1은 **가격 이탈만으로** 후보를 만든다(거래량을 필수로 하면 후보가 지나치게 적어짐). 별도 breakout threshold 상수는 두지 않는다(`box_top`=창 최고가 상회 자체가 명확한 이탈). importance=`medium`. `box_breakout_candidate`는 annotation-only이며 signal_score/regime에 반영하지 않는다(§7.1).
 
 ---
 

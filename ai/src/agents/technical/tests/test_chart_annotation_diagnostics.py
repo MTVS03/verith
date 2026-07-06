@@ -55,11 +55,10 @@ def test_each_period_has_required_keys():
 def test_unimplemented_kinds_flagged():
     for p in _result()["periods"]:
         missing = {m["kind"] for m in p["missing_or_unimplemented_kinds"]}
-        assert missing == {"box_breakout_candidate", "cup_handle_candidate"}
+        assert missing == {"cup_handle_candidate"}   # box_breakout은 이제 구현됨
         for m in p["missing_or_unimplemented_kinds"]:
             assert m["reason"] == "contract exists but generator missing"
         # 미구현 kind는 반드시 0개
-        assert p["annotation_count_by_kind"]["box_breakout_candidate"] == 0
         assert p["annotation_count_by_kind"]["cup_handle_candidate"] == 0
 
 
