@@ -27,7 +27,11 @@ from schemas.article import Sentiment, SentimentResult
 logger = logging.getLogger(__name__)
 
 # 프로세스 내 1회 로드(모듈 캐시). 모델은 무겁고 재사용되므로 기사마다 다시 로드하지 않는다(속도, §3.2-1).
-_classifier = None
+# (tokenizer, model) 튜플. transformers/torch 는 무거워 지연 import 한다(테스트는 _infer_raw 를 mock).
+_model_bundle = None
+
+# BERT 계열 최대 토큰 길이(아키텍처 상한). 문자 상한(FINBERT_MAX_INPUT_CHARS)과 별개의 2차 방어.
+_MAX_TOKENS = 512
 
 # 라벨명 대소문자·공백 차이에 견디도록 정규화한 매핑(config 원본은 건드리지 않음).
 _NORMALIZED_LABEL_MAP: dict[str, str] = {
@@ -35,41 +39,59 @@ _NORMALIZED_LABEL_MAP: dict[str, str] = {
 }
 
 
-def _get_classifier():
-    """KR-FinBert-SC 추론 파이프라인을 지연 로드(싱글턴). transformers 는 여기서만 import 한다.
+def _get_model():
+    """KR-FinBert-SC 를 지연 로드(싱글턴). transformers 로 from_pretrained 로드한다.
 
-    transformers 는 선택 의존성이라 모듈 import 시점이 아니라 실제 추론이 필요할 때 로드한다.
-    테스트는 _infer_raw 를 monkeypatch 하므로 이 함수(=실제 모델 로드)에 도달하지 않는다.
+    - 최초 호출 시 Hugging Face 에서 모델을 자동 다운로드해 로컬 캐시에 저장한다(이후 재사용).
+    - transformers/torch 는 무거워 모듈 import 시점이 아니라 실제 추론 때 import 한다.
+    - 테스트는 _infer_raw 를 monkeypatch 하므로 이 함수(=실제 모델 로드)에 도달하지 않는다.
     """
-    global _classifier
-    if _classifier is None:
-        from transformers import pipeline  # 선택 의존성: 실제 추론 시에만 필요
+    global _model_bundle
+    if _model_bundle is None:
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-        # device: transformers 파이프라인 규약(cuda=0, cpu=-1)로 변환.
-        device = 0 if str(FINBERT_DEVICE).lower().startswith("cuda") else -1
-        _classifier = pipeline(
-            "text-classification",
-            model=FINBERT_MODEL,
-            tokenizer=FINBERT_MODEL,
-            device=device,
-            truncation=True,           # 512 토큰 한계 방어(문자 상한과 별개의 2차 방어)
-            batch_size=FINBERT_BATCH_SIZE,
-        )
-    return _classifier
+        tokenizer = AutoTokenizer.from_pretrained(FINBERT_MODEL)
+        model = AutoModelForSequenceClassification.from_pretrained(FINBERT_MODEL)
+        use_cuda = str(FINBERT_DEVICE).lower().startswith("cuda") and torch.cuda.is_available()
+        model.to("cuda" if use_cuda else "cpu")
+        model.eval()  # 추론 전용(드롭아웃 등 비활성)
+        _model_bundle = (tokenizer, model)
+    return _model_bundle
 
 
 def _infer_raw(texts: list[str]) -> list[dict]:
     """저수준 배치 추론: 본문 리스트 → [{"label": str, "score": float}, ...] (예측 라벨 + confidence).
 
-    transformers text-classification 파이프라인은 최고 확률 라벨과 그 softmax 확률(0~1)을 돌려준다.
+    KR-FinBert-SC(BertForSequenceClassification) 로짓을 softmax 해 예측 라벨과 그 확률(0~1)을 낸다.
+    라벨명은 모델 config.id2label(negative/neutral/positive) 을 그대로 쓰고, Sentiment 매핑은 상위(classify)가 한다.
     이 함수가 테스트 시임이다(monkeypatch 대상). 순서·길이는 입력과 일치한다.
     """
-    clf = _get_classifier()
-    result = clf(texts)
-    # 단일 입력이라도 리스트로 정규화(파이프라인이 dict 하나를 돌려주는 경우 방어).
-    if isinstance(result, dict):
-        return [result]
-    return list(result)
+    import torch
+
+    tokenizer, model = _get_model()
+    id2label = model.config.id2label
+    out: list[dict] = []
+    # FINBERT_BATCH_SIZE 단위로 나눠 추론(처리량·메모리 안전 — 큰 배치 한 번에 패딩하지 않음).
+    for start in range(0, len(texts), FINBERT_BATCH_SIZE):
+        chunk = texts[start:start + FINBERT_BATCH_SIZE]
+        enc = tokenizer(
+            chunk,
+            return_tensors="pt",
+            truncation=True,
+            max_length=_MAX_TOKENS,   # 512 토큰 한계(문자 상한과 별개의 2차 방어)
+            padding=True,
+        )
+        enc = {k: v.to(model.device) for k, v in enc.items()}
+        with torch.no_grad():
+            logits = model(**enc).logits
+        probs = torch.softmax(logits, dim=-1)
+        scores, indices = probs.max(dim=-1)
+        out.extend(
+            {"label": id2label[int(idx)], "score": float(score)}
+            for idx, score in zip(indices.tolist(), scores.tolist())
+        )
+    return out
 
 
 def _map_label(label: str) -> Sentiment | None:

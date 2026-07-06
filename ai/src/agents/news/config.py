@@ -102,13 +102,36 @@ FINBERT_MAX_INPUT_CHARS: int = 2000           # 입력 상한(BERT 512토큰 고
 FINBERT_TIMEOUT: float = 30.0                  # (원격) 타임아웃(초)
 FINBERT_MAX_RETRIES: int = 2                   # (원격) 재시도 횟수(총 시도 = 1 + FINBERT_MAX_RETRIES)
 FINBERT_RETRY_BACKOFF: float = 1.0             # (원격) 재시도 간 대기(초)
-# 모델 출력 라벨명 → Sentiment 값(긍정/중립/부정) 매핑. 실제 라벨명은 모델 카드 확인 후 확정(예시값).
+# 모델 출력 라벨명 → Sentiment 값(긍정/중립/부정) 매핑.
+# snunlp/KR-FinBert-SC 의 config.id2label = {0: negative, 1: neutral, 2: positive} 로 확인됨(소문자).
 # 라벨 문자열은 모델에 종속되므로 여기 한 곳에 격리한다 — 모델 교체 시 이 매핑만 고친다(파이프라인 곳곳에서 다루지 않음).
 FINBERT_LABEL_MAP: dict[str, str] = {
     "positive": "긍정",
     "neutral": "중립",
     "negative": "부정",
 }
+
+# ---------------------------------------------------------------------------
+# 임베딩(arctic-embed-l-v2.0-ko) 설정 — TASK 05. summary 유사도는 이 전용 모델이 낸다(CLAUDE.md §4).
+# 기사끼리 대칭 비교라 query/document 프리픽스를 두지 않는다(model_choice §3). 임베딩 차원은 모델
+# 스펙을 따르며 config에 하드코딩하지 않는다. 값 중 배치·상한은 튜닝 대상(주석 표기, CLAUDE.md §7).
+# ---------------------------------------------------------------------------
+EMBED_MODEL: str = "arctic-embed-l-v2.0-ko"   # 한국어 검색 SOTA급(model_choice §3). 차원은 모델 스펙 따름
+EMBED_DEVICE: str = "cpu"                       # 가능 시 "cuda"
+EMBED_BATCH_SIZE: int = 32                      # 배치 임베딩 크기(처리량) — 튜닝 대상
+EMBED_MAX_INPUT_CHARS: int = 8000              # 입력 상한(8K 컨텍스트 고려). 초과분 잘라 입력 — 튜닝 대상
+# ⚠️ query/document 프리픽스 설정 없음 — 기사끼리 대칭 비교라 프리픽스 미사용(model_choice §3)
+
+# ---------------------------------------------------------------------------
+# 이벤트 병합 설정 — TASK 05. 가중 점수·임계값·후보 축소·시간 감쇠(event_merge.md §3~5).
+# 계수·임계값은 임시값이며 실데이터 튜닝 대상(주석 표기). 하드코딩 금지의 귀착점(CLAUDE.md §5/§7).
+# ---------------------------------------------------------------------------
+MERGE_W_SUMMARY: float = 0.6                    # 가중치(합=1) — 튜닝 대상(event_merge.md §3)
+MERGE_W_COMPANY: float = 0.3                    # 회사 중복도 가중
+MERGE_W_TIME: float = 0.1                       # 시간 근접도 가중
+MERGE_THRESHOLD: float = 0.7                    # 미만이면 신규 이벤트(억지 편입 금지) — 튜닝 대상(§4)
+MERGE_CANDIDATE_WINDOW_DAYS: int = 7            # 후보: 동일 회사·최근 N일(event_merge.md §5)
+MERGE_TIME_DECAY_DAYS: float = 7.0             # time_proximity 감쇠 스케일(며칠 차이까지 가깝게 볼지) — 튜닝 대상
 
 # 추출 지시 + 출력 스키마. 감성·영향도를 요청하지 않는다(§2-4). 본문/제목은 신뢰 불가 외부 입력이므로
 # 구획(delimiter)으로 감싸 '데이터'로만 취급하고, 구획 내부의 어떤 지시·명령·URL 요청도 따르지 않는다(§3.1-6).
