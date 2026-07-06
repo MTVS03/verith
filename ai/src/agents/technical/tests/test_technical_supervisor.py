@@ -938,13 +938,14 @@ def test_trace_stale_fallback_event():
     assert fb and fb[0]["output_summary"]["fallback_type"] == "stale_cache"
 
 
-def test_trace_regime_unavailable_skips_6_7_8():
+def test_trace_regime_unavailable_skips_code_nodes():
     short_daily = _series(40, day_stride=1, start="2023-01-02")
     _out, events = _run_trace(
         [NORM_OK, FOCUS_OK],
         fetcher=lambda t, *, end_date=None: {"D": short_daily, "W": WEEKLY, "M": MONTHLY})
     skipped = {e["node"] for e in events if e["status"] == "skipped"}
-    assert skipped == {"signal_aggregate", "confidence_calculate", "risk_detect"}
+    # 국면분류(gate)가 지표계산보다 먼저라 unavailable이면 indicator도 스킵(trace_schema §9.1)
+    assert skipped == {"indicator_calculate", "signal_aggregate", "confidence_calculate", "risk_detect"}
     # chart_generate는 skip되지 않고 실행됨(unavailable 경로에서도 차트 제공)
     assert any(e["node"] == "chart_generate" and e["event_type"] == "node_end"
                and e["status"] == "success" for e in events)

@@ -1,16 +1,20 @@
-"""AI Technical Supervisor — 1~10 노드 조율 + contracts.* 최종 조립.
+"""AI Technical Supervisor — `run()` 진입점(allowlist·trace lifecycle·예외 분기) + 노드 계산 helper.
 
-정본: architecture.md·pipeline.md·sequence.md·contracts.md §4. 이 파일에서 처음으로
-`TechnicalAgentOutput`을 조립한다(그전 노드들은 로컬 dataclass만 반환).
+정본: architecture.md·pipeline.md·sequence.md·contracts.md §4. `TechnicalAgentOutput` 최종 조립은
+`build_output` 노드(technical_graph)에서 하며, 그 helper(`_to_*`·`_unavailable_output` 등)를 이 파일이 소유한다.
 
 책임:
-  - 노드 1~10을 순서대로 실행하고 결과를 계약 모델로 조립한다.
-  - interpret_report 재생성 루프(1회)와 template fallback을 소유한다.
+  - `run()`: allowlist 선검증 → trace_start → LangGraph graph.invoke(state) → trace_end → output.
+  - **노드 1~10 실행 순서 조율은 `technical_graph`(LangGraph StateGraph)가 담당**하고, 이 파일은 각
+    노드가 호출하는 계산 helper(_preprocess·_collect_ohlcv·regime/indicator/signal/risk 조립·_interpret)를 소유한다.
+  - interpret_report 재생성 루프(1회)와 template fallback을 소유한다(`_interpret`).
   - LLM 호출 자체 예외(client.complete)는 잡아 template fallback으로 진행(사용자 응답 생성).
   - fetcher/KIS 실패·envelope 불량·계약 조립 불가·예상 못한 계산 오류는 전파(조용히 삼키지 않음).
 
-경계(이번 브랜치 범위 밖): trace_logger·cache·DB·FastAPI·agent.py·LangGraph·E-하네스
-(KIS 재시도/stale_cache, source="KIS (stale)"). 전역 state 스키마도 만들지 않는다.
+known debt(후속 리팩토링): graph가 이 파일의 private helper를 `_sup.`로 호출하고 이 파일은 graph를
+lazy import하는 **양방향 결합**이 남아 있다 — 계산 helper를 별도 `pipeline_steps` 모듈로 옮겨
+`supervisor → graph → steps` 단방향으로 정리하는 것은 다음 브랜치 범위다. checkpointer/persistent
+memory는 state 정화 전까지 도입하지 않는다(langgraph_state.py 보안 경계).
 """
 
 from __future__ import annotations
@@ -180,10 +184,14 @@ def _trace_end_summary(output: TechnicalAgentOutput) -> dict[str, object]:
 
 
 def _emit_regime_unavailable_skips(trace: TraceLogger) -> None:
-    """regime_unavailable → 노드 6·7·8 skipped 기록(trace_schema.md §9.1)."""
+    """regime_unavailable → 노드 4·6·7·8 skipped 기록(trace_schema.md §9.1).
+
+    국면분류(노드 5·gate)를 지표계산(노드 4·신호용 bundle)보다 먼저 실행하므로, unavailable이면
+    지표계산부터 스킵된다 — indicator_calculate까지 skipped로 기록해 trace 정직성을 지킨다(§10노드).
+    """
     reason = {"reason": "regime_unavailable"}
     input_summary = {"final_regime": "unavailable", "data_status": "regime_unavailable"}
-    for node_code in ("signal_aggregate", "confidence_calculate", "risk_detect"):
+    for node_code in ("indicator_calculate", "signal_aggregate", "confidence_calculate", "risk_detect"):
         trace.emit("node_end", "skipped", node=node_code,
                    input_summary=input_summary, output_summary=reason)
 
