@@ -19,7 +19,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ..config import (
-    MA_WINDOWS,
+    MA_LONG_WINDOW,
+    MA_MID_WINDOW,
+    MA_SHORT_WINDOW,
     MIN_DAILY_BARS,
     NEAR_BAND_THRESHOLD,
     NEAR_SUPPORT_THRESHOLD_PCT,
@@ -36,8 +38,9 @@ from ..indicators.support_resistance import calculate_support_resistance
 from ..schemas.enums import Regime
 from ..schemas.ohlcv import OHLCV
 
-# 단기/중기/장기 이동평균 창 (config.md MA_WINDOWS). 규칙의 "20MA" 등은 이 창을 가리킨다.
-_SHORT_MA, _MID_MA, _LONG_MA = MA_WINDOWS
+# 단기/중기/장기 이동평균 창 (config 역할 상수). 규칙의 "20MA" 등은 기본값 기준 표기이며
+# 이 역할 창을 가리킨다. mas 접근은 하드코딩 숫자가 아니라 이 상수로만 한다.
+_SHORT_MA, _MID_MA, _LONG_MA = MA_SHORT_WINDOW, MA_MID_WINDOW, MA_LONG_WINDOW
 
 
 def _slope(series: Sequence[float | None], lookback: int) -> float | None:
