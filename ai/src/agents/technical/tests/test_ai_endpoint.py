@@ -16,7 +16,7 @@ from src.agents.technical.observability.trace_logger import InMemoryTraceSink
 from src.agents.technical.runtime.deadline import DeadlineExceeded
 from src.agents.technical.services.kis_client import KisApiError
 from src.agents.technical.nodes._llm_utils import LlmCallError
-from src.agents.technical.supervisor import technical_supervisor as sup
+from src.agents.technical.supervisor import pipeline_steps as steps
 from src.agents.technical.tests import test_technical_supervisor as st
 from src.api import dependencies as deps
 from src.api import technical as tech
@@ -44,7 +44,7 @@ class _RecordingFetcher:
 
 @pytest.fixture(autouse=True)
 def _intraday_off(monkeypatch):
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", False)  # 실 KIS 분봉 fetch 차단
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", False)  # 실 KIS 분봉 fetch 차단
 
 
 @pytest.fixture

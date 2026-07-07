@@ -159,7 +159,7 @@ MTF-01·05·06이 중립 국면 케이스다 — 상위 추세가 무엇이든 `
 | ID | 입력 조건 | 기대 결과 |
 | --- | --- | --- |
 | REG-UNAV-01 | 일봉 < `MIN_DAILY_BARS`(예: 40개) | `data_status=regime_unavailable`, `final_regime=unavailable` |
-| REG-UNAV-02 | final_regime=unavailable | `signal=null`, `risk=null`, `technical_signals=[]`, 6~8 스킵하고 차트로 |
+| REG-UNAV-02 | final_regime=unavailable | `signal=null`, `risk=null`, `technical_signals=[]`, 4·6~8 스킵하고 차트로 |
 | REG-UNAV-03 | 일봉 ≥ `MIN_DAILY_BARS`이나 60MA **기울기**만 계산 불가 | `unavailable` 아님 — 해당 조건만 False, 어디에도 안 걸리면 `sideways`로 착지 |
 
 `contracts.md`·`regime_rules.md`(판단 불가 vs 조건 False)와 연결된다 — **필수 데이터 자체 부족(봉 수 < MIN_DAILY_BARS)**만 `unavailable`이고, 값은 있으나 보조 계산(기울기 등)만 부족하면 그 조건만 False 처리해 `sideways` 등으로 정상 착지한다. **억지 판정을 하지 않는 것**이 정직성의 핵심이다.
@@ -185,7 +185,7 @@ MVP의 검증 ③은 **LLM-as-judge가 아니라 결정론적 키워드/라벨 �
 | `test_plan.md` (이 문서) | 판정 **기준 명세** |
 | `observability/trajectory_eval.py` | 판정 **로직 구현** |
 | `observability/keyword_rules.py` | **키워드 사전** |
-| `nodes/interpret_report.py` | 노드 10 어댑터 — LLM 출력을 받아 위 `trajectory_eval`을 **호출**하고 `detail`/`interpretation.text`를 병합. 판정 로직 자체는 갖지 않는다(재생성 루프는 `supervisor/technical_supervisor.py`) |
+| `nodes/interpret_report.py` | 노드 10 어댑터 — LLM 출력을 받아 위 `trajectory_eval`을 **호출**하고 `detail`/`interpretation.text`를 병합. 판정 로직 자체는 갖지 않는다(재생성 루프는 `supervisor/pipeline_steps.py::_interpret`) |
 
 키워드 사전은 `config.py`가 아니라 `observability/keyword_rules.py`에서 관리한다. config는 수치·기간·가중치를 담당하고, 키워드 사전은 검증 ③의 문장 판정 규칙이므로 검증 코드 옆에 둔다. 다만 향후 템플릿 폴백 문장 생성에서도 같은 사전을 공유하게 되면, 공용 표현 계약 모듈로 위치를 재검토한다.
 
@@ -421,7 +421,7 @@ CONF-*·RISK-MENTION-*은 프롬프트(§4)의 "confidence 왜곡 금지·risk �
 | SUP-09 | interpret `client.complete` 예외 | template fallback 진행(전파 안 함) |
 | SUP-10 | normalize/focus `client.complete` 예외 | fallback 후 파이프라인 계속(출력엔 미포함) |
 | SUP-11 | 일봉 빈 데이터 | `data_status=data_limited`, signal/risk null, technical_signals=[], charts=[], `interpretation=unavailable` |
-| SUP-12 | 일봉 부족(final_regime=unavailable) | `data_status=regime_unavailable`, 6~8 스킵(signal/risk null), chart는 가능분 |
+| SUP-12 | 일봉 부족(final_regime=unavailable) | `data_status=regime_unavailable`, 4·6~8 스킵(signal/risk null), chart는 가능분 |
 | SUP-13 | W/M 부족(일봉 정상) | `data_status=data_limited`, 일봉 기준 분석 계속 |
 | SUP-14 | `TechnicalSignal.value=None` | 계약 허용(조립 크래시 없음) |
 | SUP-15 | fetcher 예외 | **전파**(supervisor가 삼키지 않음) |

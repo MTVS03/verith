@@ -18,6 +18,7 @@ from src.agents.technical.schemas.enums import DataStatus
 from src.agents.technical.services.kis_client import OutOfScopeTickerError
 from src.agents.technical.supervisor import technical_graph as tg
 from src.agents.technical.supervisor import technical_supervisor as sup
+from src.agents.technical.supervisor import pipeline_steps as steps
 from src.agents.technical.tests import test_technical_supervisor as st
 
 _HAPPY = [st.NORM_OK, st.FOCUS_OK, st.INTERP_BAD, st.INTERP_BAD]  # template fallback → 정상 완료
@@ -29,7 +30,7 @@ def _fetcher(t, *, end_date=None):
 
 @pytest.fixture(autouse=True)
 def _intraday_off(monkeypatch):
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", False)
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", False)
 
 
 def _state(responses, *, daily=None, cache=None, deadline=None, sink=None):
@@ -138,3 +139,58 @@ def test_state_is_runtime_only_not_persisted():
     # 다만 새 raw prompt/response 필드를 만들지 않고, output 직렬화에 raw LLM 문구가 남지 않는다
     assert not any(h in k.lower() for k in final for h in ("prompt", "response", "api_key", "token"))
     assert "흥미롭습니다" not in final["output"].model_dump_json()  # INTERP_BAD raw → template fallback 대체
+
+
+# ── 단방향 의존: supervisor → technical_graph → pipeline_steps (역방향 import 없음) ──
+def _imported_modules(module) -> set:
+    import ast
+    import pathlib
+    names: set = set()
+    for node in ast.walk(ast.parse(pathlib.Path(module.__file__).read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ImportFrom):
+            names.add(node.module or "")
+            names.update(a.name for a in node.names)  # `from . import X` 대비
+        elif isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+    return names
+
+
+def test_graph_does_not_import_supervisor():
+    imported = _imported_modules(tg)
+    assert not any("technical_supervisor" in m for m in imported)  # 순환 결합 제거
+    assert "pipeline_steps" in imported                           # steps만 참조
+
+
+def test_pipeline_steps_does_not_import_graph_or_supervisor():
+    # 단방향 강제: pipeline_steps는 leaf만 import — graph/supervisor를 참조하지 않는다
+    imported = _imported_modules(steps)
+    assert not any(("technical_graph" in m or "technical_supervisor" in m) for m in imported)
+
+
+def test_graph_node_wrappers_call_pipeline_steps():
+    # node wrapper 소스가 steps.<helper>를 호출한다(supervisor private helper 직접 호출 아님)
+    import pathlib
+    src = pathlib.Path(tg.__file__).read_text(encoding="utf-8")
+    assert "steps._collect_ohlcv" in src and "steps._interpret" in src and "steps.check_deadline" in src
+    assert "_sup." not in src  # 옛 supervisor 참조 흔적 없음
+
+
+# ── normalize/focus 실제 별도 node 분리 ───────────────────────────────────────
+def test_normalize_focus_are_separate_nodes():
+    node_names = set(tg.build_technical_graph().get_graph().nodes)
+    assert {"normalize_question", "focus_analysis"} <= node_names   # 두 노드가 분리 존재
+    # 실행 시 normalize 결과가 state에 저장되고 focus의 입력으로 쓰인다
+    final = tg.build_technical_graph().invoke(_state(_HAPPY))
+    assert final["normalized"].normalized_question                 # 노드 1 산출이 state에 있음
+
+
+def test_normalize_focus_split_preserves_llm_calls_and_trace():
+    # 분리해도 LLM 호출 2회(normalize+focus)·trace 이벤트 순서 유지
+    sink = InMemoryTraceSink()
+    state = _state(_HAPPY, sink=sink)
+    llm = state["llm_client"]
+    tg.build_technical_graph().invoke(state)
+    names = [e["node"] for e in sink.events if e["event_type"] == "node_start"]
+    assert names.index("normalize_question") < names.index("focus_analysis") < names.index("data_collect")
+    # NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD = interpret까지 4회(normalize 1 + focus 1 + interpret 2)
+    assert len(llm.prompts) == 4
