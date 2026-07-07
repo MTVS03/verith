@@ -36,9 +36,14 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    # SQLAlchemy async DSN. 검증은 _load_settings() 에서(secret-safe). 예:
-    # postgresql+asyncpg://<user>:<pw>@<host>:5433/<db>
+    # SQLAlchemy async DSN. 검증은 _load_settings() 에서(secret-safe).
     DATABASE_URL: str = ""
+
+    # AI(technical) 서버 base URL. 코드에 경로를 박지 않고 .env/환경변수에서 읽는다.
+    # 없으면 _load_settings() 에서 에러
+    AI_SERVICE_URL: str = ""
+    # backend → AI 호출 timeout(초). 숫자 튜닝값 — env 로 override 가능.
+    AI_REQUEST_TIMEOUT_SECONDS: float = 60.0
 
 
 def _load_settings() -> Settings:
@@ -53,6 +58,11 @@ def _load_settings() -> Settings:
         raise RuntimeError(
             "DATABASE_URL 이 설정되지 않았습니다. 환경변수 또는 backend/.env 에 "
             "postgresql+asyncpg://... DSN 을 설정하세요."
+        )
+    if not s.AI_SERVICE_URL.strip():
+        raise RuntimeError(
+            "AI_SERVICE_URL 이 설정되지 않았습니다. 환경변수 또는 backend/.env 에 "
+            "AI 서버 base URL 을 설정하세요."
         )
     return s
 
