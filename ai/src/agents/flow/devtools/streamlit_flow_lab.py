@@ -61,9 +61,11 @@ if _missing:
 st.header("2. 입력")
 col1, col2, col3 = st.columns([1, 1, 2])
 with col1:
-    ticker = st.text_input("티커 (6자리)", value=config.TARGET_TICKER)
+    stock_name = st.text_input("종목명", value=config.TARGET_NAME,
+                               help="이름만 넣으면 게이트1이 KIS 종목 마스터로 티커를 찾습니다")
 with col2:
-    stock_name = st.text_input("종목명 (표시용)", value=config.TARGET_NAME)
+    ticker_raw = st.text_input("티커 (6자리 · 비우면 자동)", value="")
+    ticker = ticker_raw.strip() or None
 with col3:
     auto_date = st.checkbox("기준일 자동 (게이트1의 18시 규칙)", value=True)
     base_date = None if auto_date else st.date_input("기준일", value=date.today())
@@ -117,11 +119,11 @@ with tab_html:
     height = st.slider("표시 높이(px)", 600, 3000, 1600, step=100)
     components.html(out.html, height=height, scrolling=True)
     st.download_button("HTML 내려받기", out.html,
-                       file_name=f"flow_report_{ticker}_{meta.get('base_date')}.html",
+                       file_name=f"flow_report_{meta.get('ticker')}_{meta.get('base_date')}.html",
                        mime="text/html")
 with tab_json:
     st.json(payload)
     st.download_button("JSON 내려받기",
                        json.dumps(payload, ensure_ascii=False, indent=2),
-                       file_name=f"flow_payload_{ticker}_{meta.get('base_date')}.json",
+                       file_name=f"flow_payload_{meta.get('ticker')}_{meta.get('base_date')}.json",
                        mime="application/json")

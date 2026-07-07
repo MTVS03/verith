@@ -11,6 +11,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from . import config
+from .core import stock_master
 from .core.kis_client import fetch_daily_quotes, fetch_supply_demand
 from .core.signals import COL_OWNERSHIP
 from .core.signals import compute_signals
@@ -37,12 +38,25 @@ def _meta(state: SupplyDemandState) -> dict:
 
 # ── 노드 ──────────────────────────────────────────────────
 def validate_node(state: SupplyDemandState) -> dict:
-    """게이트1 — 입력 검증 + base_date 산출. 통과 시 판정·기준일을 상태에 싣고,
-    실패 시 예외로 멈춘다(게이트2·3과 달리 후퇴할 리포트 자체가 없다)."""
-    gate1, base_date = verify_input(state.input, state.base_date)
+    """게이트1 — 입력 검증 + base_date 산출 + 종목명→티커 해석. 통과 시 판정·
+    기준일·확정 티커를 상태에 싣고, 실패 시 예외로 멈춘다(후퇴할 리포트가 없다).
+
+    종목 마스터는 I/O 라 여기(노드)가 로드해 순수 함수에 주입한다. 티커가
+    이미 있으면 마스터는 보강(상장·정합 확인)일 뿐이라 캐시 전용으로 읽고
+    (네트워크 0), 티커가 없으면 해석에 필수라 다운로드를 허용한다.
+    """
+    need_resolve = not state.input.ticker
+    try:
+        master = stock_master.load_master(allow_download=need_resolve)
+    except stock_master.MasterError:
+        master = None                    # 보강 실패는 생략으로(verify_input 이 기록),
+                                         # 해석 필수인데 실패면 아래 게이트1이 실패한다.
+    gate1, base_date, ticker = verify_input(state.input, state.base_date, master=master)
     if not gate1.passed:
         raise ValueError("게이트1 실패: " + " / ".join(gate1.failures))
-    return {"gate1": gate1, "base_date": base_date}
+    # 해석된 티커를 입력에 반영 — collect 부터는 확정 코드만 흐른다.
+    updated = state.input.model_copy(update={"ticker": ticker})
+    return {"gate1": gate1, "base_date": base_date, "input": updated}
 
 
 def collect_node(state: SupplyDemandState) -> dict:

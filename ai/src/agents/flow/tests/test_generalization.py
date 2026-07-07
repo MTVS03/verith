@@ -42,8 +42,11 @@ def test_collect_without_ticker_raises_instead_of_silent_default():
 
 
 def test_run_rejects_malformed_ticker():
-    """6자리 숫자가 아니면 API 호출 전에 차단(최소 방어 — 정식 검증은 게이트1)."""
-    for bad in ("12345", "ABC123", ""):
+    """6자리 숫자가 아니면 API 호출 전에 차단(최소 방어 — 정식 검증은 게이트1).
+
+    빈 값·None 은 이제 '종목명→티커 해석' 경로라 여기서 다루지 않는다
+    (오프라인 검증은 test_ticker_resolve 가 master 주입으로 담당)."""
+    for bad in ("12345", "ABC123"):
         with pytest.raises(ValueError, match="6자리"):
             agent.run(ticker=bad)
 

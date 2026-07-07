@@ -32,7 +32,7 @@ from agents.flow.schemas import AgentInput, GateResult, SupplyDemandState  # noq
 _NOW = datetime(2026, 7, 6, 19, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 _INPUT = AgentInput(query="", stock_name="삼성전자", ticker="005930")
 _SIGNALS = sig.compute_signals(df_foreign_5day_streak)
-_GATE1, _ = verify_input(_INPUT, date(2026, 7, 3), now=_NOW)
+_GATE1, _, _ = verify_input(_INPUT, date(2026, 7, 3), now=_NOW)
 _GATE2 = verify_signals(df_foreign_5day_streak, _SIGNALS)
 _META = {"stock_name": "삼성전자", "ticker": "005930",
          "market": "KOSPI200", "base_date": "2026-07-03"}
