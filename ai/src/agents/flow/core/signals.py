@@ -34,6 +34,23 @@ COL_OWNERSHIP: str = "외국인한도소진율"  # 일별 한도소진율(%) Ser
 # 식별자 'ownership'의 유래: KIS hts_frgn_ehrt(한도소진율). 한도 100% 종목은
 # 보유율과 같지만 한도 제한 종목(통신·항공)은 다르다 — 한국어 라벨은 소진율로 통일.
 
+# 일자별 시세(quotes) DataFrame 컬럼 — kis_client.fetch_daily_quotes 가 만든다.
+# 리포트의 "기준점"(네이버식 날짜별 표) 용도. 단위: 종가·전일비=원,
+# 등락률=%, 거래량=주 (소진율과 같은 API — 실물 확인 2026-07-07).
+COL_CLOSE: str = "종가"
+COL_CHANGE: str = "전일비"
+COL_CHANGE_RATE: str = "등락률"
+COL_VOLUME: str = "거래량"
+QUOTE_COLS: tuple[str, ...] = (COL_CLOSE, COL_CHANGE, COL_CHANGE_RATE, COL_VOLUME)
+
+# 순매매량(주) — 매매동향 df 의 컬럼(대금과 같은 API·같은 행). 일자별 시세
+# API 에도 frgn_ntby_qty 가 있지만 값이 다르다(실측 2026-07-07 하이닉스:
+# 매매동향 -27,696주 vs 일자별시세 -33,208주 — 집계 범위 상이). 한 표의
+# 순매매량은 한 출처여야 하므로 매매동향으로 일원화하고, 일자별 시세 쪽
+# 수량은 파싱하지 않는다(정직성 — 두 값이 같은 이름으로 섞이는 것 차단).
+COL_FORE_QTY: str = "외국인순매매량"
+COL_INST_QTY: str = "기관순매매량"
+
 # 순매수 주체 3인. 반복 계산에서 이 리스트를 돌린다.
 SUBJECTS: tuple[str, ...] = (COL_INDI, COL_FORE, COL_INST)
 
@@ -197,9 +214,42 @@ def extract_ownership(ownership: pd.Series | None) -> list[dict] | None:
     ]
 
 
+def extract_price_daily(
+    quotes: pd.DataFrame | None,
+    df: pd.DataFrame | None = None,   # 매매동향 — 순매매량(주) 두 컬럼의 출처
+) -> list[dict] | None:
+    """최근 PRICE_TABLE_DAYS일의 일자별 시세 팩트 목록 (오름차순, 최근이 마지막).
+
+    extract_daily·extract_ownership 과 같은 원리 — 계산이 아니라 "있는 값의
+    직렬화". 시세 4필드는 quotes(일자별 시세 API)에서, 순매매량(주) 2필드는
+    df(매매동향 API)에서 온다 — 두 출처의 컬럼 근거는 COL_FORE_QTY 주석 참조.
+    df 에 수량 컬럼이 없으면(과거 스키마·간이 fixture) 해당 필드는 None —
+    주장하지 않으면 표시도 없다. quotes 가 None/빈 DataFrame 이면 통째로 None.
+    이 배열도 게이트2 규칙 8 이 원본 quotes·df 와 대조한다.
+    """
+    if quotes is None or quotes.empty:
+        return None
+    has_qty = df is not None and COL_FORE_QTY in df.columns and COL_INST_QTY in df.columns
+    recent = quotes.tail(config.PRICE_TABLE_DAYS)
+    rows = []
+    for idx, row in recent.iterrows():
+        qty_ok = has_qty and idx in df.index
+        rows.append({
+            "date": idx.date().isoformat(),
+            "close": float(row[COL_CLOSE]),
+            "change": float(row[COL_CHANGE]),
+            "change_rate": float(row[COL_CHANGE_RATE]),
+            "volume": float(row[COL_VOLUME]),
+            "frgn_qty": float(df.loc[idx, COL_FORE_QTY]) if qty_ok else None,
+            "inst_qty": float(df.loc[idx, COL_INST_QTY]) if qty_ok else None,
+        })
+    return rows
+
+
 def compute_signals(
     df: pd.DataFrame,
     ownership: pd.Series | None = None,   # M2: 한도소진율은 별도 API라 df 밖에서 온다
+    quotes: pd.DataFrame | None = None,   # 일자별 시세 — 소진율과 같은 API에서 온다
 ) -> dict[str, object]:
     """세 계산을 묶어 하나의 신호 dict로 반환한다.
 
@@ -213,4 +263,5 @@ def compute_signals(
         "persistence": calc_persistence(df),  # M2: 지속성 5일 vs 20일
         "inst_detail": calc_inst_detail(df),  # M2: 기관 세부 7주체 5일 합 (없으면 None)
         "ownership": extract_ownership(ownership),  # M2: 한도소진율 5일 추이 (없으면 None)
+        "price_daily": extract_price_daily(quotes, df),  # 날짜별 시세 표 (없으면 None)
     }

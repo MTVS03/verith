@@ -35,6 +35,7 @@ def _facts_to_text(signals: dict, meta: dict) -> str:
     """
     consecutive = signals.get("consecutive", {})
     strength = signals.get("strength", {})
+    persistence = signals.get("persistence", {})
     lines = [
         f"종목: {meta.get('stock_name')} ({meta.get('ticker')})",
         f"기준일: {meta.get('base_date')}",
@@ -50,8 +51,33 @@ def _facts_to_text(signals: dict, meta: dict) -> str:
         else:
             direction = "순매수" if ratio > 0 else "순매도" if ratio < 0 else "중립"
             ratio_pct = f"{'+' if ratio > 0 else ''}{ratio * 100:.1f}%"
+        # 지속성: 5일·20일 합(억원 병기 — 코드가 환산, LLM은 복사만)과 일관 여부.
+        p = persistence.get(subject, {})
+        s5, s20 = p.get("sum_5"), p.get("sum_20")
+        persist = ""
+        if s5 is not None and s20 is not None:
+            word = "일관됨" if p.get("consistent") else "다름"
+            persist = (f", 5일 순매수 합 {s5 / 100:+,.1f}억원 · 20일 합 {s20 / 100:+,.1f}억원"
+                       f" (5일과 20일 방향 {word})")
         lines.append(
-            f"- {subject}: {direction} 방향(순매수 강도 {ratio_pct}), 최근 연속 순매수 {days}일"
+            f"- {subject}: {direction} 방향(순매수 강도 {ratio_pct}),"
+            f" 최근 연속 순매수 {days}일{persist}"
+        )
+    # 시세 맥락: 기준일 종가·등락률 (게이트2 규칙8 검증분의 마지막 행).
+    price = signals.get("price_daily")
+    if price:
+        last = price[-1]
+        lines.append(
+            f"- 기준일 시세: 종가 {last['close']:,.0f}원,"
+            f" 전일 대비 {last['change']:+,.0f}원 ({last['change_rate']:+.2f}%)"
+        )
+    # 외국인 한도소진율: 표시 창의 처음↔끝 변화 (게이트2 규칙7 검증분).
+    ownership = signals.get("ownership")
+    if ownership:
+        first, latest = ownership[0]["ratio"], ownership[-1]["ratio"]
+        lines.append(
+            f"- 외국인 한도소진율: 최신 {latest:.2f}%,"
+            f" 표시 창({len(ownership)}거래일) 동안 {latest - first:+.2f}%p 변화"
         )
     return "\n".join(lines)
 

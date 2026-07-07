@@ -32,7 +32,7 @@ Top Supervisor가 쿼리를 도메인별로 변형해 넘긴다. 에이전트는
 | --- | --- | --- | --- |
 | `ticker` | string | ✅ | 종목 코드 (6자리) |
 | `query` | string | ✅ | 변형된 도메인 질의 (기술적 분석 관점) |
-| `request_id` | string | ✅ | 요청 추적용 ID (trace 연결). **런타임 필드** — 출력 JSON에 그대로 되돌려주지만 DB에 저장하지 않는다(영구 추적은 `trace_id`·`report_id` 기준). 따라서 저장된 리포트 조회 응답에는 없을 수 있다. |
+| `request_id` | string | ✅ | 요청 추적용 ID (trace 연결). **런타임 필드** — 출력 JSON에 그대로 되돌려준다. 에이전트 자신은 저장하지 않지만 **backend가 `technical_reports.request_id`(UNIQUE NOT NULL)에 저장**하며(api_spec §4), 저장 리포트 조회 응답의 `report` 안에도 포함된다. |
 | `as_of` | ISO8601 | ✅ | 분석 기준 시점. **리포트 표시 기준일이자 KIS 조회 종료일(`end_date`)로도 사용된다** — supervisor가 `data_collect`에 넘겨 KIS D/W/M 조회의 종료일로 스레딩한다(생략 불가한 입력이라 항상 존재). **미래 `as_of`는 거부**(ValueError). 자세한 흐름은 `kis_mapping.md §8.2`. |
 
 *에이전트는 다른 에이전트의 존재를 모른다. 위 4개만 받으면 독립 동작한다.*
@@ -398,7 +398,7 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
 1. **필드 이름·타입 불변.** enum 값은 `enums.md`를 따른다.
 2. **에이전트는 HTML을 출력하지 않는다.** JSON 데이터만 반환하고, 렌더링은 프론트 책임. (5개 에이전트 공통.)
-3. **null 허용 필드:** `signal`·`risk`는 판단 불가 시 null 가능하다. **`interpretation`은 원칙적으로 항상 존재한다** — LLM 해석이 불가능하거나 검증 실패 시 null로 두지 않고 `template_fallback` 문장으로 안전 착지한다. 나머지 필드는 항상 존재. 단, `request_id`는 Agent Output 및 생성 응답에 포함되는 **런타임 필드**이며, 저장된 리포트 조회 API에서는 제외될 수 있다(DB 미저장).
+3. **null 허용 필드:** `signal`·`risk`는 판단 불가 시 null 가능하다. **`interpretation`은 원칙적으로 항상 존재한다** — LLM 해석이 불가능하거나 검증 실패 시 null로 두지 않고 `template_fallback` 문장으로 안전 착지한다. 나머지 필드는 항상 존재. 단, `request_id`는 Agent Output·생성 응답·조회 응답에 모두 포함되는 **런타임 필드**이며, backend가 DB에 저장한다(api_spec §4).
 4. **저장 파생값 규칙:** 재계산 가능한 파생값(`confidence_level`)은 저장 안 함. 판단 결과(`alignment_flag`·`regime_context`)는 저장.
 5. **본체는 목록용 요약만.** 상세에서만 보는 것(interpretation·charts·signals·risk)은 분리 테이블 → 클릭 시 JOIN. 목록 조회를 가볍게 유지.
 6. **신호 판정은 코드, 설명 문장은 LLM.** `technical_signals[]`에서 `signal`·`value`·`metrics`·`weight`는 코드가 확정하고, `detail`만 LLM이 그 확정값을 서술한다. LLM은 판정을 바꿀 수 없으며 `detail`은 검증 ③ 대상이다. 화면에서도 이 경계를 색으로 구분 표시한다(코드=청록, LLM=보라).

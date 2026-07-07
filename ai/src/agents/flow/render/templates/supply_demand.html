@@ -25,6 +25,12 @@
   .top .tkr { font-size:17px; font-weight:600; color:#8B95A1; margin-left:6px; }
   .top .mkt { font-size:12px; font-weight:700; color:#4E5968; background:#fff;
               border-radius:8px; padding:4px 10px; margin-left:8px; vertical-align:3px; }
+  .top .hprice { margin-top:10px; display:flex; align-items:baseline; gap:10px; }
+  .top .hclose { font-size:30px; font-weight:800; letter-spacing:-0.02em;
+                 font-variant-numeric:tabular-nums; }
+  .top .hchg { font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .top .hchg.buy { color:#F04452; } .top .hchg.sell { color:#3182F6; }
+  .top .hchg.mut { color:#8B95A1; }
   .top .date { margin-top:6px; font-size:14px; color:#4E5968; }
   .top-right { text-align:right; padding-top:4px; font-size:13px; color:#8B95A1; font-weight:600; }
 
@@ -35,6 +41,17 @@
   @media (max-width: 900px) { .grid { grid-template-columns:1fr; } .side { position:static; } }
 
   /* 카드 */
+  /* 한글 줄바꿈: 어절 단위(keep-all) — 단어 중간에서 꺾이는 것 방지 */
+  body { word-break: keep-all; overflow-wrap: break-word; }
+  /* 호버 툴팁 — 설명·기준은 본문이 아니라 여기로 (JS 없음) */
+  .tip { position:relative; cursor:help; border-bottom:1px dotted #B0B8C1; }
+  .tip::after { content:attr(data-tip); position:absolute; left:50%;
+    transform:translateX(-50%); bottom:calc(100% + 8px); background:#333D4B;
+    color:#fff; font-size:12px; font-weight:500; line-height:1.55;
+    padding:9px 13px; border-radius:9px; width:max-content; max-width:250px;
+    white-space:normal; text-align:left; opacity:0; pointer-events:none;
+    transition:opacity .15s; z-index:10; }
+  .tip:hover::after { opacity:1; }
   .card { background:#fff; border-radius:22px; padding:26px 30px;
           box-shadow:0 1px 3px rgba(0,0,0,0.04); }
   .card h2 { font-size:15px; font-weight:800; letter-spacing:-0.01em; margin-bottom:4px; }
@@ -56,7 +73,24 @@
   .track .bar { position:absolute; top:5px; bottom:5px; border-radius:6px; }
   .track .bar.buy-bar  { left:50%; background:#F04452; }
   .track .bar.sell-bar { right:50%; background:#3182F6; }
-  .subjrow .val { width:80px; flex-shrink:0; font-size:14px; font-weight:800;
+  /* 검증 상세 접기 */
+  .vdetails { margin-top:12px; }
+  .vdetails summary { cursor:pointer; font-size:12.5px; color:#8B95A1; font-weight:600;
+                      user-select:none; }
+  .vdetails summary:hover { color:#4E5968; }
+  .vdetails[open] summary { margin-bottom:8px; }
+  /* 날짜별 시세 표 (기준점) */
+  .ptab-wrap { overflow-x:auto; }
+  .ptab { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  .ptab th { text-align:right; font-weight:700; color:#8B95A1; font-size:12px;
+             padding:8px 10px; border-bottom:1px solid #E5E8EB; white-space:nowrap; }
+  .ptab td { text-align:right; padding:8px 10px; border-bottom:1px solid #F2F4F6;
+             color:#333D4B; white-space:nowrap; }
+  .ptab th:first-child, .ptab td:first-child { text-align:left; color:#4E5968; font-weight:700; }
+  .ptab tr:last-child td { border-bottom:none; }
+  .ptab td.buy { color:#F04452; } .ptab td.sell { color:#3182F6; } .ptab td.mut { color:#8B95A1; }
+  .subjrow .val .valsub { display:block; font-size:11px; font-weight:600; color:#8B95A1; }
+  .subjrow .val { width:96px; flex-shrink:0; font-size:14px; font-weight:800;
                   font-variant-numeric:tabular-nums; text-align:right; }
 
   /* placeholder (M2 예정 블록) */
@@ -149,6 +183,9 @@
 
   /* 종합 결론 */
   .concl { font-size:16.5px; line-height:1.75; font-weight:500; }
+  .concl p + p { margin-top:12px; }
+  .concl b { font-weight:800; background:linear-gradient(transparent 62%, #FFE3A3 62%);
+             padding:0 1px; }
 
   .footnote { font-size:12px; color:#8B95A1; line-height:1.6; padding:0 6px; }
 
@@ -173,7 +210,13 @@
   <header class="top">
     <div>
       <h1>{{ meta.stock_name }}<span class="tkr">{{ meta.ticker }}</span>{% if market %}<span class="mkt">{{ market }}</span>{% endif %}</h1>
-      <div class="date">기준일 {{ meta.base_date }}</div>
+      {% if header_price %}
+      <div class="hprice">
+        <span class="hclose">{{ header_price.close }}</span>
+        <span class="hchg {{ header_price.cls }}">{{ header_price.chg }} {{ header_price.rate }}</span>
+      </div>
+      {% endif %}
+      <div class="date">기준일 {{ meta.base_date }} 종가</div>
     </div>
     <div class="top-right">수급 검증 리포트</div>
   </header>
@@ -198,8 +241,8 @@
           <text x="140" y="20" font-size="12" fill="#B0B8C1" font-weight="600" text-anchor="middle">중립</text>
           <text x="238" y="163" font-size="12.5" fill="#F04452" font-weight="700" text-anchor="middle">매수 우위</text>
         </svg>
-        <div class="gauge-verdict" style="color:{{ gauge.color }}">{{ gauge.verdict }}</div>
-        <div class="gauge-note">최근 {{ recent_days }}거래일 순매수 강도 기준 · 외국인·기관 강도 합의 부호</div>
+        <div class="gauge-verdict" style="color:{{ gauge.color }}"><span class="tip"
+          data-tip="최근 {{ recent_days }}거래일 순매수 강도 기준 — 외국인·기관 강도 합의 부호로 판정합니다">{{ gauge.verdict }}</span></div>
       </div>
       <div>
         <div class="headline">{{ headline }}</div>
@@ -213,11 +256,42 @@
               <div class="bar sell-bar" style="width:{{ r.bar_w }}%"></div>
             {% endif %}
           </div>
-          <span class="val {{ 'buy' if r.direction == '매수' else 'sell' if r.direction == '매도' else 'mut' }}">{{ r.pct }}</span>
+          <span class="val {{ 'buy' if r.direction == '매수' else 'sell' if r.direction == '매도' else 'mut' }}"><span class="tip"
+            data-tip="최근 {{ recent_days }}거래일 순매수 합계 · %는 같은 기간 하루평균 거래대금 대비 비율 · +매수 −매도">{% if r.amt %}{{ r.amt }}<span class="valsub">거래대금의 {{ r.pct }}</span>{% else %}{{ r.pct }}{% endif %}</span></span>
         </div>
         {% endfor %}
-        <div class="cap" style="margin:8px 0 0">막대는 최근 {{ recent_days }}일 순매수 강도(총 거래대금 대비 비율)의 상대 크기 · +매수 −매도</div>
       </div>
+    </section>
+
+    {# ── [A] 날짜별 시세 — price_daily 팩트(게이트2 규칙8 검증분)를 그리기만 ── #}
+    <section class="card" id="price">
+      <h2>날짜별 시세</h2>
+      <div class="cap">최근 {{ price_days }}거래일 · 종가·전일비 원 · 거래량·순매매량 주 · 최신이 위</div>
+      {% if price_table %}
+      <div class="ptab-wrap">
+        <table class="ptab">
+          <thead><tr>
+            <th>날짜</th><th>종가</th><th>전일비</th><th>등락률</th>
+            <th>거래량</th><th>기관 순매매량</th><th>외국인 순매매량</th>
+          </tr></thead>
+          <tbody>
+          {% for r in price_table %}
+          <tr>
+            <td>{{ r.label }}</td>
+            <td>{{ r.close }}</td>
+            <td class="{{ r.chg_cls }}">{{ r.chg }}</td>
+            <td class="{{ r.chg_cls }}">{{ r.rate }}</td>
+            <td>{{ r.vol }}</td>
+            <td class="{{ r.inst.cls }}">{{ r.inst.txt }}</td>
+            <td class="{{ r.fore.cls }}">{{ r.fore.txt }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="placeholder">데이터 준비 중 — 날짜별 시세가 아직 없습니다.</div>
+      {% endif %}
     </section>
 
     {# ── [A] 투자자별 일별 순매수 — daily 팩트(게이트2 규칙4 검증분)를 그리기만 ── #}
@@ -276,36 +350,35 @@
       {% endif %}
     </section>
 
-    {# ── [A] 해석 신호 · 판정 근거 ── #}
+    {# ── [A] 판정 근거 — 기준·계산 방법은 제목 호버 툴팁으로 ── #}
     <section class="card" id="signals">
-      <h2>해석 신호 · 판정 근거</h2>
-      <div class="cap">signals가 계산한 값 그대로 · 임계값은 config 기준</div>
+      <h2>판정 근거</h2>
       <div class="sigrid">
         <div class="sig">
-          <div class="t">연속 순매수 일수</div>
+          <div class="t"><span class="tip"
+            data-tip="{{ consec_threshold }}일 이상 이어지면 '신호'로 표시합니다">연속 순매수 일수</span></div>
           {% for r in rows %}
           <div class="row"><span class="sub">{{ r.name }}</span>
             <span><b>{{ r.days }}일</b>
               {% if r.consec_signal %}<span class="chip on">신호</span>{% else %}<span class="chip off">–</span>{% endif %}
             </span></div>
           {% endfor %}
-          <div class="note">임계값 {{ consec_threshold }}일 이상</div>
         </div>
         <div class="sig">
-          <div class="t">순매수 강도</div>
+          <div class="t"><span class="tip"
+            data-tip="최근 {{ recent_days }}거래일 순매수 합 ÷ 하루평균 거래대금 · {{ strength_threshold }} 이상이면 '강함'으로 표시합니다">순매수 강도</span></div>
           {% for r in rows %}
           <div class="row"><span class="sub">{{ r.name }}</span>
             <span><b class="{{ 'buy' if r.direction == '매수' else 'sell' if r.direction == '매도' else 'mut' }}">{{ r.pct }}</b>
               {% if r.strong %}<span class="chip on">강함</span>{% else %}<span class="chip off">–</span>{% endif %}
             </span></div>
           {% endfor %}
-          <div class="note">임계값 {{ strength_threshold }} 이상 · {{ recent_days }}일 순매수 합 ÷ 평균 거래대금</div>
         </div>
         <div class="sig">
-          <div class="t">수급 구도 (외국인·기관)</div>
+          <div class="t"><span class="tip"
+            data-tip="외국인·기관의 최근 {{ recent_days }}거래일 순매수 방향이 같은지 다른지를 봅니다">수급 구도 (외국인·기관)</span></div>
           <div class="big {{ 'buy' if alignment == '동반매수' else 'sell' if alignment == '동반매도' else 'mut' }}"
                style="margin:8px 0 6px">{{ alignment }}</div>
-          <div class="note">외국인·기관 {{ recent_days }}일 순매수 합의 부호 조합</div>
         </div>
       </div>
     </section>
@@ -313,10 +386,10 @@
     {# ── 심화: 기관 세부(게이트2 규칙6 검증분) + 외국인 한도소진율(게이트2 규칙7 검증분) ── #}
     <section class="card" id="deep">
       <h2>심화 · 기관 세부와 외국인 한도소진율</h2>
-      <div class="cap">기관 세부 순매수(최근 5거래일 누적·단위 백만원) · 외국인 한도소진율 추이</div>
       <div class="deepgrid">
         <div>
-          <div class="deept">기관 세부 순매수{% if inst_detail %} · {{ inst_detail.leader }}{% endif %}</div>
+          <div class="deept"><span class="tip"
+            data-tip="최근 {{ recent_days }}거래일 누적 순매수 · 단위 백만원">기관 세부 순매수</span>{% if inst_detail %} · {{ inst_detail.leader }}{% endif %}</div>
           {% if inst_detail %}
           {% for r in inst_detail.rows %}
           <div class="drow">
@@ -330,7 +403,8 @@
           {% endif %}
         </div>
         <div>
-          <div class="deept">외국인 한도소진율 추이</div>
+          <div class="deept"><span class="tip"
+            data-tip="외국인이 살 수 있는 한도 대비 실제 보유 비율(%) · 한도가 100%인 대부분 종목은 보유율과 같습니다">외국인 한도소진율 추이</span></div>
           {% if ownership %}
           <div class="ownhead">
             <span class="ownbig">{{ ownership.latest }}</span>
@@ -345,7 +419,6 @@
             {% endfor %}
           </div>
           <div class="ownlabs">{% for b in ownership.bars %}<span>{{ b.label }}</span>{% endfor %}</div>
-          <div class="ownnote">{{ recent_days }}거래일 · 외국인 한도 대비 소진율(%) · 한도 100% 종목은 보유율과 동일</div>
           {% else %}
           <div class="placeholder">데이터 준비 중 — 외국인 한도소진율이 아직 없습니다.</div>
           {% endif %}
@@ -353,50 +426,48 @@
       </div>
     </section>
 
-    {# ── [A] 검증 · 원본 대조 (게이트2) ── #}
+    {# ── [A] 검증 — 배지만 보이고 체크 전문은 접힘(클릭 시 펼침) ── #}
     <section class="card" id="verify">
-      <h2>검증 · 원본 대조</h2>
-      <div class="cap">입력 검증(게이트1) · 신호가 원본 데이터와 정합한지 코드로 대조(게이트2)</div>
+      <h2>검증</h2>
+      <div class="cap">이 리포트의 모든 숫자는 표시 전에 코드로 원본과 대조됩니다</div>
       {% if gate1 %}
       {% if gate1.passed %}
-        <span class="badge pass">✓ 입력 검증 통과 (게이트1)</span>
+        <span class="badge pass">✓ 입력 확인</span>
       {% else %}
-        <span class="badge fail">✗ 입력 검증 실패 (게이트1)</span>
+        <span class="badge fail">✗ 입력 확인 실패</span>
       {% endif %}
-      <ul class="checks">
-        {% for c in gate1.checks %}<li>{{ c }}</li>{% endfor %}
-        {% for f in gate1.failures %}<li class="bad">{{ f }}</li>{% endfor %}
-      </ul>
       {% endif %}
       {% if gate2.passed %}
-        <span class="badge pass">✓ 검증 통과</span>
+        <span class="badge pass">✓ 데이터 검증 통과</span>
       {% else %}
-        <span class="badge fail">✗ 검증 실패</span>
+        <span class="badge fail">✗ 데이터 검증 실패</span>
       {% endif %}
-      <ul class="checks">
-        {% for c in gate2.checks %}<li>{{ c }}</li>{% endfor %}
-        {% for f in gate2.failures %}<li class="bad">{{ f }}</li>{% endfor %}
-      </ul>
+      {% if interpretation %}
+        <span class="badge pass">✓ 해석 검증 통과</span>
+      {% endif %}
+      {% set n_checks = (gate1.checks|length if gate1 else 0) + gate2.checks|length %}
+      {% set n_fails = (gate1.failures|length if gate1 else 0) + gate2.failures|length %}
+      <details class="vdetails">
+        <summary>검증 상세 {{ n_checks + n_fails }}건 보기</summary>
+        <ul class="checks">
+          {% if gate1 %}
+          {% for c in gate1.checks %}<li>{{ c }}</li>{% endfor %}
+          {% for f in gate1.failures %}<li class="bad">{{ f }}</li>{% endfor %}
+          {% endif %}
+          {% for c in gate2.checks %}<li>{{ c }}</li>{% endfor %}
+          {% for f in gate2.failures %}<li class="bad">{{ f }}</li>{% endfor %}
+        </ul>
+      </details>
       <div class="src">출처: 한국투자증권(KIS) Open API · 기준일 {{ meta.base_date }}</div>
     </section>
 
-    {# ── [A] 근거 · 추적 (게이트3 통과 여부) ── #}
-    <section class="card" id="trace">
-      <h2>근거 · 해석 검증</h2>
-      <div class="cap">해석 문장이 팩트와 모순되지 않는지 코드로 대조(게이트3)</div>
-      {% if interpretation %}
-        <span class="badge pass">✓ 게이트3 통과 — 아래 결론은 팩트 대조를 마친 해석입니다</span>
-      {% else %}
-        <span class="badge fail">해석 없음 — 검증을 통과한 해석이 없습니다</span>
-      {% endif %}
-    </section>
-
-    {# ── [A] 종합 결론 ── #}
+    {# ── [A] 종합 결론 — 게이트3(해석↔팩트 대조) 통과분만 여기 실린다 ── #}
     <section class="card" id="conclusion">
       <h2>종합 결론</h2>
-      <div class="cap">검증된 팩트 기반 해석</div>
       {% if interpretation %}
-        <p class="concl">{{ interpretation }}</p>
+        <div class="cap"><span class="tip"
+          data-tip="이 해석 문장은 위 팩트와 모순되지 않는지 코드로 대조(검증)를 마친 것입니다">✓ 팩트 대조를 마친 해석</span></div>
+        <div class="concl">{{ interpretation_html }}</div>
       {% else %}
         <div class="placeholder">해석 생략 — 검증을 통과한 해석이 없어 팩트만 표시합니다.</div>
       {% endif %}

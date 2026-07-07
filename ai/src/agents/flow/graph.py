@@ -11,7 +11,9 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from . import config
-from .core.kis_client import fetch_foreign_ownership, fetch_supply_demand
+from .core import stock_master
+from .core.kis_client import fetch_daily_quotes, fetch_supply_demand
+from .core.signals import COL_OWNERSHIP
 from .core.signals import compute_signals
 from .core.verify_input import verify_input
 from .core.verify_interpretation import verify_interpretation
@@ -36,20 +38,34 @@ def _meta(state: SupplyDemandState) -> dict:
 
 # ── 노드 ──────────────────────────────────────────────────
 def validate_node(state: SupplyDemandState) -> dict:
-    """게이트1 — 입력 검증 + base_date 산출. 통과 시 판정·기준일을 상태에 싣고,
-    실패 시 예외로 멈춘다(게이트2·3과 달리 후퇴할 리포트 자체가 없다)."""
-    gate1, base_date = verify_input(state.input, state.base_date)
+    """게이트1 — 입력 검증 + base_date 산출 + 종목명→티커 해석. 통과 시 판정·
+    기준일·확정 티커를 상태에 싣고, 실패 시 예외로 멈춘다(후퇴할 리포트가 없다).
+
+    종목 마스터는 I/O 라 여기(노드)가 로드해 순수 함수에 주입한다. 티커가
+    이미 있으면 마스터는 보강(상장·정합 확인)일 뿐이라 캐시 전용으로 읽고
+    (네트워크 0), 티커가 없으면 해석에 필수라 다운로드를 허용한다.
+    """
+    need_resolve = not state.input.ticker
+    try:
+        master = stock_master.load_master(allow_download=need_resolve)
+    except stock_master.MasterError:
+        master = None                    # 보강 실패는 생략으로(verify_input 이 기록),
+                                         # 해석 필수인데 실패면 아래 게이트1이 실패한다.
+    gate1, base_date, ticker = verify_input(state.input, state.base_date, master=master)
     if not gate1.passed:
         raise ValueError("게이트1 실패: " + " / ".join(gate1.failures))
-    return {"gate1": gate1, "base_date": base_date}
+    # 해석된 티커를 입력에 반영 — collect 부터는 확정 코드만 흐른다.
+    updated = state.input.model_copy(update={"ticker": ticker})
+    return {"gate1": gate1, "base_date": base_date, "input": updated}
 
 
 def collect_node(state: SupplyDemandState) -> dict:
-    """수집 + 계산 + 게이트2. df·ownership 은 이 함수 지역변수로만 존재(밖으로 안 나감).
+    """수집 + 계산 + 게이트2. df·quotes·ownership 은 이 함수 지역변수로만 존재.
 
     KIS/네트워크 예외는 삼키지 않고 그대로 전파한다(규약: 연쇄 시도 없이 멈춤).
-    한도소진율은 심화 축이라 ENABLE_ADVANCED 가 꺼져 있으면 아예 조회하지 않는다
-    (추가 API 호출 절약 + 플래그 하나로 심화 전체가 꺼지는 단일 스위치).
+    시세(quotes)는 핵심 블록(날짜별 표의 기준점)이라 항상 조회하고, 소진율은
+    같은 응답의 컬럼이라 공짜로 딸려 온다 — 심화 플래그(ENABLE_ADVANCED)는
+    이제 표시 여부만 끈다(호출 절약 근거가 사라짐: 시세가 어차피 필요).
     """
     ticker = state.input.ticker
     if not ticker:
@@ -60,12 +76,12 @@ def collect_node(state: SupplyDemandState) -> dict:
     # 확정 base_date 는 응답에서 나온다: 후보일이 휴장일이어도 KIS 가 마지막
     # 거래일로 클램프해 주므로(실측), 마지막 행 날짜가 실제 확정 거래일이다.
     confirmed = df.index[-1].date()
+    quotes = fetch_daily_quotes(confirmed, ticker)   # 절단 기준도 확정일
     ownership = (
-        fetch_foreign_ownership(confirmed, ticker)   # 절단 기준도 확정일
-        if config.ENABLE_ADVANCED else None
+        quotes[COL_OWNERSHIP] if (config.ENABLE_ADVANCED and quotes is not None) else None
     )
-    signals = compute_signals(df, ownership)
-    gate2 = verify_signals(df, signals, ownership)
+    signals = compute_signals(df, ownership, quotes)
+    gate2 = verify_signals(df, signals, ownership, quotes)
     # market 은 표시 전용 원본 문자열(숫자 아님) — 게이트2 대상이 아니다.
     return {"signals": signals, "gate2": gate2, "market": market,
             "base_date": confirmed}

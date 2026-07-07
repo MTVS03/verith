@@ -33,36 +33,41 @@ def _inp(ticker="005930"):
 
 
 def test_rejects_malformed_ticker():
-    """형식 불량은 API 호출 전에 차단 (없음·5자리·문자 혼입)."""
-    for bad in (None, "12345", "ABC123", ""):
-        gate1, _ = verify_input(_inp(bad), date(2026, 7, 3), now=_MON_19)
+    """형식 불량은 API 호출 전에 차단 (5자리·문자 혼입). 없음(None·빈값)은
+    이제 '해석 경로' — 마스터가 없으면 해석 불가로 실패한다."""
+    for bad in ("12345", "ABC123"):
+        gate1, _, _ = verify_input(_inp(bad), date(2026, 7, 3), now=_MON_19)
         assert gate1.passed is False
         assert any("6자리" in f for f in gate1.failures)
+    for missing in (None, ""):
+        gate1, _, _ = verify_input(_inp(missing), date(2026, 7, 3), now=_MON_19)
+        assert gate1.passed is False
+        assert any("해석" in f for f in gate1.failures)
 
 
 def test_rejects_future_and_intraday_base_date():
     """미래 날짜(없는 데이터)와 오늘·18시 전(장중 미확정)은 실패."""
-    gate1, _ = verify_input(_inp(), date(2026, 7, 10), now=_MON_19)
+    gate1, _, _ = verify_input(_inp(), date(2026, 7, 10), now=_MON_19)
     assert gate1.passed is False and any("미래" in f for f in gate1.failures)
 
-    gate1, _ = verify_input(_inp(), date(2026, 7, 6), now=_MON_17)
+    gate1, _, _ = verify_input(_inp(), date(2026, 7, 6), now=_MON_17)
     assert gate1.passed is False and any("미확정" in f for f in gate1.failures)
 
 
 def test_accepts_today_after_finalize_and_past_dates():
     """18시 후의 오늘과 과거 날짜는 통과, 명시값은 그대로 쓴다."""
-    gate1, bd = verify_input(_inp(), date(2026, 7, 6), now=_MON_19)
-    assert gate1.passed is True and bd == date(2026, 7, 6)
+    gate1, bd, tk = verify_input(_inp(), date(2026, 7, 6), now=_MON_19)
+    assert gate1.passed is True and bd == date(2026, 7, 6) and tk == "005930"
 
-    gate1, bd = verify_input(_inp(), date(2026, 7, 3), now=_MON_17)
+    gate1, bd, _ = verify_input(_inp(), date(2026, 7, 3), now=_MON_17)
     assert gate1.passed is True and bd == date(2026, 7, 3)
 
 
 def test_auto_base_date_follows_18h_rule():
     """자동 산출: 18시 전 → 어제(휴일이어도 KIS 클램프가 처리), 18시 후 → 오늘."""
-    _, bd = verify_input(_inp(), None, now=_MON_17)
+    _, bd, _ = verify_input(_inp(), None, now=_MON_17)
     assert bd == date(2026, 7, 5)          # 일요일 — 클램프는 KIS 몫(실측)
-    _, bd = verify_input(_inp(), None, now=_MON_19)
+    _, bd, _ = verify_input(_inp(), None, now=_MON_19)
     assert bd == date(2026, 7, 6)
 
 
@@ -70,7 +75,7 @@ def test_collect_confirms_base_date_from_response(monkeypatch):
     """collect 가 base_date 를 응답의 마지막 행 날짜로 갱신한다(클램프 반영)."""
     monkeypatch.setattr(graph, "fetch_supply_demand",
                         lambda base_date, ticker: (df_foreign_5day_streak, "KOSPI200"))
-    monkeypatch.setattr(graph, "fetch_foreign_ownership", lambda base_date, ticker: None)
+    monkeypatch.setattr(graph, "fetch_daily_quotes", lambda base_date, ticker: None)
     state = SupplyDemandState(input=_inp(), base_date=date(2026, 7, 4))  # 토요일 후보
     out = graph.collect_node(state)
     assert out["base_date"] == df_foreign_5day_streak.index[-1].date()
