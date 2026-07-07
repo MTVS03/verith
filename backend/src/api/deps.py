@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.session import get_session
 from src.api.clients.ai_client import AIClient
 from src.api.config import settings
+from src.api.services.stock_resolver_service import StockResolverService
 from src.api.services.technical_report_service import TechnicalReportService
 
 
@@ -29,3 +30,9 @@ async def get_technical_report_service(
     ai_client: AIClient = Depends(get_ai_client),
 ) -> AsyncGenerator[TechnicalReportService, None]:
     yield TechnicalReportService(session=session, ai_client=ai_client)
+
+
+async def get_stock_resolver_service(
+    session: AsyncSession = Depends(get_session),
+) -> AsyncGenerator[StockResolverService, None]:
+    yield StockResolverService(session=session)

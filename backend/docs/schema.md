@@ -44,8 +44,16 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 ### Common
 | 테이블 | 요약 | PK |
 |---|---|---|
-| `stocks` | 종목 마스터(코드·이름·시장) | `stock_code` (varchar) |
+| `stocks` | **공통 종목 마스터**(코드·이름·시장). `stock_name` 이 공식 이름 정본 | `stock_code` (varchar) |
+| `stock_aliases` | 종목 별칭(변형/영문/약칭/구명/모호그룹). `stock_code` FK→stocks **ON DELETE CASCADE** | `id` (uuid) |
 | `agent_reports` | 전 에이전트 리포트 통합 인덱스 | `id` (uuid) |
+
+> **stocks 소유권/범위:** `stocks` 는 Backend 소유 공통 마스터로, 장기적으로 전체 국내 상장 종목을
+> 담는다. **현재 seed 된 10종은 개발 bootstrap** 이며 전체 정본이 아니다(전체 마스터 동기화는 후속).
+> Technical 10종 지원 정책(`BATTERY_TICKERS`)과는 **별개**다.
+> `stock_aliases` 제약: `UNIQUE(normalized_alias, stock_code)` · `CHECK(normalized_alias<>'')` ·
+> `index(stock_code)`. 공식 이름은 여기 중복 저장하지 않는다(정본=`stocks.stock_name`).
+> Resolver 응답 의미·경계는 [`stock_resolver.md`](stock_resolver.md) 참고(여기 중복 안 함).
 
 ### Fundamental (재무)
 | 테이블 | 요약 |
