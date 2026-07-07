@@ -50,7 +50,7 @@ _TICKER_RE = re.compile(r"\d{6}")
 class TechnicalAgentInput(_StrictModel):
     ticker: str  # 6자리 종목코드. 앞자리 0 보존을 위해 반드시 str.
     query: str  # 기술적 분석 관점으로 변형된 도메인 질의
-    request_id: str  # 요청 추적용 런타임 필드. 출력에 되돌려주지만 DB에는 저장하지 않음.
+    request_id: str  # 요청 추적용 런타임 필드. 출력에 되돌려준다(에이전트는 저장 안 함 — backend가 technical_reports.request_id 에 저장, api_spec §4).
     as_of: datetime  # 분석 기준 시점(ISO8601). 문자열 입력을 Pydantic이 파싱.
 
     # 의미 검증(형식 오류 = 사용자 요청 오류 → endpoint 422 VALIDATION_ERROR). allowlist 소속 검사는
@@ -173,7 +173,7 @@ class VerificationResult(_StrictModel):
 # ─────────────────────────────────────────────────────────────────────────────
 class TechnicalAgentOutput(_StrictModel):
     """에이전트 최종 반환 JSON. 의미 단위 중첩 구조 유지(backend가 테이블별 flatten 저장)."""
-    request_id: str  # 런타임 필드(입력에서 되돌려줌). DB 저장 대상 아님.
+    request_id: str  # 런타임 필드(입력에서 되돌려줌). backend가 technical_reports.request_id 에 저장(api_spec §4).
     ticker: str
     as_of: datetime
     # 데이터(시세) 출처 라벨. test_plan §7: 최상위 source는 KIS / KIS (stale)만 허용.

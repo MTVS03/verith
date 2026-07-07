@@ -39,13 +39,13 @@
 
 | 필드 | 설명 | 저장 위치 |
 | --- | --- | --- |
-| `request_id` | Top Supervisor가 넘긴 외부 요청 ID | trace 로그에는 기록 가능, 리포트 DB에는 저장하지 않음 |
+| `request_id` | Chat/Top Supervisor가 넘긴 외부 요청 ID(직접 호출 시 backend fallback) | trace 로그 기록 + 리포트 DB 저장(`technical_reports.request_id`, api_spec §4) |
 | `trace_id` | 가격/기술 에이전트 내부 실행 추적 ID | trace 로그와 최종 리포트 DB에 모두 기록 |
 | `node_run_id` | 노드 1회 실행 단위 ID | trace 로그에만 기록 |
 
 `trace_id`는 **Technical Supervisor 진입 시 생성**된다. 생성된 `trace_id`는 모든 trace event에 동일하게 부여되며, 최종 리포트의 `technical_reports.trace_id`에도 같은 값으로 저장된다. 이로써 "실행 로그 ↔ 저장된 리포트"가 하나의 ID로 이어진다.
 
-`request_id`는 Top Supervisor가 넘긴 런타임 요청 ID이고, `trace_id`는 에이전트 내부 실행 추적 ID다. 영구 리포트 추적은 `trace_id`를 기준으로 한다(`schema.md` §12와 일치 — request_id는 DB 미저장).
+`request_id`는 요청 1건(사용자/Supervisor 실행) 단위이고, `trace_id`는 에이전트 내부 실행 추적 단위다. **둘 다 DB에 저장된다** — `request_id`는 요청 추적·중복 식별 키(`technical_reports.request_id` UNIQUE, 멱등의 기반), `trace_id`는 "실행 로그 ↔ 리포트" 연결 검색키(실제 trace 이벤트는 별도 운영 sink). 정본: api_spec §4.
 
 ---
 
