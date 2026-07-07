@@ -82,13 +82,20 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 | `flow_report_interpretations` | 해석 (1:1) |
 | `flow_report_verifications` | 검증 (1:1) |
 
-### Industry (산업/섹터 — 5번째 에이전트 placeholder)
+### Industry (산업/섹터)
 | 테이블 | 요약 |
 |---|---|
-| `industry_reports` | 산업/섹터 리포트 placeholder(세부 ERD 미정, request/answer 최소 컬럼) |
+| `industry_reports` | 산업 에이전트 PostgreSQL 리포트 저장 테이블. `payload`=research-report.v1 전체 JSON 정본 |
 
-> **명칭 확정:** 5번째 에이전트는 **industry(산업/섹터)** 로 확정. 과거 스캐폴드/논의의
-> `macro` 명칭은 폐기했고 테이블은 `industry_reports` 다.
+> **명칭 확정:** 5번째 에이전트는 **industry(산업/섹터)**. 과거 `macro` 명칭은 폐기, 테이블은 `industry_reports`.
+>
+> **industry_reports 규약:**
+> - `payload`(jsonb)는 산업 에이전트 **research-report.v1 전체 JSON 정본**이다.
+> - `report_id`(text, UNIQUE)는 `payload.reportId` 와 매핑되는 **외부 노출 ID**. 내부 PK 는 `id`(uuid)다.
+> - `status`(pending/processing/completed/failed)가 리포트 lifecycle 정본. `data_status`·`input_payload`·`output_payload` 는 통합 호환용(reserved).
+> - `agent_reports.agent_report_id` 는 `industry_reports.id`(report_id 아님)를 가리키는 **app-level reference**(FK 없음).
+> - **Neo4j 의 Company/Industry/Product/Policy/Person/Chunk 는 PostgreSQL 테이블로 만들지 않는다**(그래프는 app 레벨 별도 처리).
+> - 인덱스: `report_id` UNIQUE, `created_at DESC`, `question_type`, `payload` **GIN**, `request_id`, `trace_id`.
 
 ---
 
