@@ -82,7 +82,11 @@ LLM_MODEL: str = "qwen3-30b-a3b"           # 로컬 Qwen3 30B-A3B 식별자(추�
 # OpenAI 호환 엔드포인트 규약: services/llm.py가 base 뒤에 /v1/chat/completions 를 붙인다.
 LLM_BASE_URL: str = (os.getenv("QWEN_API_KEY") or "").strip() or "http://localhost:8001/v1"
 LLM_TEMPERATURE: float = 0.1               # 추출 결정성 위해 낮게 — 튜닝 대상
-LLM_MAX_TOKENS: int = 1024                 # 짧은 JSON 출력 상한
+LLM_MAX_TOKENS: int = 2048                 # JSON 출력 상한. thinking 모델 대비 여유 확보(빈 출력 방지)
+# Qwen3 는 하이브리드 추론 모델이라 기본적으로 <think> 추론을 먼저 낸다. 추출은 결정적 JSON 만 필요하고
+# thinking 이 켜진 채 max_tokens 가 작으면 추론이 토큰을 소진해 content 가 비어 온다(파싱 실패의 실제 원인).
+# 추출/질의 답변 모두 thinking 을 끈다. (vLLM/SGLang OpenAI 엔드포인트: chat_template_kwargs 로 전달)
+LLM_DISABLE_THINKING: bool = (os.getenv("LLM_DISABLE_THINKING") or "true").strip().lower() in ("1", "true", "yes")
 LLM_TIMEOUT: float = 30.0                  # 모델 호출 타임아웃(초)
 LLM_MAX_RETRIES: int = 2                   # 재시도 횟수(총 시도 = 1 + LLM_MAX_RETRIES)
 LLM_RETRY_BACKOFF: float = 1.0             # 재시도 간 대기(초)
@@ -213,9 +217,10 @@ BACKEND_QUERY_SHARED_PATH: str = "/news/query/shared"          # 공유 이벤�
 BACKEND_EVENT_ARTICLES_PATH: str = "/news/events/{event_id}/articles"  # 이벤트별 기사 on-demand(GET, ?limit=N) → ArticleRef[]
 
 # ---------------------------------------------------------------------------
-# 질의·리포트 옵션 — TASK 09. 저장된 데이터를 읽어 질문에 답하고 HTML 리포트 하나를 그린다.
-# 정책값(기간·TOP N·랭킹·프롬프트 토큰·별칭·템플릿 경로)은 코드에 흩지 않고 여기서 읽는다
-# (CLAUDE.md §7). 라벨·관계 타입 문자열은 schemas/graph.py Enum(TASK 07) 재사용 — config에 안 둔다.
+# 질의·리포트 옵션 — TASK 09. 저장된 데이터를 읽어 질문에 답하고 JSON 리포트 하나를 만든다
+# (팀 계약: ai·backend·frontend JSON 통일 — backend 저장·frontend 렌더). 정책값(기간·TOP N·랭킹·
+# 프롬프트 토큰·별칭)은 코드에 흩지 않고 여기서 읽는다(CLAUDE.md §7). 라벨·관계 타입 문자열은
+# schemas/graph.py Enum(TASK 07) 재사용 — config에 안 둔다.
 # ---------------------------------------------------------------------------
 QUERY_DEFAULT_PERIOD_DAYS: int = 7          # 질문에 기간 표현이 없을 때 기본 조회 기간(query_spec §2-①)
 REPORT_TOP_N: int = 5                        # 리포트 '주요 이슈' TOP 개수
@@ -227,8 +232,6 @@ QUERY_ANSWER_MAX_TOKENS: int = 1024         # ④ 답변 생성 토큰(services/
 QUERY_ANSWER_TEMPERATURE: float = 0.3       # ④ 답변 생성 온도(요약 서술이라 추출(0.1)보다 약간 높임) — 튜닝 대상
 # 종목 선택(A) → 자유 질문(B) 변환 문구. 문구를 코드에 흩지 않고 config에(query_spec §2-①).
 QUERY_PRESET_QUESTION_TEMPLATE: str = "{company} 최근 뉴스 요약해줘"
-# 렌더러가 읽을 리포트 템플릿(목업 데이터 주입 템플릿). 상대 경로는 news 패키지 루트 기준으로 해소한다.
-REPORT_TEMPLATE_PATH: str = "templates/report.html"
 
 # ⚠️ 회사 별칭 사전: 미확정(CLAUDE.md §8) — 아래는 '임시 시드'다. 별칭→canonical 회사명 리스트
 #    (한 별칭이 여러 회사로 매핑 가능: 삼전닉스→[삼성전자, SK하이닉스]). canonical 은 그래프 Company

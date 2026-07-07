@@ -152,14 +152,45 @@ def test_fetch_article_rejects_foreign_url(monkeypatch):
 
 
 def test_extract_foreign_url_not_crawled(monkeypatch):
-    # LLM 이 오염된 본문에 속아 다른 URL 을 부르려 해도 크롤링되지 않는다.
-    _script(monkeypatch, [_tool_msg("http://backend:8000/news/cleanup"), _final_msg(_GOOD)])
-    spy = _crawl(monkeypatch, "본문", "success", True)
+    # LLM 이 오염된 본문에 속아 다른 URL 을 부르면 그 URL 은 절대 크롤링되지 않는다(화이트리스트 거부).
+    # 1차 경로는 None 이 되지만, 폴백이 '이 기사 URL'로만 본문을 직접 확보해 회복한다.
+    _script(monkeypatch, [_tool_msg("http://backend:8000/news/cleanup"),
+                          _final_msg(_GOOD), _final_msg(_GOOD)])
+    spy = _crawl(monkeypatch, "본문 " * 100, "success", True)
 
-    result = llm.extract(_article())
+    article = _article()
+    result = llm.extract(article)
 
-    assert spy["n"] == 0                        # 화이트리스트 거부 → 크롤러 미호출
-    assert result is None                       # 본문 확보 실패(failed) → skip
+    # 크롤러는 오직 이 기사 URL 로만 불린다. 오염된 외부 URL 은 결코 크롤되지 않는다(화이트리스트 유지).
+    assert "http://backend:8000/news/cleanup" not in spy["urls"]
+    assert spy["urls"] == [URL]
+    # 폴백이 본문을 직접 확보해 추출을 회복한다.
+    assert result is not None
+    assert result.source_type is SourceType.ARTICLE
+    assert article.content_available is True
+
+
+# ---- 폴백: 1차 None(파싱·크롤 실패) → 본문 직접 확보로 회복 ------------------
+def test_fallback_recovers_after_parse_failure(monkeypatch):
+    # 제목만 경로에서 파싱이 2회 실패(1차 None) → 폴백이 본문을 직접 확보해 재추출에 성공한다.
+    _script(monkeypatch, [_final_msg("깨진1"), _final_msg("깨진2"), _final_msg(_GOOD)])
+    spy = _crawl(monkeypatch, "본문 " * 100, "success", True)
+
+    article = _article()
+    result = llm.extract(article)
+
+    assert result is not None
+    assert result.source_type is SourceType.ARTICLE   # 본문 기반으로 회복
+    assert spy["urls"] == [URL]                        # 폴백은 이 기사 URL 로만 크롤
+    assert article.content_available is True
+
+
+def test_fallback_no_content_stays_skip(monkeypatch):
+    # 폴백이 본문을 확보하지 못하면(no_content) 지어내지 않고 skip(None) 유지(환각 금지, §2-5).
+    _script(monkeypatch, [_final_msg("깨진1"), _final_msg("깨진2")])
+    _crawl(monkeypatch, None, "no_content", False)
+
+    assert llm.extract(_article()) is None
 
 
 # ---- Tool 루프 상한(§3.2-4) ------------------------------------------------
@@ -183,9 +214,10 @@ def test_tool_loop_capped(monkeypatch):
 
 # ---- 파싱 실패 → 1회 재시도 → skip ----------------------------------------
 def test_validation_error_retry_then_skip(monkeypatch):
-    # 최초 최종 응답이 깨짐 → 재시도 호출도 깨짐 → None.
+    # 제목만 경로에서 파싱이 2회 실패한다. 폴백이 본문을 직접 확보하려 해도 크롤이 실패하면
+    # 지어내지 않고 skip(None) 한다(환각 금지 — 폴백은 회복 시도일 뿐 없는 본문을 만들지 않는다).
     _script(monkeypatch, [_final_msg("그냥 텍스트, JSON 아님"), _final_msg("여전히 JSON 아님")])
-    _crawl(monkeypatch, "x", "success", True)
+    _crawl(monkeypatch, None, "failed", False)
 
     assert llm.extract(_article()) is None
 

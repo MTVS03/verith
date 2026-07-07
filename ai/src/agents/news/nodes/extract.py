@@ -34,7 +34,7 @@ def extract_node(state: dict) -> dict:
             logger.warning("추출 실패, skip: url=%s (%s)", article.url, exc)
             continue
 
-        if result is None:  # 크롤 실패·파싱 실패 등 skip 신호
+        if result is None:  # llm.extract 의 폴백(본문 직접 확보 재시도)까지 실패한 skip 신호
             logger.info("추출 skip(결과 없음): url=%s status=%s", article.url, article.crawl_status)
             continue
 
