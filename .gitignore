@@ -296,3 +296,7 @@ ai/src/agents/technical/scripts/technical_smoke_output/
 # technical agent intraday 분봉 smoke 출력 JSON (수동 실행 산출물 — 커밋하지 않음)
 ai/src/agents/technical/scripts/intraday_smoke_output/
 **/intraday_smoke_output/
+
+# technical agent chart annotation 진단 출력 JSON (수동 실행 산출물 — 커밋하지 않음)
+ai/src/agents/technical/scripts/chart_annotation_diagnostics_output/
+**/chart_annotation_diagnostics_output/

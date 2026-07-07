@@ -201,7 +201,14 @@ CACHE_KEY_MINUTE = "ohlcv:minute:{ticker}"  # 1d 정식 지원 시 사용 (chart
 ```
 
 *연결: `services/cache_service.py`. 일봉·주봉·월봉은 KIS D/W/M 원본을 각각 캐시한다(리샘플 파생 없음).*
-*`CACHE_TTL_* = None`은 Redis expire를 설정하지 않는다는 의미다(만료 없이 보관, 오늘 일봉만 갱신).*
+
+**구현 매핑(`feat/technical-cache-service`):** 전체 D/W/M **시계열 하나**를 timeframe별 key(`ohlcv:daily|weekly|monthly:{ticker}`)에 캐시한다. key에 as_of를 넣지 않고 **entry에 `as_of`를 저장**해, 요청 as_of와 다르면 fresh/stale 모두 쓰지 않고 miss 처리한다. entry는 `fetched_at`도 저장한다.
+- **fresh(primary 서빙)** = `fetched_at` 나이 ≤ `CACHE_FRESH_TTL_SECONDS`(=`CACHE_TTL_TODAY` 15분). 시계열이 오늘/당주/당월 봉을 포함해 가변이므로 "오늘 15분" 갱신을 freshness로 쓴다.
+- **Redis expire** = `STALE_CACHE_MAX_AGE_BY_PERIOD[tf] × 86400`(D=1일·W=7일·M=31일, **calendar-day 기반 근사** — "거래일"은 주말/휴장로 달력일과 다를 수 있으나 MVP는 달력일로 근사한다). 그 안엔 stale 폴백으로 재사용 가능하게 보존한다. (위 `CACHE_TTL_*=None`은 *historical-only key* 가정이라 full-series에는 이 매핑을 쓴다.)
+- **stale 폴백은 KIS 통신 실패(`KisApiError`)에만** 적용한다 — envelope 오류·잘못된 as_of·OHLCV/타입/프로그래밍 오류는 stale로 덮지 않고 **전파**한다(fail-fast, technical_coding_guidelines §14).
+- **per-timeframe 복원**: KIS 실패 시 tf별로 fresh/stale을 재구성한다. **D(일봉)는 필수**(fresh/stale 없으면 KIS 예외 전파), **W/M은 optional**(없으면 빈 리스트 → regime unavailable·chart 빈 5y로 안전 처리). 하나라도 stale을 쓰면 `data_status=stale_cache`·`source="KIS (stale)"`.
+- **get 무결성**: entry의 `ticker`·`timeframe`·`as_of`가 요청과 모두 일치해야 사용(불일치=miss — 종목 혼입 차단). `fetched_at`이 naive(tz 없음)·미래·파싱 불가·age 계산 오류면 전부 miss(예외 전파 없음).
+- **official runtime wiring은 후속**: cache는 supervisor **주입식**(기본 None)이며 agent.py/AI router에서 `default_cache()` 주입·Redis lifecycle·실 Redis smoke는 별도 브랜치(AI endpoint 통합)에서 한다.
 
 ## 8. 복원력 (resilience)
 
@@ -296,11 +303,20 @@ VOLUME_SPIKE_MULTIPLIER = 2.0          # 거래량 급증: 20봉 평균 × 배�
 TRADING_VALUE_SPIKE_MULTIPLIER = 2.0   # 거래대금 급증 배수
 BOX_LOOKBACK_DAYS = 40                 # 박스권 탐색 기간
 BOX_RANGE_THRESHOLD_PCT = 0.12         # 박스권 상·하단 범위 허용 폭
-BOX_MIN_TOUCH_COUNT = 2                # 박스권 왕복 최소 횟수
-CUP_LOOKBACK_DAYS = 120                # 컵앤핸들 탐색 기간
-CUP_MIN_DEPTH_PCT = 0.10               # 컵 최소 깊이
-CUP_MAX_DEPTH_PCT = 0.40               # 컵 최대 깊이
-HANDLE_MAX_PULLBACK_PCT = 0.15         # 핸들 최대 되돌림
+BOX_MIN_TOUCH_COUNT = 2                # 박스권 상·하단 각각 근접 최소 봉 수
+BOX_MIN_ALTERNATIONS = 2              # 상단↔하단 zone 전환 최소(왕복 — 단방향 추세 배제)
+# 컵앤핸들 후보 — 탐색 창은 timeframe별 봉(BARS) 기준(1y 일봉·5y 주봉, 3m 제외). chart_annotation_spec §13.
+CUP_HANDLE_DAILY_LOOKBACK_BARS = 120       # 1y 일봉 탐색 창(봉)
+CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78       # 5y 주봉 탐색 창(봉)
+CUP_HANDLE_RIM_TOLERANCE_PCT = 0.05        # 좌/우 rim 가격 차 허용
+CUP_HANDLE_MIN_DEPTH_PCT = 0.10            # 컵 최소 깊이(rim 대비)
+CUP_HANDLE_MAX_DEPTH_PCT = 0.40            # 컵 최대 깊이
+CUP_HANDLE_MIN_HANDLE_PULLBACK_PCT = 0.02  # 핸들 최소 되돌림(실제 조정 존재 — no-handle 배제)
+CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15  # 핸들 최대 되돌림
+CUP_HANDLE_MIN_HANDLE_BARS = 5             # 핸들 최소 길이(봉)
+CUP_HANDLE_MAX_HANDLE_BARS = 30            # 핸들 최대 길이(봉)
+CUP_HANDLE_MIN_BOTTOM_BARS = 3            # 둥근 저점 최소 봉 수(단봉 V자 배제)
+CUP_HANDLE_BOTTOM_TOLERANCE_PCT = 0.03   # bottom 근처 판정 폭
 
 # annotation 중복 제거 창 — 달력일이 아니라 candle(봉) index 거리 기준(주말·휴장 왜곡 방지).
 # chart_annotation_spec §8.4의 "거래일/4주"를 봉 개수로 표현. 5y는 주봉이라 "4주"=4봉.
@@ -370,6 +386,53 @@ if ticker not in BATTERY_TICKERS:
 `INTRADAY_CONFIDENCE_ADJUSTMENT_CAP`·`INTRADAY_RISK_NOTE_MAX_COUNT`는 계산 상한일 뿐 아니라 **`IntradayContext` 스키마가 직접 강제하는 계약 경계**다(§ `contracts.md` "1D intraday"). `confidence_adjustment`·`signal_score_adjustment`는 `[-cap, +cap]`, `risk_notes`는 최대 `INTRADAY_RISK_NOTE_MAX_COUNT`개.
 
 *연결: `config.py` §14, `synthesis/intraday_alignment.py`·`intraday_adjustment.py`, `charts/intraday_*`, `services/kis_client.py`, `contracts.md` "1D intraday"*
+
+---
+
+## 15. OpenAI LLM client (`feat/technical-openai-client`)
+
+> **문서 번호 주의**: 이 절은 `config.py` §15·`implementation_plan.md`와 번호를 맞춰 **§15**로 둔다(config.md 자체 순번 11·12와는 별개 — 앞 §11은 "MVP 종목 범위"). "§15 = OpenAI"로 세 문서에서 일치시킨다.
+
+실 LLM 어댑터(`services/openai_llm_client.py`)가 기존 `complete(prompt) -> str` 계약을 OpenAI **Responses API**(`responses.create`→`output_text`)로 구현할 때 쓰는 설정. **`.env` = secret + 환경별 선택값(API key·MODEL), config.py = 튜닝/안전 상수**로 나눈다. 값의 단일 출처가 겹치지 않게 한다(`technical_coding_guidelines §2.2·§13.2`).
+
+**.env에서 읽는 값(`load_openai_settings()`, fail-fast — 코드에 기본값 두지 않음)**
+
+| 항목 | 환경변수 | 필수 | 의미 |
+|---|---|---|---|
+| API key | `OPENAI_API_KEY` | ✅ | 값은 `.env`에만. 코드/로그/trace/repr 미저장 |
+| 모델 | `OPENAI_MODEL` | ✅ | **단일 출처=.env**(예: `OPENAI_MODEL=gpt-5.4-mini`). 환경/실험별 교체는 `.env`만 변경. **코드 기본값 없음** — import 시점이 아니라 `.env` 로드 후 읽어야 override가 실제로 먹기 때문 |
+
+> `OPENAI_API_KEY_ENV`·`OPENAI_MODEL_ENV`는 환경변수 "이름" 상수일 뿐(값 아님). 모델은 코드에 기본값을 두면 import 시점 평가라 `.env`를 무시하므로, 일부러 `load_openai_settings()`에서 읽고 누락 시 fail-fast한다.
+
+**config.py 튜닝/안전 상수(코드 — secret도 환경차도 아님, `KIS_TIMEOUT_SECONDS`와 같은 급. `.env`에 넣지 않는다)**
+
+| 상수 | 기본값 | 단위 | 의미 |
+|---|---|---|---|
+| `OPENAI_TIMEOUT_SECONDS` | `20.0` | 초 | 1회 호출 timeout — 60초 계약 안에서 보수적 하향 |
+| `OPENAI_MAX_RETRIES` | `0` | 회 | **SDK 재시도 끔** — SDK 기본(2회)은 60초 계약 초과 위험·agent 재생성과 중복 |
+| `OPENAI_TEMPERATURE` | `0.0` | — | 재현성 위해 0. **`None`이면 요청 파라미터에서 생략**(모델별 미허용 대비) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | `1200` | 토큰 | 응답 최대 토큰(보수적 기본) |
+| `OPENAI_STORE` | `False` | bool | **OpenAI 측 application state 저장 끔**(stateless). 분석 이력은 우리 backend DB가 관리 |
+
+- **환경변수(.env 필수)**: `OPENAI_API_KEY`, `OPENAI_MODEL`.
+- **timeout/retry 안전**: `OpenAI(timeout=20.0, max_retries=0)`. SDK-level 재시도를 끄고 **agent-level 재생성/template fallback**을 쓴다(SDK retry는 중복이자 60초 계약 초과 위험). 총 60초 deadline **완전** 보장(호출 간 deadline 전파)은 supervisor/endpoint 레벨 작업으로 **후속 AI endpoint integration 범위** — 이 브랜치는 per-call timeout/retry만 안전화한다.
+- **예외 정책**: OpenAI SDK 예외(timeout·rate limit·auth·connection·API·BadRequest)는 모두 `LlmCallError`로 변환(메시지는 type 이름만). **`raise ... from None`으로 exception chain을 끊어** 원본 OpenAIError가 상위 `logger.exception` traceback에 raw로 노출되지 않게 한다. 실패 시 안전 breadcrumb(`error_type`·`model`·`duration_ms`)만 로깅한다. `OPENAI_API_KEY`·`OPENAI_MODEL` 누락은 `default_openai_client()` 생성 시점의 **config error(fail-fast)** 로 `LlmCallError`와 구분한다.
+- **last_usage**: `complete()` 진입 시 `None`으로 리셋하고 **text 추출 성공 후에만** 저장한다 → 어떤 실패(빈 output·SDK 예외)든 `last_usage=None`. best-effort 메타데이터이며 동시 실행에서 request-scoped state로 신뢰하지 않는다(공유 client면 다른 요청이 덮을 수 있음).
+- **secret/trace**: raw prompt·raw response·API key·Authorization 헤더를 로그·trace·test snapshot에 남기지 않는다. 어댑터는 `model`·`last_usage`(토큰수)를 optional 노출하지만, **trace sink 배선은 이 브랜치 밖**(후속 AI endpoint 통합).
+- **테스트/실행**: `pytest`는 **network-free**(fake SDK 주입). 실제 연결은 수동 smoke(`scripts/smoke_openai_llm.py`, 비용 발생)로만 확인한다.
+- **runtime wiring**: `run_technical_agent`는 이 client를 **자동 생성하지 않는다**(계속 주입식, A안). 운영에서는 endpoint가 `default_openai_client()`를 주입한다.
+
+### 15.1 분석 이력 저장 정책 (store=False + backend DB)
+
+- **`store=False`의 의미**: OpenAI Responses **application state에 저장하지 않는다**(stateless 호출). "우리 서비스가 기억하지 말자"는 뜻이 **아니다**.
+- **분석 이력·follow-up context·report retrieval은 우리 backend DB(PostgreSQL)가 관리**한다 — OpenAI가 아니다. Technical Agent의 OpenAI 어댑터는 **stateless 호출만** 담당한다.
+
+  > Technical Agent uses OpenAI in stateless mode by default (`store=False`). Analysis history, follow-up context, and report retrieval are stored and managed by our backend database, not by OpenAI Responses application state.
+
+- **저장 후보 데이터(예시 — 이 브랜치에서 구현하지 않음, 후속 backend/AI endpoint 범위)**: `user_id`·`session_id`·`ticker`·`as_of`·`original_query`·`normalized_question`·`analysis_focus`·`data_status`·`source`·`final_regime`·`signal_score`·`confidence`·`risk_flags`·`technical_signals`·chart summaries·annotation summaries·LLM final report·`model`·`created_at`.
+- **금지**: 이 브랜치에서 PostgreSQL 저장 구현 금지. raw prompt·raw response·API key/token 저장 금지.
+
+*연결: `config.py` §15(`load_openai_settings`), `services/openai_llm_client.py`, `nodes/_llm_utils.py`(`LlmCallError`·`complete` 계약)*
 
 ---
 

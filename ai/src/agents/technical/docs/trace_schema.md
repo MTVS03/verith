@@ -4,6 +4,12 @@
 
 가격/기술적 분석 에이전트의 실행 과정에서 남기는 trace 로그 구조를 정의한다. 이 문서는 최종 리포트 DB 스키마가 아니라, **노드별 입력·출력·계산·검증·예외·폴백을 추적하기 위한 관측 스키마**다.
 
+> **구현 상태(MVP — `feat/technical-trace-logger`):** 이 스키마는 `observability/trace_logger.py`(`TraceLogger`+`TraceSink`: Noop/InMemory/JSONL)로 구현됐고, `supervisor/technical_supervisor.py`·`agent.py`에 `trace_sink` **주입식**으로 배선됐다. **MVP 범위** — run/node/cache/KIS/LLM validation/retry/fallback 핵심 이벤트를 우선 지원하며, 이 문서의 **전체 상세 필드(§9의 지표별 값·date range·confidence components 등)는 후속 AI endpoint/production 통합 단계에서 확장**한다.
+>
+> - **허용 event_type enum: 8종**(§7). **현재 실제 emit: 7종**(`trace_start·trace_end·node_start·node_end·validation·retry·fallback`). `error`는 독립 이벤트로도 허용되지만 MVP에서는 `node_end`/`trace_end`의 `status=failed`+`error` 필드 중심으로 기록한다. 세부(cache_hit·stale·재생성 등)는 `node`+event_type+summary 조합으로 표현한다.
+> - **secret-safe(§10·§13) 2겹:** ① key 이름 redaction ② **값-패턴 스크럽**(sk-·Bearer·URL credential·JWT·`k=v` secret·긴 고엔트로피 토큰) — key가 무해해도 값 자체가 secret 형태면 가린다. 단 `trace_id`·`event_id`·`*_hash`는 긴 토큰 redaction에서 면제(식별자 정합성). 원문 query는 `original_query_hash`(salt 없는 sha256)만, LLM prompt/response·시세/annotation 배열·API key/token은 미기록. error(예외/dict/str)는 모두 정화 경로를 거친다.
+> - **동작 보장:** trace emit 실패는 흡수해 계산·판단 로직에 영향이 없다. sink 미주입(Noop)이면 **출력 결과는 불변**이고 timestamp/hash/wrapper 생성 등 경미한 관측 오버헤드만 있다. **운영 sink 인스턴스 생성·JSONL 파일 경로·config 결선은 AI endpoint 통합 단계로 이연**한다.
+
 ---
 
 ## 1. 문서 목적
@@ -151,9 +157,11 @@ trace에서 쓰는 값 중 일부는 기존 문서의 enum을 그대로 재사�
 | 1 | 질문 안전 정규화 | `normalize_question` |
 | 2 | 분석 포커스 정리 | `focus_analysis` |
 | 3 | 데이터수집 | `data_collect` |
-| 4 | 지표계산 | `indicator_calculate` |
-| 5 | 국면분류 | `regime_classify` |
+| 4 | 신호용 지표계산(signal_score용 bundle) | `indicator_calculate` |
+| 5 | 국면분류(OHLCV 선판정·gate) | `regime_classify` |
 | 6 | 신호종합 | `signal_aggregate` |
+
+> **실행 순서 주의:** 노드 번호는 안정 ID이지만, **실제 실행은 국면분류(5·gate)가 지표계산(4)보다 먼저**다(`architecture.md` §10노드). regime은 지표 bundle을 쓰지 않는 OHLCV 선판정이고, indicator는 그 뒤 signal_score용 bundle이다.
 | 7 | 신뢰도계산 | `confidence_calculate` |
 | 8 | 리스크관찰점 | `risk_detect` |
 | 9 | 차트생성 | `chart_generate` |
@@ -178,7 +186,7 @@ trace에서 쓰는 값 중 일부는 기존 문서의 enum을 그대로 재사�
 
 ### 9.1 skipped 기록 규칙
 
-`regime_unavailable`이 발생하면 노드 6(`signal_aggregate`)·7(`confidence_calculate`)·8(`risk_detect`)은 실행하지 않고 **`status=skipped` 이벤트를 남긴다.** 이벤트를 생략하지 않는다 — 생략하면 "왜 신호 종합·신뢰도·리스크가 없었는지"를 trace에서 확인할 수 없기 때문이다.
+`regime_unavailable`이 발생하면 국면분류(노드 5·gate) 뒤로는 **노드 4(`indicator_calculate`)·6(`signal_aggregate`)·7(`confidence_calculate`)·8(`risk_detect`)을 실행하지 않고** 각각 **`status=skipped` 이벤트를 남긴다.** 국면분류(5·gate)를 신호용 지표계산(4)보다 먼저 실행하므로 지표계산도 스킵된다(`architecture.md` §10노드 — regime은 gate, indicator는 signal_score용 bundle). 신뢰도·리스크는 regime 결과에 의존하므로 어차피 실행 불가다. 이벤트를 생략하지 않는다 — 생략하면 "왜 지표·신호·신뢰도·리스크가 없었는지"를 trace에서 확인할 수 없기 때문이다.
 
 ```json
 {
