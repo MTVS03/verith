@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..core.contract import FundamentalRequest, FundamentalResponse
+from ..emit.html_builder import build_report_html
 from ..graph import analyze_fundamental
 from ..ratios.scorer import display_label
 
@@ -74,6 +75,7 @@ def resolve_years_from_question(question: str, default: int = 4) -> int:
 
 
 def resolve_latest_mode_from_question(question: str, forced_latest: bool = False) -> bool:
+    # 사용자가 최신/실시간 성격을 말하면 CLI 옵션 없이도 latest 보고서 탐색으로 보낸다.
     if forced_latest:
         return True
     tokens = ("최신", "실시간", "새로", "다시 가져", "캐시 없이", "fresh")
@@ -241,6 +243,48 @@ def render_agent_markdown(question: str, response: FundamentalResponse) -> str:
     )
 
 
+def _report_html(response: FundamentalResponse) -> str:
+    return build_report_html(
+        corp_name=response.corp_name,
+        ticker=response.ticker,
+        score=response.score,
+        label=response.verdict_label,
+        confidence=response.confidence,
+        ratios=response.ratios,
+        trend=response.trend,
+        interpretation=response.interpretation,
+        evidence=response.evidence,
+        risk_flags=response.risk_flags,
+        insights=response.insights,
+        score_breakdown=response.score_breakdown,
+        analyst_plan=response.analyst_plan,
+        evidence_graph=response.evidence_graph,
+        meta=response.meta,
+        audience="user",
+    )
+
+
+def _debug_html(response: FundamentalResponse) -> str:
+    return build_report_html(
+        corp_name=response.corp_name,
+        ticker=response.ticker,
+        score=response.score,
+        label=response.verdict_label,
+        confidence=response.confidence,
+        ratios=response.ratios,
+        trend=response.trend,
+        interpretation=response.interpretation,
+        evidence=response.evidence,
+        risk_flags=response.risk_flags,
+        insights=response.insights,
+        score_breakdown=response.score_breakdown,
+        analyst_plan=response.analyst_plan,
+        evidence_graph=response.evidence_graph,
+        meta=response.meta,
+        audience="debug",
+    )
+
+
 async def ask_once(
     question: str,
     *,
@@ -249,7 +293,8 @@ async def ask_once(
     use_cache: bool,
     latest: bool = False,
     intent: str = "fundamental_health",
-) -> tuple[FundamentalResponse, Path, Path]:
+) -> tuple[FundamentalResponse, Path, Path, Path]:
+    # ask_agent는 서비스 API가 아니라 사용자가 묻는 흐름을 로컬에서 재현하는 검수 하네스다.
     resolved_ticker = resolve_ticker_from_question(question, ticker)
     resolved_years = years if years is not None else resolve_years_from_question(question)
     latest_mode = resolve_latest_mode_from_question(question, latest)
@@ -267,10 +312,12 @@ async def ask_once(
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     stem = f"{stamp}_{response.ticker}"
     md_path = OUT_DIR / f"{stem}.md"
-    html_path = OUT_DIR / f"{stem}.html"
+    html_path = OUT_DIR / f"{stem}_report.html"
+    debug_html_path = OUT_DIR / f"{stem}_debug.html"
     md_path.write_text(render_agent_markdown(question, response), encoding="utf-8")
-    html_path.write_text(response.report_html, encoding="utf-8")
-    return response, md_path, html_path
+    html_path.write_text(_report_html(response), encoding="utf-8")
+    debug_html_path.write_text(_debug_html(response), encoding="utf-8")
+    return response, md_path, html_path, debug_html_path
 
 
 async def interactive_loop(args: argparse.Namespace) -> int:
@@ -283,7 +330,7 @@ async def interactive_loop(args: argparse.Namespace) -> int:
         if not question:
             continue
         try:
-            response, md_path, html_path = await ask_once(
+            response, md_path, html_path, debug_html_path = await ask_once(
                 question,
                 ticker=args.ticker,
                 years=args.years,
@@ -294,10 +341,10 @@ async def interactive_loop(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"[ERROR] {type(exc).__name__}: {exc}")
             continue
-        print_response_summary(response, md_path, html_path)
+        print_response_summary(response, md_path, html_path, debug_html_path)
 
 
-def print_response_summary(response: FundamentalResponse, md_path: Path, html_path: Path) -> None:
+def print_response_summary(response: FundamentalResponse, md_path: Path, html_path: Path, debug_html_path: Path | None = None) -> None:
     print("\n=== Fundamental Agent Report ===")
     print(f"{response.corp_name} ({response.ticker})")
     print(f"score={response.score} label={response.verdict_label} confidence={response.confidence}")
@@ -311,7 +358,9 @@ def print_response_summary(response: FundamentalResponse, md_path: Path, html_pa
     print(f"\n[Verdict]\n{response.verdict}")
     print(f"\n[Interpretation]\n{response.interpretation}")
     print(f"\nSaved markdown: {md_path}")
-    print(f"Saved html:     {html_path}")
+    print(f"Saved report:   {html_path}")
+    if debug_html_path is not None:
+        print(f"Saved debug:    {debug_html_path}")
     print("VS Code에서 파일을 열어 보세요. legacy CMD type/more는 한글이 깨질 수 있습니다.")
 
 
@@ -342,7 +391,7 @@ def main() -> int:
         args.question = trailing_question
 
     if args.question:
-        response, md_path, html_path = asyncio.run(
+        response, md_path, html_path, debug_html_path = asyncio.run(
             ask_once(
                 args.question,
                 ticker=args.ticker,
@@ -352,7 +401,7 @@ def main() -> int:
                 intent=args.intent,
             )
         )
-        print_response_summary(response, md_path, html_path)
+        print_response_summary(response, md_path, html_path, debug_html_path)
         return 0
     return asyncio.run(interactive_loop(args))
 

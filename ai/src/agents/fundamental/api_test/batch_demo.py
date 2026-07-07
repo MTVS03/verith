@@ -56,7 +56,7 @@ def write_outputs(response: FundamentalResponse) -> None:
         json.dumps(response.model_dump(), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    (OUT_DIR / f"{stem}.html").write_text(response.report_html, encoding="utf-8")
+    (OUT_DIR / f"{stem}_debug.html").write_text(response.report_html, encoding="utf-8")
 
 
 def _peer_label(rank: int, count: int) -> str:
@@ -85,10 +85,13 @@ def _refresh_report_html(response: FundamentalResponse) -> None:
         score_breakdown=response.score_breakdown,
         analyst_plan=response.analyst_plan,
         meta=response.meta,
+        evidence_graph=response.evidence_graph,
+        audience="debug",
     )
 
 
 def apply_peer_context(results: dict[str, FundamentalResponse | Exception]) -> None:
+    # peer 정보는 batch_demo 표시용 상대 위치다. 내부 verdict_label은 절대 점수 라벨을 유지한다.
     valid = [result for result in results.values() if isinstance(result, FundamentalResponse)]
     valid.sort(key=lambda item: (-item.score, item.ticker))
     count = len(valid)
@@ -160,6 +163,7 @@ def build_summary(results: dict[str, FundamentalResponse | Exception], years: in
 
 
 async def run_batch(tickers: list[str], years: int, use_cache: bool) -> dict[str, FundamentalResponse | Exception]:
+    # DART 호출 제한을 고려해 순차 실행한다. 실패 기업도 summary에 남겨 배치 건강도를 볼 수 있게 한다.
     results: dict[str, FundamentalResponse | Exception] = {}
     for ticker in tickers:  # DART rate limit 고려 순차 실행
         corp_name = STOCK_NAME_MAP.get(ticker, "?")
