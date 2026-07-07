@@ -1,0 +1,49 @@
+# schemas/response.py
+"""backend 조회/저장/삭제 응답 래퍼. sequence.md §2(리포트 흐름)에서 query_client가 받는 형태.
+
+세부 엔드포인트 계약은 TASK 08(및 SCHEMA_SPEC §7)에서 확정하되, 모델 골격은 여기 둔다.
+"""
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+from schemas.report import ArticleRef, SentimentGauge
+from schemas.event import Event
+
+
+class EventWithArticles(BaseModel):
+    """조회된 이벤트 1건 + 대표 근거 기사 소수 + 실시간 감성 집계."""
+    event: Event
+    article_count: int = 0   # 관련 기사 총 건수(실시간 집계). articles는 그 일부(대표 소수)
+    # 화면 노출용 대표 소수(요약+링크 묶음, 순서 어긋남 방지). news_id를 이미 포함하므로
+    # 일반 리포트는 이 대표 소수만으로 근거를 단다(재조회 불필요).
+    # 더 깊은 근거는 get_articles_by_event로 on-demand(TASK 09 §3.5).
+    articles: list[ArticleRef] = Field(default_factory=list)
+    gauge: SentimentGauge = Field(default_factory=SentimentGauge)  # 조회 시 backend 실시간 집계 결과
+
+
+class SubjectQueryResponse(BaseModel):
+    """종목 조회 응답. importance 내림차순 정렬 가정."""
+    subject: str
+    # "없는 종목"과 "종목은 있으나 뉴스 0건"을 구분하기 위한 플래그.
+    # 둘 다 events=[]가 되므로 리포트의 '데이터 제한' 문구를 다르게 쓰려면 필요.
+    # 당장 backend가 구분값을 못 주면 기본 True로 두고 TASK 08에서 확정.
+    subject_found: bool = True
+    events: list[EventWithArticles] = Field(default_factory=list)
+    # 전체 감성 집계(sentiment=None 제외). backend가 채운다 — ai는 재집계 안 함(절대규칙 4, SCHEMA_SPEC §7.3).
+    overall_gauge: SentimentGauge = Field(default_factory=SentimentGauge)
+
+
+class SaveResponse(BaseModel):
+    """배치 저장 응답. 쓰기 실패 시 정확 보고(degrade 금지, SCHEMA_SPEC §7.1)."""
+    ok: bool
+    saved: int = 0
+    message: str | None = None
+
+
+class CleanupResponse(BaseModel):
+    """7일 롤링 삭제 응답."""
+    ok: bool
+    deleted_articles: int = 0
+    deleted_events: int = 0
+    message: str | None = None
