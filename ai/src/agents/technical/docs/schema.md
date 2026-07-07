@@ -94,6 +94,7 @@ technical_reports 1 ─ 1 report_verification
 | 컬럼 | 타입 | Nullable | 설명 |
 | --- | --- | --- | --- |
 | id | UUID | NO | PK |
+| request_id | VARCHAR | NO | 요청 추적 ID(생성=Chat/Supervisor·직접 호출 시 backend). UNIQUE. 정본 api_spec §4 |
 | ticker | VARCHAR(20) | NO | 종목 코드 |
 | final_regime | VARCHAR(50) | NO | 최종 기술 국면 |
 | daily_regime | VARCHAR(50) | NO | 일봉 기준 국면 |
@@ -403,6 +404,7 @@ CREATE UNIQUE INDEX ux_report_verification_report_id
 
 | contracts.md 필드 | 저장 테이블 | 저장 컬럼 |
 | --- | --- | --- |
+| request_id | technical_reports | request_id |
 | ticker | technical_reports | ticker |
 | source | technical_reports | source |
 | trace_id | technical_reports | trace_id |
@@ -440,7 +442,7 @@ CREATE UNIQUE INDEX ux_report_verification_report_id
 
 `signal.confidence_level`은 DB 저장 대상이 아니다 — `confidence` 숫자값에서 프론트/백엔드가 파생한다.
 
-`request_id`도 DB 저장 대상이 아니다 — 런타임 요청 추적용이며, 영구 추적은 `trace_id`를 기준으로 한다(요청 1건과 그 실행 trace는 1:1이라 둘 다 저장하면 중복이다). contracts 출력의 `request_id`가 이 매핑 표에 없는 이유다.
+`request_id`는 Agent Output 필드이자 backend 통합 물리 스키마에 **저장된다** — `technical_reports.request_id`(UNIQUE NOT NULL, 요청 추적·중복 식별 키)이며 위 §12 매핑표에도 포함된다. 물리 정본은 backend schema이고 식별자 소유권 정본은 api_spec §4다. 반면 `report_id`는 Agent Output 필드가 아니라 backend가 부여하는 저장 ID(= `technical_reports.id`)이므로 이 매핑표에는 없다(이전 request_id '미저장' 규정은 통합 스키마 확정으로 폐기).
 
 ---
 
