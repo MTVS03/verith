@@ -98,3 +98,25 @@ class SaveResponse(BaseModel):
     ok: bool
     saved: int = 0
     message: str | None = None
+
+
+# ── 조회 응답 (ai schemas/report.py·event.py 미러) ───────────────────────────
+class ArticleRef(BaseModel):
+    """근거 기사 한 건(ai `ArticleRef`). news_id+summary+url 를 묶어 근거 추적 사슬의 원천."""
+
+    news_id: int
+    summary: str
+    url: str
+
+
+class EventArticleStats(BaseModel):
+    """이벤트의 누적 기사 통계(ai `EventArticleStats`). publishers 는 원자료(distinct) — 가중치는 ai 가 적용.
+
+    sentiment_magnitude_sum/sentiment_count 는 감성이 있는(None 아님) 기사만 집계한다(중요도 입력).
+    """
+
+    article_count: int = 0
+    publishers: list[str] = Field(default_factory=list)
+    sentiment_magnitude_sum: float = 0.0
+    sentiment_count: int = 0
+    updated_at: datetime | None = None
