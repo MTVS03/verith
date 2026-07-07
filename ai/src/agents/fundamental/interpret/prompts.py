@@ -7,6 +7,7 @@ from ..verify.verdict_guard import _allowed_numbers
 
 
 FORBIDDEN_RULES = (
+    # 프롬프트 규칙은 verify guard와 같은 경계를 미리 알려 LLM 재생성 비용을 줄인다.
     "Do not create or alter numbers. Quote only the values in the payload.",
     "Do not add benchmark thresholds such as 100% unless the exact number appears in the payload.",
     "Do not mention metrics that are not calculated, including PER, PBR, ROIC, target price, or market price.",
@@ -15,6 +16,7 @@ FORBIDDEN_RULES = (
     "Do not provide investment advice, buy/sell language, or target prices.",
     "Do not make claims outside the supplied evidence and ratios.",
     "If a metric has status unavailable, explain the supplied reason instead of guessing a value.",
+    "If a growth rate is marked low_base or its absolute value exceeds 300%, do not quote the percent; describe only the direction and the low-base caveat.",
     "Avoid quoting raw large KRW trend amounts; describe large KRW trends directionally unless a formatted display value is supplied.",
     "Do not repeat schema placeholder text such as 'one Korean sentence' or '3-5 Korean analyst-style sentences'.",
 )
@@ -40,6 +42,7 @@ def build_interpret_prompt(
     retrieval_context: dict[str, Any] | None = None,
     period_basis: dict[str, Any] | None = None,
 ) -> str:
+    # allowed_numbers는 검증 가능한 수치 화이트리스트다. 여기에 없는 숫자는 verdict_guard에서 막힌다.
     allowed_numbers = sorted(
         {
             round(value, 4)
@@ -48,17 +51,33 @@ def build_interpret_prompt(
         }
         | {float(score)}
     )
+    selected_paths = (retrieval_context or {}).get("selected_paths", [])
+    compact_ratios = {
+        key: {
+            "label": value.get("label", key),
+            "display_value": value.get("display_value"),
+            "status": value.get("status", "available"),
+            "direction": value.get("direction"),
+            "reason": value.get("reason", ""),
+        }
+        for key, value in ratios.items()
+    }
     payload = {
         "corp_name": corp_name,
         "score": score,
         "verdict_label": label,
         "allowed_numbers": allowed_numbers,
         "intent": (analyst_plan or {}).get("score_context", {}).get("intent", "fundamental_health"),
-        "ratios": ratios,
-        "trend": trend,
+        "ratios": compact_ratios,
+        "trend": {"years": trend.get("years", []), "display": trend.get("display", {})},
         "insights": insights or {},
         "analyst_plan": analyst_plan or {},
-        "retrieval_context": retrieval_context or {},
+        "retrieval_context": {
+            "ordered_evidence_briefs": (retrieval_context or {}).get("ordered_evidence_briefs", []),
+            "selected_paths": selected_paths,
+            "agent_focus_sections": (retrieval_context or {}).get("agent_focus_sections", []),
+            "agent_emphasis_notes": (retrieval_context or {}).get("agent_emphasis_notes", []),
+        },
         "period_basis": period_basis or {},
         "risk_flags": risk_flags,
         "rules": FORBIDDEN_RULES,
@@ -88,6 +107,7 @@ def build_interpret_prompt(
         "Do not include <think>, reasoning, markdown, or any text outside JSON.\n"
         "Every numeric value in the answer must be included in payload.allowed_numbers. "
         "Avoid generic benchmark numbers, market indicators such as 주가 or PER, raw large KRW trend amounts, and schema placeholder text.\n"
+        "When growth metrics are marked low_base, use the display_value and reason instead of inventing or quoting an extreme percent.\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
 

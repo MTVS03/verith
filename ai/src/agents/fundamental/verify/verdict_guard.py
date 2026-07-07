@@ -21,6 +21,7 @@ PLACEHOLDER_PATTERNS = (
     re.compile(r"(한\s*문장|3\s*-\s*5\s*문장|one Korean sentence|3-5 Korean)", re.IGNORECASE),
 )
 BENCHMARK_NUMBERS = {0.0, 100.0}
+EXTREME_PERCENT_LIMIT = 300.0
 
 
 @dataclass
@@ -70,6 +71,8 @@ def _allowed_numbers(
     for item in ratios.values():
         value = item.get("value")
         if isinstance(value, (int, float)):
+            if item.get("unit") == "%" and abs(float(value)) > EXTREME_PERCENT_LIMIT:
+                continue
             values.append(float(value))
     values.extend(float(item.value) for item in evidence)
     if trend:
@@ -107,6 +110,7 @@ def guard_llm_output(
     trend: dict[str, Any] | None = None,
     insights: dict[str, Any] | None = None,
 ) -> GuardResult:
+    # LLM 문장에 등장한 숫자는 계산 결과, evidence, trend, insight, score 화이트리스트 안에 있어야 한다.
     text = f"{verdict}\n{interpretation}"
     violations: list[str] = []
     allowed = _allowed_numbers(ratios, evidence, trend, insights)
