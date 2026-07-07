@@ -11,6 +11,7 @@ from db.base import Base
 # Common
 from db.models.common.agent_report import AgentReport
 from db.models.common.stock import Stock
+from db.models.common.stock_alias import StockAlias
 
 # Fundamental
 from db.models.fundamental.fundamental_report import FundamentalReport
@@ -46,6 +47,7 @@ __all__ = [
     "Base",
     "AgentReport",
     "Stock",
+    "StockAlias",
     "FundamentalReport",
     "ReportEvidence",
     "ReportFilingSnippet",

@@ -28,16 +28,16 @@ Technical Agent / Stock Resolver 에서 쓸 **기본 종목 마스터(지원 10�
 
 ```bash
 cd backend
+# 순서 중요: 종목 마스터 먼저, 그다음 Stock Resolver 별칭.
 uv run python -m scripts.seed_stocks
-# 또는
-uv run python scripts/seed_stocks.py
+uv run python -m scripts.seed_stock_aliases
 ```
 
 주의:
 - PostgreSQL 이 실행 중이어야 하고, `DATABASE_URL`(포트 5433) 이 설정돼 있어야 한다.
-- 스크립트는 **idempotent** — 여러 번 실행해도 안전하다.
-- `INSERT ... ON CONFLICT(stock_code) DO NOTHING` 이라 **기존 stock row(이름/시장)를 덮어쓰지 않는다.**
-  종목명·시장 수정이 필요하면 seed 가 아니라 별도 관리 작업으로 처리한다.
+- 두 스크립트 모두 **idempotent** (`ON CONFLICT ... DO NOTHING`) — 여러 번 실행해도 기존 row 를 덮지 않는다.
+- `seed_stock_aliases` 는 참조 종목이 `stocks` 에 없으면 **부분 seed 없이 fail-fast** 하므로 반드시 `seed_stocks` 를 먼저 실행한다.
+- 별칭 정본은 `src/api/constants/stock_aliases.py`(변형만 — 공식 이름은 `stocks.stock_name`).
 
 확인:
 
