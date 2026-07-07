@@ -58,6 +58,12 @@ def yoy(current: float | None, previous: float | None) -> float | None:
     return round((current - previous) / abs(previous) * 100, 2)
 
 
+LOW_BASE_DISPLAY = "흑자 기조 회복(저기저)"
+LOW_BASE_ABSOLUTE_THRESHOLD = 1_000_000_000.0
+LOW_BASE_REVENUE_RATIO = 0.01
+EXTREME_GROWTH_PERCENT = 300.0
+
+
 def _growth_status(current: float | None, previous: float | None) -> tuple[str, str | None, str | None]:
     if current is None or previous in (None, 0):
         return "unavailable", None, None
@@ -68,6 +74,38 @@ def _growth_status(current: float | None, previous: float | None) -> tuple[str, 
     if current < 0:
         return "not_meaningful", "전기 흑자에서 당기 적자로 전환되어 성장률을 %로 표시하지 않습니다.", "turnaround_negative"
     return "available", None, None
+
+
+def _is_low_base_operating_income(previous: float, current_revenue: float | None) -> bool:
+    threshold = LOW_BASE_ABSOLUTE_THRESHOLD
+    if current_revenue is not None and current_revenue > 0:
+        threshold = abs(current_revenue) * LOW_BASE_REVENUE_RATIO
+    return abs(previous) < threshold
+
+
+def _operating_income_growth_status(
+    current: float | None,
+    previous: float | None,
+    current_revenue: float | None,
+) -> tuple[str, str | None, str | None]:
+    # 저기저 흑자 확대는 퍼센트가 과장되므로 display_value와 direction으로만 전달한다.
+    status, reason, direction = _growth_status(current, previous)
+    if status != "available" or current is None or previous is None:
+        return status, reason, direction
+    if _is_low_base_operating_income(previous, current_revenue):
+        return (
+            "not_meaningful",
+            "전기 영업이익이 당기 매출 대비 1% 미만의 낮은 기저라 성장률을 %로 표시하지 않습니다.",
+            "low_base",
+        )
+    growth = yoy(current, previous)
+    if growth is not None and abs(growth) > EXTREME_GROWTH_PERCENT:
+        return (
+            "not_meaningful",
+            "영업이익 성장률이 300%를 초과해 방향성으로만 설명합니다.",
+            "low_base",
+        )
+    return status, reason, direction
 
 
 def _source_url(rcept_no: str) -> str:
@@ -112,6 +150,7 @@ def calculate_ratios(
     yearly_metrics: dict[str, dict[str, MetricValue]],
     share_count: ShareCountData | None = None,
 ) -> tuple[dict[str, Any], list[Evidence], list[str]]:
+    # 이 함수가 지표 값과 evidence의 단일 생성 지점이다. LLM 계층은 여기서 나온 값을 수정하지 않는다.
     years = sorted(yearly_metrics)
     latest_year = years[-1] if years else ""
     previous_year = years[-2] if len(years) >= 2 else None
@@ -128,9 +167,10 @@ def calculate_ratios(
     current_liabilities = _metric_value(latest, "current_liabilities")
 
     revenue_growth_status, revenue_growth_reason, revenue_growth_direction = _growth_status(revenue, _metric_value(previous, "revenue"))
-    operating_income_growth_status, operating_income_growth_reason, operating_income_growth_direction = _growth_status(
+    operating_income_growth_status, operating_income_growth_reason, operating_income_growth_direction = _operating_income_growth_status(
         operating_income,
         _metric_value(previous, "operating_income"),
+        revenue,
     )
 
     values = {
@@ -140,7 +180,11 @@ def calculate_ratios(
         "debt_ratio": _round(_safe_ratio(liabilities, equity)),
         "current_ratio": _round(_safe_ratio(current_assets, current_liabilities)),
         "revenue_growth": yoy(revenue, _metric_value(previous, "revenue")),
-        "operating_income_growth": yoy(operating_income, _metric_value(previous, "operating_income")),
+        "operating_income_growth": (
+            yoy(operating_income, _metric_value(previous, "operating_income"))
+            if operating_income_growth_status == "available"
+            else None
+        ),
         "eps": _metric_value(latest, "basic_eps"),
         "bps": _round(equity / share_count.issued_shares) if equity and share_count else None,
     }
@@ -169,6 +213,8 @@ def calculate_ratios(
             if operating_income_growth_direction == "turnaround_positive"
             else "적자전환"
             if operating_income_growth_direction == "turnaround_negative"
+            else LOW_BASE_DISPLAY
+            if operating_income_growth_direction == "low_base"
             else None
         ),
     }
@@ -191,6 +237,7 @@ def calculate_ratios(
         "bps": (("equity", "equity", "latest"),),
     }
     for metric, value in values.items():
+        # not_meaningful은 결측이 아니라 표시 정책이다. 숫자 대신 방향성과 사유를 JSON에 남긴다.
         status = status_overrides.get(metric, "available" if value is not None else "unavailable")
         if value is None and status == "unavailable":
             risk_flags.append(f"MISSING_{metric.upper()}")

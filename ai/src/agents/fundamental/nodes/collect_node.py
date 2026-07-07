@@ -61,6 +61,7 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
     fs_div = request.fs_div
     latest_live_year: str | None = None
     if request.report_mode == "latest":
+        # latest는 최신 보고서 탐색 결과만 cache bypass 대상이 되도록 live year를 따로 표시한다.
         selection = discover_latest_report(corp_code, fs_div)
         source_records.extend(selection.probe_records)
         dart_calls += selection.probe_calls
@@ -127,6 +128,19 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
         dart_calls += 1
     except Exception:
         share_count = None
+    if share_count is None and reprt_code != "11011":
+        # 분기/반기 보고서에 주식수 표가 없으면 BPS 산출을 위해 최신 사업보고서의 주식수만 보조 사용한다.
+        annual = latest_annual_selection()
+        try:
+            share_count = fetch_share_count(
+                corp_code,
+                annual.bsns_year,
+                reprt_code=annual.reprt_code,
+                use_cache=use_cache,
+            )
+            dart_calls += 1
+        except Exception:
+            share_count = None
 
     insights, insight_calls = fetch_regular_report_insights(
         corp_code,

@@ -5,6 +5,7 @@ from typing import Any
 from src.agents.fundamental.core.contract import FundamentalRequest
 from src.agents.fundamental.data.cache import CacheInspection
 from src.agents.fundamental.data import latest_report
+from src.agents.fundamental.data.regular_disclosure import ShareCountData
 from src.agents.fundamental.nodes import collect_node
 from src.agents.fundamental.retrieval import source_policy
 
@@ -304,3 +305,97 @@ def test_collect_latest_mode_only_bypasses_cache_for_latest_year(monkeypatch) ->
 
     assert result["data_status"] == "normal"
     assert calls == [(2024, True), (2025, True), (2026, False)]
+
+
+def test_collect_latest_mode_falls_back_to_annual_share_count_for_bps(monkeypatch) -> None:
+    # 분기/반기 보고서에 주식수 표가 없을 때 BPS를 위해 사업보고서 주식수만 보조 사용한다.
+    share_calls: list[tuple[int, str]] = []
+
+    monkeypatch.setattr(collect_node, "resolve", lambda ticker: "00155276")
+    monkeypatch.setattr(collect_node, "resolve_name", lambda ticker: "포스코퓨처엠")
+    monkeypatch.setattr(
+        collect_node,
+        "discover_latest_report",
+        lambda corp_code, fs_div: latest_report.ReportSelection(
+            bsns_year=2026,
+            reprt_code="11013",
+            reprt_name="1분기보고서",
+            mode="latest",
+        ),
+    )
+    monkeypatch.setattr(
+        collect_node,
+        "latest_annual_selection",
+        lambda: latest_report.ReportSelection(
+            bsns_year=2025,
+            reprt_code="11011",
+            reprt_name="사업보고서",
+            mode="annual",
+        ),
+    )
+    monkeypatch.setattr(collect_node, "fetch_regular_report_insights", lambda *args, **kwargs: ({}, 0))
+
+    def fake_fetch_share_count(corp_code: str, bsns_year: int, *, reprt_code: str, use_cache: bool) -> ShareCountData | None:
+        share_calls.append((bsns_year, reprt_code))
+        if reprt_code == "11013":
+            return None
+        return ShareCountData(
+            issued_shares=77_463_220,
+            distributed_shares=None,
+            treasury_shares=None,
+            share_class="보통주",
+            basis="common_issued_shares",
+            rcept_no="20260312000217",
+            stlm_dt="2025-12-31",
+        )
+
+    monkeypatch.setattr(collect_node, "fetch_share_count", fake_fetch_share_count)
+
+    def fake_fetch_financial_statement_rows(
+        corp_code: str,
+        bsns_year: int,
+        *,
+        reprt_code: str,
+        fs_div: str,
+        use_cache: bool,
+    ) -> source_policy.FinancialFetchResult:
+        rows = [
+            {
+                "rcept_no": f"{bsns_year}0515000001",
+                "account_id": "ifrs-full_Revenue",
+                "account_nm": "매출액",
+                "thstrm_amount": "1000",
+            }
+        ]
+        return source_policy.FinancialFetchResult(
+            rows=rows,
+            source_record=source_policy.DartSourceRecord(
+                endpoint="fnlttSinglAcntAll",
+                cache_key=f"{corp_code}_{bsns_year}_{reprt_code}_{fs_div}",
+                corp_code=corp_code,
+                bsns_year=bsns_year,
+                reprt_code=reprt_code,
+                fs_div=fs_div,
+                source="dart",
+                cache_status="bypass",
+                row_count=1,
+                rcept_nos=[f"{bsns_year}0515000001"],
+                as_of="2026-07-07T00:00:00+00:00",
+                ttl_seconds=86400,
+            ),
+        )
+
+    monkeypatch.setattr(collect_node, "fetch_financial_statement_rows", fake_fetch_financial_statement_rows)
+
+    request = FundamentalRequest(
+        request_id="req-1",
+        trace_id="trace-1",
+        ticker="003670",
+        report_mode="latest",
+        years=2,
+    )
+
+    result = collect_node.collect_node({"request": request, "use_cache": True})
+
+    assert result["share_count"].issued_shares == 77_463_220
+    assert share_calls == [(2026, "11013"), (2025, "11011")]

@@ -2,6 +2,7 @@ from src.agents.fundamental.data.regular_disclosure import ShareCountData
 from src.agents.fundamental.normalize.standardize import MetricValue
 from src.agents.fundamental.ratios.calculators import _safe_ratio, calculate_ratios, yoy
 from src.agents.fundamental.ratios.scorer import score_financials
+from src.agents.fundamental.verify.verdict_guard import guard_llm_output
 
 
 def metric(value: float, account_id: str = "test", account_nm: str | None = None, sj_div: str = "BS") -> MetricValue:
@@ -57,6 +58,54 @@ def test_growth_marks_loss_to_profit_turnaround_direction():
     assert ratios["operating_income_growth"]["display_value"] == "흑자전환"
     assert ratios["operating_income_growth"]["direction"] == "turnaround_positive"
     assert "NOT_MEANINGFUL_OPERATING_INCOME_GROWTH" in flags
+
+
+def test_operating_income_growth_marks_low_base_without_extreme_percent():
+    # 저기저 회복은 극단적 성장률 퍼센트 대신 방향성 display로 고정한다.
+    ratios, evidence, flags = calculate_ratios(
+        {
+            "2024": {
+                "operating_income": metric(721_245_866, "dart_OperatingIncomeLoss", "영업이익", "IS"),
+                "revenue": metric(3_699_944_235_821, "ifrs-full_Revenue", "매출액", "IS"),
+            },
+            "2025": {
+                "operating_income": metric(32_827_283_494, "dart_OperatingIncomeLoss", "영업이익", "IS"),
+                "revenue": metric(2_938_698_184_392, "ifrs-full_Revenue", "매출액", "IS"),
+            },
+        }
+    )
+
+    item = ratios["operating_income_growth"]
+    assert item["value"] is None
+    assert item["status"] == "not_meaningful"
+    assert item["direction"] == "low_base"
+    assert item["display_value"] == "흑자 기조 회복(저기저)"
+    assert "4451.47" not in str(item)
+    assert "NOT_MEANINGFUL_OPERATING_INCOME_GROWTH" in flags
+
+    guard = guard_llm_output(
+        "영업이익은 저기저에서 회복했습니다.",
+        "영업이익성장률 4,451.47%로 급등했습니다.",
+        ratios,
+        evidence,
+        score=50,
+    )
+    assert not guard.ok
+    assert "unbound or altered number: 4451.47" in guard.violations
+
+
+def test_operating_income_growth_keeps_normal_percent_growth():
+    ratios, _, flags = calculate_ratios(
+        {
+            "2024": {"operating_income": metric(100), "revenue": metric(1000)},
+            "2025": {"operating_income": metric(180), "revenue": metric(1200)},
+        }
+    )
+
+    assert ratios["operating_income_growth"]["value"] == 80.0
+    assert ratios["operating_income_growth"]["status"] == "available"
+    assert "direction" not in ratios["operating_income_growth"]
+    assert "NOT_MEANINGFUL_OPERATING_INCOME_GROWTH" not in flags
 
 
 def test_missing_metrics_emit_missing_flags():
@@ -184,6 +233,24 @@ def test_turnaround_positive_scores_above_continued_loss():
     continued_loss_score, _, _ = score_financials(base | {"operating_income_growth": {"value": None, "direction": "loss_continued"}})
 
     assert positive_score > continued_loss_score
+
+
+def test_low_base_growth_receives_partial_growth_points():
+    # low_base는 숫자 성장률이 없어도 성장성의 일부 신호로만 점수화한다.
+    base = {
+        "roe": {"value": 15},
+        "operating_margin": {"value": 12},
+        "debt_ratio": {"value": 80},
+        "current_ratio": {"value": 180},
+        "revenue_growth": {"value": 20},
+    }
+    low_base_score, low_base_breakdown, _ = score_financials(base | {"operating_income_growth": {"value": None, "direction": "low_base"}})
+    full_growth_score, _, _ = score_financials(base | {"operating_income_growth": {"value": 30}})
+    zero_growth_score, _, _ = score_financials(base | {"operating_income_growth": {"value": None, "direction": "loss_continued"}})
+    low_base_metric = next(item for item in low_base_breakdown["scored_metrics"] if item["metric"] == "operating_income_growth")
+
+    assert low_base_metric["points"] == 7.5
+    assert zero_growth_score < low_base_score < full_growth_score
 
 
 def test_all_scored_metrics_at_max_return_100():

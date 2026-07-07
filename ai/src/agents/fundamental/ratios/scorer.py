@@ -71,13 +71,15 @@ def _metric_points(metric: str, item: dict[str, Any]) -> tuple[float, float] | N
         return scorer(value, table), _max_points(table)
     direction = item.get("direction")
     if metric in GROWTH_METRICS and direction:
+        # 흑자전환/저기저 회복은 숫자 성장률 없이도 일부 성장성 신호로만 반영한다.
         max_points = _max_points(table)
-        points = max_points / 2 if direction == "turnaround_positive" else 0.0
+        points = max_points / 2 if direction in {"turnaround_positive", "low_base"} else 0.0
         return points, max_points
     return None
 
 
 def score_financials(ratios: dict[str, Any]) -> tuple[int, dict[str, Any], str]:
+    # 점수와 라벨의 결정론적 원천. report_html/LLM은 이 결과를 재해석하거나 재계산하지 않는다.
     earned_by_component = {"profitability": 0.0, "stability": 0.0, "growth": 0.0}
     attainable_by_component = {"profitability": 0.0, "stability": 0.0, "growth": 0.0}
     scored_metrics: list[dict[str, Any]] = []
