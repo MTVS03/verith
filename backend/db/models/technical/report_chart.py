@@ -17,9 +17,10 @@ class TechnicalReportChart(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("technical_reports.id"), nullable=False
+        ForeignKey("technical_reports.id", ondelete="CASCADE"), nullable=False
     )
-    period: Mapped[str | None] = mapped_column(String, nullable=True)
+    period: Mapped[str] = mapped_column(String, nullable=False)
+    # chart_data/annotations/chart_payload 는 backend 저장 정책 미확정 → nullable 유지.
     candle_unit: Mapped[str | None] = mapped_column(String, nullable=True)
     chart_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     annotations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

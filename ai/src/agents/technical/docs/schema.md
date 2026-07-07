@@ -2,9 +2,23 @@
 
 `docs/schema.md`
 
-가격/기술적 분석 에이전트의 PostgreSQL 영구 저장 구조와 Redis 캐시 구조를 정의한다. 백엔드가 마이그레이션·저장 로직·조회 API를 구현할 때 기준으로 삼는 **DB 스키마의 단일 기준 문서**다.
+가격/기술적 분석 에이전트의 **논리 스키마(output 계약)와 Redis 캐시 구조**를 정의한다. 컬럼의 의미·enum·nullable 규칙·검증 정책의 설계 근거를 담는다.
 
-> **이 문서가 DB 이름의 최종 기준이다.** 컬럼명이 `contracts.md`의 기존 매핑과 다르면 이 문서를 따르고, contracts를 여기 맞춘다(§13).
+> **⚠️ 물리 스키마 정본 = backend 통합 schema.** PostgreSQL 실제 테이블명·제약(FK/CASCADE/UNIQUE/NOT NULL)·마이그레이션의 **정본은 `backend/db/models/*` + `backend/db/migrations/*`**(통합 ERD)다. 이 문서와 물리 테이블명이 다르면 **backend 물리 스키마를 따른다.** 이 문서는 논리 설계·output 계약·nullable 근거를 설명한다.
+>
+> **논리명 → 물리 테이블명 매핑** (backend 통합 schema):
+>
+> | 이 문서(논리명) | backend 물리 테이블 |
+> | --- | --- |
+> | `technical_reports` | `technical_reports` |
+> | `report_signals` | `technical_report_signals` |
+> | `report_charts` | `technical_report_charts` |
+> | `report_risk_notes` | `technical_report_risk_notes` |
+> | `report_interpretation` | `technical_report_interpretations` |
+> | `report_verification` | `technical_report_verifications` |
+> | (신규) 후속 질의 | `technical_report_followups` |
+>
+> 물리 스키마는 이 문서의 무결성 규칙을 흡수한다: 자식 FK **ON DELETE CASCADE**, `report_id` **UNIQUE**(1:1), `report_signals` **UNIQUE(report_id, indicator)**, degraded에도 sentinel로 채워지는 `final_regime`·`daily_regime`·`alignment_flag`는 **NOT NULL**. 단 `consensus`·`signal_score`·`confidence`·`weekly_trend`·`monthly_trend`는 degraded에서 NULL 가능하므로 nullable(§9). 통합 ERD 신규 컬럼(`timeframe`, `chart_payload` 등)은 보장 근거 확정 전까지 nullable.
 
 ---
 

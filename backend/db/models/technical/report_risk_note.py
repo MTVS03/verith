@@ -17,7 +17,7 @@ class TechnicalReportRiskNote(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("technical_reports.id"), nullable=False
+        ForeignKey("technical_reports.id", ondelete="CASCADE"), nullable=False
     )
     flag: Mapped[str | None] = mapped_column(String, nullable=True)
     severity: Mapped[str | None] = mapped_column(String, nullable=True)

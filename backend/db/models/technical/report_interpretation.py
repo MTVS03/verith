@@ -17,11 +17,12 @@ class TechnicalReportInterpretation(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("technical_reports.id"), nullable=False, unique=True
+        ForeignKey("technical_reports.id", ondelete="CASCADE"), nullable=False, unique=True
     )
-    interpretation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    interpretation_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 정본 §9: LLM 실패 시에도 template_fallback 문장으로 안전착지 → NOT NULL.
+    interpretation: Mapped[str] = mapped_column(Text, nullable=False)
+    interpretation_source: Mapped[str] = mapped_column(String, nullable=False)
     model_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    template_fallback_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    template_fallback_used: Mapped[bool] = mapped_column(Boolean, nullable=False)
     detail_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sections: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

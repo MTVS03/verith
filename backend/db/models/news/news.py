@@ -23,10 +23,11 @@ class News(Base):
     __tablename__ = "news"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    url: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    # url 기반 upsert/중복차단의 핵심 → NOT NULL + UNIQUE.
+    url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     publisher: Mapped[str | None] = mapped_column(String, nullable=True)
     sentiment: Mapped[str | None] = mapped_column(String, nullable=True)
     sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)

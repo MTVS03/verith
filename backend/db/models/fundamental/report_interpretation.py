@@ -17,7 +17,7 @@ class FundamentalReportInterpretation(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("fundamental_reports.id"), nullable=False, unique=True
+        ForeignKey("fundamental_reports.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     interpretation: Mapped[str | None] = mapped_column(Text, nullable=True)
     interpretation_source: Mapped[str | None] = mapped_column(String, nullable=True)

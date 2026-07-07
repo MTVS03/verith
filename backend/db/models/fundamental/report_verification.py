@@ -17,7 +17,7 @@ class FundamentalReportVerification(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("fundamental_reports.id"), nullable=False, unique=True
+        ForeignKey("fundamental_reports.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     binding_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     consistency_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

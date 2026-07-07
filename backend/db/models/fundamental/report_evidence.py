@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
@@ -17,11 +18,11 @@ class ReportEvidence(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("fundamental_reports.id"), nullable=False
+        ForeignKey("fundamental_reports.id", ondelete="CASCADE"), nullable=False
     )
     # 원문 스니펫 evidence 대비 nullable.
     ratio_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("report_ratios.id"), nullable=True
+        ForeignKey("report_ratios.id", ondelete="CASCADE"), nullable=True
     )
     metric: Mapped[str | None] = mapped_column(String, nullable=True)
     claim: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -31,7 +32,7 @@ class ReportEvidence(Base):
     sj_div: Mapped[str | None] = mapped_column(String, nullable=True)
     account_id: Mapped[str | None] = mapped_column(String, nullable=True)
     account_nm: Mapped[str | None] = mapped_column(String, nullable=True)
-    amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     unit: Mapped[str | None] = mapped_column(String, nullable=True)
     display_value: Mapped[str | None] = mapped_column(String, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String, nullable=True)

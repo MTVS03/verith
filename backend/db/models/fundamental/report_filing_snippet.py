@@ -17,7 +17,7 @@ class ReportFilingSnippet(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("fundamental_reports.id"), nullable=False
+        ForeignKey("fundamental_reports.id", ondelete="CASCADE"), nullable=False
     )
     rcept_no: Mapped[str | None] = mapped_column(String, nullable=True)
     section_name: Mapped[str | None] = mapped_column(String, nullable=True)

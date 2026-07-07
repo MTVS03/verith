@@ -18,7 +18,7 @@ class TechnicalReportFollowup(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("technical_reports.id"), nullable=False
+        ForeignKey("technical_reports.id", ondelete="CASCADE"), nullable=False
     )
     request_id: Mapped[str | None] = mapped_column(String, nullable=True)
     client_session_id: Mapped[str | None] = mapped_column(String, nullable=True)

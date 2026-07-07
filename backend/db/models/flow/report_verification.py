@@ -17,7 +17,7 @@ class FlowReportVerification(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("flow_reports.id"), nullable=False, unique=True
+        ForeignKey("flow_reports.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     gate1_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     gate2_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

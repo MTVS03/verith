@@ -1,8 +1,16 @@
-# news DB 모델 명세 (backend 구현 지시서)
+# news DB 모델 명세 (논리 설계 + backend 물리 대응)
 
-> **문서만.** 아직 모델 코드(SQLAlchemy 등)는 없다 — 이 문서는 backend가 이 폴더
-> (`backend/db/models/news`)에 무엇을 구현해야 하는지 정의한다.
-> 원 명세: `ai/src/agents/news/docs/erd.dbml`. 두 문서는 1:1 대응해야 한다.
+> **물리 스키마 정본 = backend 통합 schema.** SQLAlchemy 모델(`backend/db/models/news/news.py`,
+> `news_report.py`)과 Alembic 마이그레이션이 이미 존재하며, 물리 테이블명·제약의 정본이다.
+> 이 문서는 컬럼 의미·논리 설계·Neo4j 경계를 설명한다. 원 논리 명세: `ai/src/agents/news/docs/erd.dbml`.
+>
+> **물리 대응(중요):**
+> - 논리 `reports` → **물리 테이블 `news_reports`**
+> - 논리 `reports.html` → **물리 `news_reports.report_json`(jsonb)** (렌더 HTML 대신 ReportModel 전체 JSON 보존)
+> - `news_reports`에는 물리상 `owner_user_id`/`owner_session_id`(nullable, **FK 없음**)가 추가돼 있다.
+> - `news.url`은 물리상 **NOT NULL + UNIQUE**(url 기반 upsert의 핵심), `news.title`도 **NOT NULL**.
+> - `news.event_id`는 Neo4j `Event.canonical_id` **논리 링크(FK 없음)**.
+> - **Neo4j 객체(Event/Company/Sector/NewsRef/Keyword/Person/Country)는 PostgreSQL 테이블이 아니다.**
 
 ## 경계 (중요)
 
@@ -23,7 +31,7 @@
 | title | text NOT NULL | |
 | content | text | 본문 |
 | summary | text | LLM(Qwen3) 통일 요약. 임베딩·병합 기준 |
-| url | text UNIQUE | 원문 직링크. 1차 중복 차단 |
+| url | text NOT NULL UNIQUE | 원문 직링크. 1차 중복 차단(url upsert 키) |
 | publisher | varchar | 언론사명. importance 가중치에 사용 |
 | sentiment | varchar | KR-FinBert 결과: 긍정/중립/부정 |
 | embedding | vector (pgvector) | summary 임베딩(arctic-embed-l-v2.0-ko) |
@@ -33,7 +41,9 @@
 
 - **pgvector 확장 필요**(embedding). 유사 검색은 추후 ANN 인덱스.
 
-## 2. PostgreSQL — `reports` (질의 결과 리포트)
+## 2. PostgreSQL — `reports` (질의 결과 리포트) → 물리 테이블 `news_reports`
+
+> 물리: 테이블명 `news_reports`, `html` 컬럼은 물리상 `report_json`(jsonb)로 저장, `owner_user_id`/`owner_session_id`(nullable, FK 없음) 추가.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|

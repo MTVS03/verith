@@ -17,12 +17,13 @@ class TechnicalReportVerification(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     report_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("technical_reports.id"), nullable=False, unique=True
+        ForeignKey("technical_reports.id", ondelete="CASCADE"), nullable=False, unique=True
     )
-    calc_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    regime_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    label_matched: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    outcome: Mapped[str | None] = mapped_column(String, nullable=True)
-    regen_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 정본 §5.6: verification row 생성 시 gate 결과·outcome·regen_count 는 항상 존재.
+    calc_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    regime_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    label_matched: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    regen_count: Mapped[int] = mapped_column(Integer, nullable=False)
     failed_indicators: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     validation_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

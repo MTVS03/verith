@@ -1,8 +1,8 @@
 """add integrated postgresql schema
 
-Revision ID: ba32d04374c3
-Revises: 
-Create Date: 2026-07-07 13:50:45.568850
+Revision ID: 705a5833d4a3
+Revises:
+Create Date: 2026-07-07 14:25:47.771752
 
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pgvector.sqlalchemy.vector  # news.embedding VECTOR 타입 렌더에 필�
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'ba32d04374c3'
+revision: str = '705a5833d4a3'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -57,10 +57,10 @@ def upgrade() -> None:
     )
     op.create_table('news',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('title', sa.Text(), nullable=True),
+    sa.Column('title', sa.Text(), nullable=False),
     sa.Column('content', sa.Text(), nullable=True),
     sa.Column('summary', sa.Text(), nullable=True),
-    sa.Column('url', sa.Text(), nullable=True),
+    sa.Column('url', sa.Text(), nullable=False),
     sa.Column('publisher', sa.String(), nullable=True),
     sa.Column('sentiment', sa.String(), nullable=True),
     sa.Column('sentiment_score', sa.Float(), nullable=True),
@@ -96,31 +96,31 @@ def upgrade() -> None:
     )
     op.create_table('technical_reports',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.Column('request_id', sa.String(), nullable=True),
+    sa.Column('request_id', sa.String(), nullable=False),
     sa.Column('client_session_id', sa.String(), nullable=True),
-    sa.Column('ticker', sa.String(), nullable=True),
+    sa.Column('ticker', sa.String(), nullable=False),
     sa.Column('stock_name', sa.String(), nullable=True),
     sa.Column('original_query', sa.Text(), nullable=True),
     sa.Column('normalized_query', sa.Text(), nullable=True),
     sa.Column('analysis_focus', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('final_regime', sa.String(), nullable=True),
-    sa.Column('daily_regime', sa.String(), nullable=True),
+    sa.Column('final_regime', sa.String(), nullable=False),
+    sa.Column('daily_regime', sa.String(), nullable=False),
     sa.Column('weekly_trend', sa.String(), nullable=True),
     sa.Column('monthly_trend', sa.String(), nullable=True),
-    sa.Column('alignment_flag', sa.String(), nullable=True),
+    sa.Column('alignment_flag', sa.String(), nullable=False),
     sa.Column('regime_context', sa.Text(), nullable=True),
     sa.Column('consensus', sa.String(), nullable=True),
     sa.Column('signal_score', sa.Float(), nullable=True),
     sa.Column('confidence', sa.Float(), nullable=True),
     sa.Column('confidence_basis', sa.String(), nullable=True),
-    sa.Column('data_status', sa.String(), nullable=True),
-    sa.Column('source', sa.String(), nullable=True),
-    sa.Column('trace_id', sa.String(), nullable=True),
+    sa.Column('data_status', sa.String(), nullable=False),
+    sa.Column('source', sa.String(), nullable=False),
+    sa.Column('trace_id', sa.String(), nullable=False),
     sa.Column('model_name', sa.String(), nullable=True),
-    sa.Column('as_of', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('as_of', sa.DateTime(timezone=True), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('input_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('output_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('input_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('output_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_reports')),
     sa.UniqueConstraint('request_id', name=op.f('uq_technical_reports_request_id'))
     )
@@ -158,7 +158,7 @@ def upgrade() -> None:
     sa.Column('interpretation_source', sa.String(), nullable=True),
     sa.Column('provider', sa.String(), nullable=True),
     sa.Column('model', sa.String(), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['flow_reports.id'], name=op.f('fk_flow_report_interpretations_report_id_flow_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['flow_reports.id'], name=op.f('fk_flow_report_interpretations_report_id_flow_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_flow_report_interpretations')),
     sa.UniqueConstraint('report_id', name=op.f('uq_flow_report_interpretations_report_id'))
     )
@@ -171,7 +171,7 @@ def upgrade() -> None:
     sa.Column('checks', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('outcome', sa.String(), nullable=True),
     sa.Column('regen_count', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['flow_reports.id'], name=op.f('fk_flow_report_verifications_report_id_flow_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['flow_reports.id'], name=op.f('fk_flow_report_verifications_report_id_flow_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_flow_report_verifications')),
     sa.UniqueConstraint('report_id', name=op.f('uq_flow_report_verifications_report_id'))
     )
@@ -212,13 +212,13 @@ def upgrade() -> None:
     op.create_table('technical_report_charts',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('report_id', sa.UUID(), nullable=False),
-    sa.Column('period', sa.String(), nullable=True),
+    sa.Column('period', sa.String(), nullable=False),
     sa.Column('candle_unit', sa.String(), nullable=True),
     sa.Column('chart_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('annotations', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('chart_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('display_order', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_charts_report_id_technical_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_charts_report_id_technical_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_charts'))
     )
     op.create_index('ix_technical_report_charts_report_id_period', 'technical_report_charts', ['report_id', 'period'], unique=False)
@@ -233,20 +233,20 @@ def upgrade() -> None:
     sa.Column('trace_id', sa.String(), nullable=True),
     sa.Column('context_snapshot', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_followups_report_id_technical_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_followups_report_id_technical_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_followups'))
     )
     op.create_index('ix_technical_report_followups_report_id_created_at', 'technical_report_followups', ['report_id', 'created_at'], unique=False)
     op.create_table('technical_report_interpretations',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('report_id', sa.UUID(), nullable=False),
-    sa.Column('interpretation', sa.Text(), nullable=True),
-    sa.Column('interpretation_source', sa.String(), nullable=True),
+    sa.Column('interpretation', sa.Text(), nullable=False),
+    sa.Column('interpretation_source', sa.String(), nullable=False),
     sa.Column('model_name', sa.String(), nullable=True),
-    sa.Column('template_fallback_used', sa.Boolean(), nullable=True),
+    sa.Column('template_fallback_used', sa.Boolean(), nullable=False),
     sa.Column('detail_source_count', sa.Integer(), nullable=True),
     sa.Column('sections', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_interpretations_report_id_technical_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_interpretations_report_id_technical_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_interpretations')),
     sa.UniqueConstraint('report_id', name=op.f('uq_technical_report_interpretations_report_id'))
     )
@@ -259,38 +259,38 @@ def upgrade() -> None:
     sa.Column('ref_price', sa.Float(), nullable=True),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('display_order', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_risk_notes_report_id_technical_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_risk_notes_report_id_technical_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_risk_notes'))
     )
     op.create_index('ix_technical_report_risk_notes_report_id_severity', 'technical_report_risk_notes', ['report_id', 'severity'], unique=False)
     op.create_table('technical_report_signals',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('report_id', sa.UUID(), nullable=False),
-    sa.Column('indicator', sa.String(), nullable=True),
+    sa.Column('indicator', sa.String(), nullable=False),
     sa.Column('timeframe', sa.String(), nullable=True),
-    sa.Column('signal', sa.String(), nullable=True),
+    sa.Column('signal', sa.String(), nullable=False),
     sa.Column('value', sa.Float(), nullable=True),
     sa.Column('value_unit', sa.String(), nullable=True),
     sa.Column('metrics', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('detail', sa.Text(), nullable=True),
     sa.Column('detail_source', sa.String(), nullable=True),
-    sa.Column('weight', sa.Float(), nullable=True),
+    sa.Column('weight', sa.Float(), nullable=False),
     sa.Column('display_order', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_signals_report_id_technical_reports')),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_signals'))
+    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_signals_report_id_technical_reports'), ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_signals')),
+    sa.UniqueConstraint('report_id', 'indicator', name='uq_technical_report_signals_report_id_indicator')
     )
-    op.create_index('ix_technical_report_signals_report_id_indicator', 'technical_report_signals', ['report_id', 'indicator'], unique=False)
     op.create_table('technical_report_verifications',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('report_id', sa.UUID(), nullable=False),
-    sa.Column('calc_passed', sa.Boolean(), nullable=True),
-    sa.Column('regime_passed', sa.Boolean(), nullable=True),
-    sa.Column('label_matched', sa.Boolean(), nullable=True),
-    sa.Column('outcome', sa.String(), nullable=True),
-    sa.Column('regen_count', sa.Integer(), nullable=True),
+    sa.Column('calc_passed', sa.Boolean(), nullable=False),
+    sa.Column('regime_passed', sa.Boolean(), nullable=False),
+    sa.Column('label_matched', sa.Boolean(), nullable=False),
+    sa.Column('outcome', sa.String(), nullable=False),
+    sa.Column('regen_count', sa.Integer(), nullable=False),
     sa.Column('failed_indicators', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('validation_summary', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_verifications_report_id_technical_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['technical_reports.id'], name=op.f('fk_technical_report_verifications_report_id_technical_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_technical_report_verifications')),
     sa.UniqueConstraint('report_id', name=op.f('uq_technical_report_verifications_report_id'))
     )
@@ -302,7 +302,7 @@ def upgrade() -> None:
     sa.Column('provider', sa.String(), nullable=True),
     sa.Column('model', sa.String(), nullable=True),
     sa.Column('prompt_meta', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_fundamental_report_interpretations_report_id_fundamental_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_fundamental_report_interpretations_report_id_fundamental_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_fundamental_report_interpretations')),
     sa.UniqueConstraint('report_id', name=op.f('uq_fundamental_report_interpretations_report_id'))
     )
@@ -317,7 +317,7 @@ def upgrade() -> None:
     sa.Column('evidence_count', sa.Integer(), nullable=True),
     sa.Column('guard_violations', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('flags', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_fundamental_report_verifications_report_id_fundamental_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_fundamental_report_verifications_report_id_fundamental_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_fundamental_report_verifications')),
     sa.UniqueConstraint('report_id', name=op.f('uq_fundamental_report_verifications_report_id'))
     )
@@ -331,7 +331,7 @@ def upgrade() -> None:
     sa.Column('source_hash', sa.String(), nullable=True),
     sa.Column('verified', sa.Boolean(), nullable=True),
     sa.Column('meta', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_filing_snippets_report_id_fundamental_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_filing_snippets_report_id_fundamental_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_report_filing_snippets'))
     )
     op.create_table('report_insights',
@@ -341,7 +341,7 @@ def upgrade() -> None:
     sa.Column('source_endpoint', sa.String(), nullable=True),
     sa.Column('rcept_no', sa.String(), nullable=True),
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_insights_report_id_fundamental_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_insights_report_id_fundamental_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_report_insights'))
     )
     op.create_table('report_ratios',
@@ -359,7 +359,7 @@ def upgrade() -> None:
     sa.Column('reason', sa.Text(), nullable=True),
     sa.Column('formula', sa.String(), nullable=True),
     sa.Column('basis', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_ratios_report_id_fundamental_reports')),
+    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_ratios_report_id_fundamental_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_report_ratios'))
     )
     op.create_table('report_evidence',
@@ -380,8 +380,8 @@ def upgrade() -> None:
     sa.Column('source_url', sa.String(), nullable=True),
     sa.Column('role', sa.String(), nullable=True),
     sa.Column('raw', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['ratio_id'], ['report_ratios.id'], name=op.f('fk_report_evidence_ratio_id_report_ratios')),
-    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_evidence_report_id_fundamental_reports')),
+    sa.ForeignKeyConstraint(['ratio_id'], ['report_ratios.id'], name=op.f('fk_report_evidence_ratio_id_report_ratios'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['report_id'], ['fundamental_reports.id'], name=op.f('fk_report_evidence_report_id_fundamental_reports'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_report_evidence'))
     )
     # ### end Alembic commands ###
@@ -396,7 +396,6 @@ def downgrade() -> None:
     op.drop_table('fundamental_report_verifications')
     op.drop_table('fundamental_report_interpretations')
     op.drop_table('technical_report_verifications')
-    op.drop_index('ix_technical_report_signals_report_id_indicator', table_name='technical_report_signals')
     op.drop_table('technical_report_signals')
     op.drop_index('ix_technical_report_risk_notes_report_id_severity', table_name='technical_report_risk_notes')
     op.drop_table('technical_report_risk_notes')
