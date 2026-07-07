@@ -13,7 +13,7 @@ endpoint)이 살아있는지 사람이 수동으로 확인한다. 단위 테스�
 
 ## 필요한 env (값이 아니라 존재만 확인)
 
-`config.py` 기준 이름만 사용한다. 값은 `.env`에서만 읽고 **어디에도 출력하지 않는다**.
+`config.py` 기준 이름만 쓰고 **값은 어디에도 출력하지 않는다**(존재 여부만).
 
 | 용도 | env |
 |---|---|
@@ -21,14 +21,29 @@ endpoint)이 살아있는지 사람이 수동으로 확인한다. 단위 테스�
 | OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL`(예: `gpt-5.4-mini`) |
 | Redis | `REDIS_URL` |
 
-하나라도 없으면 해당 preflight는 `missing`을 찍고 **safe-fail**한다(required일 때 중단).
+> **⚠️ env 출처(중요):** 스크립트는 **현재 프로세스의 환경변수 + `ai/.env`를 함께** 사용한다.
+> `load_dotenv(override=False)`이므로 **이미 export된 셸 환경변수가 `.env`보다 우선**한다. 즉 `.env`에
+> 없어도 셸에 export돼 있으면 preflight가 `present`로 잡고 **실 호출이 나간다**(비용). 실행 전
+> `env | grep -E 'KIS_|OPENAI_|REDIS_'`(값 확인 시 주의) 등으로 **셸에 남은 자격을 반드시 확인**한다.
+
+하나라도 없으면 해당 preflight는 `missing`을 찍고 **safe-fail**한다(required일 때 네트워크 호출 전 중단).
+
+## 모드 (중복 외부 호출 최소화)
+
+| 모드 | 실행 | 용도 |
+|---|---|---|
+| **기본(e2e)** | env → 입력검증 → Redis preflight → **agent e2e** → cache 상태 | 실제 파이프라인 점검. **OpenAI/KIS는 agent가 커버**하므로 단독 preflight를 생략(중복 호출 방지) |
+| `--via-testclient` | 위 + endpoint(TestClient, 실 wiring) | endpoint 배선까지 점검 |
+| `--preflight-only` | Redis/OpenAI/KIS **단독 preflight만**(agent/endpoint 실행 안 함) | 어느 의존성이 죽었는지 격리 점검 |
+
+> 기본 모드는 OpenAI/KIS를 **agent 실행에서 한 번만** 친다. 의존성만 따로 찍어보려면 `--preflight-only`.
 
 ## 실행
 
 ```bash
 cd ai
 
-# 기본: env preflight → redis/openai/kis preflight → agent e2e → (옵션)cache 상태
+# 기본 e2e: env → 입력검증 → Redis → agent(real KIS+OpenAI) → cache 상태
 uv run python src/agents/technical/scripts/smoke_technical_integration.py \
   --ticker 373220 --as-of 2026-07-06T00:00:00+09:00 --via-agent --check-cache
 
@@ -36,15 +51,23 @@ uv run python src/agents/technical/scripts/smoke_technical_integration.py \
 uv run python src/agents/technical/scripts/smoke_technical_integration.py \
   --ticker 373220 --as-of 2026-07-06T00:00:00+09:00 --via-agent --via-testclient --check-cache
 
+# 의존성 단독 점검(agent 실행 안 함 — 중복 호출 최소)
+uv run python src/agents/technical/scripts/smoke_technical_integration.py \
+  --ticker 373220 --preflight-only
+
 # 특정 ticker의 D/W/M 캐시만 비우고 live KIS 경로 확인(전체 flush 아님, --yes 필수)
 uv run python src/agents/technical/scripts/smoke_technical_integration.py \
   --ticker 373220 --as-of 2026-07-06T00:00:00+09:00 \
   --clear-cache-for-ticker --yes --via-agent --check-cache
 ```
 
-주요 옵션: `--ticker`(기본 373220)·`--as-of`(기본 현재 UTC, 미래 금지)·`--query`·`--via-agent`(기본 on)·
-`--via-testclient`(opt-in)·`--check-cache`·`--clear-cache-for-ticker`(+`--yes`)·
-`--require-{redis,openai,kis}`(기본 true, `--no-require-*`로 해제)·`--timeout-seconds`(기본 55).
+주요 옵션: `--ticker`(기본 373220)·`--as-of`(기본 현재 UTC, 미래 금지)·`--query`(기본 ticker에서 파생)·
+`--via-agent`(기본 on)·`--via-testclient`(opt-in)·`--preflight-only`·`--check-cache`·
+`--clear-cache-for-ticker`(+`--yes`, 없으면 네트워크 호출 전 실패)·`--require-{redis,openai,kis}`(기본 true,
+`--no-require-*`로 해제)·`--timeout-seconds`(기본 55).
+
+**입력 검증(fail-fast)**: allowlist(BATTERY_TICKERS) 밖 ticker·미래 as_of는 **어떤 네트워크/비용 호출
+전에** 명확한 메시지로 중단한다.
 
 ## ⚠️ 네트워크/비용 주의
 
@@ -72,6 +95,9 @@ response·interpretation 전문·raw candles. 대신 `present`/`missing`·개수
 - `kis`: `daily_candles > 0`, 최신 date 출력.
 - `agent`: `success=true`(request_id/ticker 일치·trace_id·data_status·source·final_regime·
   interpretation·verification 존재). `charts` 개수·`signal_score`·`trace_events` 출력.
+  - **`data_collect_source`**: `kis`=이번 run이 실제 KIS 조회 / `cache`=캐시 hit(KIS 미호출) /
+    `cache_stale`=stale 폴백. `source` 라벨(항상 `KIS`)로는 구분이 안 되므로 이 값으로 판정한다.
+    (cache hit을 보려면 1회 채운 뒤 fresh TTL 15분 안에 재실행 → `data_collect_source=cache` 확인.)
 - (옵션) `endpoint`: `status=200`, `schema_ok=true`.
 - 마지막 줄 `=== RESULT: PASS ===`.
 

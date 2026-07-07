@@ -4,8 +4,11 @@
 네트워크 0이며, 이 스크립트는 **수동 실행 시에만** KIS/Redis/OpenAI를 호출한다.
 
 ⚠️ 비용/네트워크: 실제 KIS 시세·OpenAI(토큰 비용)·Redis를 호출한다.
+⚠️ env 출처: 현재 프로세스 환경변수 + `ai/.env`를 함께 쓰며 `load_dotenv(override=False)`라
+**이미 export된 셸 환경변수가 `.env`보다 우선**한다(셸에 남은 자격이 실 호출을 유발할 수 있음).
 secret-safe: API key·secret·token·Redis URL·raw prompt·raw response·interpretation 전문·raw candles를
 **절대 출력하지 않는다**(존재 여부·개수·길이·enum·usage·duration만).
+안전: allowlist 밖 ticker·미래 as_of·`--clear-cache-for-ticker` without `--yes`는 **네트워크 호출 전** 중단.
 
 실행:
   cd ai
@@ -42,6 +45,7 @@ if _ENV_FILE.exists():
     load_dotenv(_ENV_FILE, override=False)
 
 from src.agents.technical.config import (  # noqa: E402
+    BATTERY_TICKERS,
     CACHE_KEY_BY_PERIOD,
     KIS_PERIOD_DAILY,
     KIS_PERIOD_MONTHLY,
@@ -67,7 +71,11 @@ _KIS_ENV = ("KIS_API_KEY", "KIS_API_SECRET", "KIS_BASE_URL")
 _OPENAI_ENV = (OPENAI_API_KEY_ENV, OPENAI_MODEL_ENV)  # OPENAI_API_KEY / OPENAI_MODEL
 _REDIS_ENV = ("REDIS_URL",)
 _DWM = (KIS_PERIOD_DAILY, KIS_PERIOD_WEEKLY, KIS_PERIOD_MONTHLY)
-_DEFAULT_QUERY = "373220 최근 기술적 흐름과 리스크 관찰점을 분석해줘"
+
+
+def _default_query(ticker: str) -> str:
+    """기본 query는 payload ticker에서 파생한다(하드코딩 종목과 불일치 방지)."""
+    return f"{ticker} 최근 기술적 흐름과 주요 리스크 관찰점을 분석해줘"
 
 
 def _present(name: str) -> bool:
@@ -162,10 +170,10 @@ def kis_preflight(ticker: str, as_of_dt: datetime) -> bool:
     """기존 KIS fetcher로 D/W/M 조회(새 endpoint 추측 없음). daily 개수·최신 date만 출력."""
     print("=== kis preflight ===")
     try:
-        end_date = normalize_end_date(as_of_dt)
+        end_date = normalize_end_date(as_of_dt)  # 미래 as_of 등은 ValueError (상위에서 이미 fail-fast)
         ohlcv = fetch_multi_timeframe_ohlcv(ticker, end_date=end_date)
-    except KisError as exc:
-        print(f"[kis] fetch failed: {type(exc).__name__}")
+    except (KisError, ValueError) as exc:
+        print(f"[kis] fetch failed: {type(exc).__name__}")  # traceback 대신 type 이름만
         return False
     daily = list(ohlcv.get(KIS_PERIOD_DAILY, []))
     latest = daily[-1].date if daily else None
@@ -175,13 +183,11 @@ def kis_preflight(ticker: str, as_of_dt: datetime) -> bool:
 
 
 # ── cache clear (해당 ticker D/W/M 키만) ──────────────────────────────────────
-def clear_cache_for_ticker(ticker: str, confirmed: bool) -> bool:
+def clear_cache_for_ticker(ticker: str) -> bool:
+    """해당 ticker의 D/W/M 키 3개만 삭제(전체 flush 아님). 호출 전 main에서 --yes를 확인한다."""
     print("=== clear cache for ticker (D/W/M 키만 — 전체 flush 아님) ===")
     keys = _cache_keys(ticker)
     print(f"[cache] delete 대상 keys={keys}")  # 키 이름만(secret 아님)
-    if not confirmed:
-        print("[cache] --yes 없이는 삭제하지 않습니다. (안전장치)")
-        return False
     r = _raw_redis()
     if r is None:
         print("[cache] Redis 미가용 — 삭제 생략")
@@ -249,10 +255,16 @@ def agent_e2e(args, as_of_dt: datetime) -> bool:
         "interpretation_present": bool(out.interpretation and out.interpretation.text),
         "verification_present": out.verification is not None,
     }
+    # data_collect 노드 trace로 이번 run이 실제로 KIS를 쳤는지/캐시를 썼는지 구분(source 라벨만으론 불가).
+    dc = next((e for e in sink.events
+               if e.get("node") == "data_collect" and e["event_type"] == "node_end"), None)
+    data_source = dc["output_summary"].get("source") if dc else None  # cache / kis / cache_stale
+
     signal_score = out.signal.signal_score if out.signal else None
     print(f"[agent] success={all(checks.values())} request_id={out.request_id} ticker={out.ticker}")
     print(f"[agent] data_status={out.data_status.value} source={out.source} "
           f"final_regime={out.regime.final_regime.value}")
+    print(f"[agent] data_collect_source={data_source}  # cache=KIS 미호출(cache hit) / kis=live 조회")
     print(f"[agent] signal_score={signal_score} charts={len(out.charts)} "
           f"interpretation_chars={len(out.interpretation.text)} trace_id={out.trace_id}")
     print(f"[agent] verification_outcome={out.verification.outcome.value} trace_events={len(sink.events)}")
@@ -297,11 +309,13 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Technical Agent real integration smoke (수동 전용)")
     p.add_argument("--ticker", default="373220", help="allowlist 내 종목(기본 373220)")
     p.add_argument("--as-of", default=None, help="ISO8601 분석 기준 시각(기본: 현재 UTC). 미래 금지")
-    p.add_argument("--query", default=_DEFAULT_QUERY)
+    p.add_argument("--query", default=None, help="기본: '{ticker} 최근 기술적 흐름...' 자동 생성")
     p.add_argument("--via-agent", action="store_true", default=True, help="run_technical_agent e2e(기본 on)")
     p.add_argument("--no-via-agent", dest="via_agent", action="store_false")
     p.add_argument("--via-testclient", action="store_true", help="endpoint TestClient 경로(opt-in)")
     p.add_argument("--check-cache", action="store_true", help="Redis D/W/M status/TTL 확인")
+    p.add_argument("--preflight-only", action="store_true",
+                   help="Redis/OpenAI/KIS 단독 preflight만(agent/endpoint 실행 안 함)")
     p.add_argument("--clear-cache-for-ticker", action="store_true", help="해당 ticker D/W/M 키만 삭제(--yes 필요)")
     p.add_argument("--yes", action="store_true", help="파괴적 작업(cache 삭제) 확인")
     p.add_argument("--require-redis", action="store_true", default=True)
@@ -313,7 +327,10 @@ def main() -> int:
     p.add_argument("--timeout-seconds", type=float, default=TECHNICAL_AGENT_TIMEOUT_SECONDS)
     args = p.parse_args()
 
-    # as_of 파싱(기본: 현재 UTC — validator가 미래를 거절하므로 현재 시각을 쓴다).
+    # 기본 query는 payload ticker에서 파생(--ticker와 질문 종목 불일치 방지).
+    args.query = args.query or _default_query(args.ticker)
+
+    # as_of 파싱(기본: 현재 UTC). 파싱 실패는 traceback 대신 명확한 메시지로.
     try:
         as_of_dt = (datetime.fromisoformat(args.as_of) if args.as_of
                     else datetime.now(timezone.utc))
@@ -322,37 +339,48 @@ def main() -> int:
         return 2
 
     print("⚠️  실제 KIS/OpenAI/Redis를 호출합니다(네트워크·토큰 비용 발생).")
-    print(f"[smoke] ticker={args.ticker} as_of={as_of_dt.isoformat()} timeout={args.timeout_seconds}s")
+    print(f"[smoke] ticker={args.ticker} as_of={as_of_dt.isoformat()} timeout={args.timeout_seconds}s "
+          f"mode={'preflight-only' if args.preflight_only else 'e2e'}")
 
-    # 1) env preflight — required 누락이면 즉시 중단(네트워크 호출 전).
+    # ── 네트워크/비용 호출 전 fail-fast (env → 입력검증 → clear-cache 게이트) ──
+    # 1) env preflight — required 누락이면 즉시 중단.
     if not env_preflight(args):
         print("[smoke] 필수 env 누락으로 중단합니다.")
         return 1
+    # 2) 입력 검증 — 잘못된 ticker/미래 as_of는 OpenAI/KIS 호출 전에 거절(비용·traceback 방지).
+    if args.ticker not in BATTERY_TICKERS:
+        print(f"[smoke] ticker {args.ticker!r} 은 allowlist(BATTERY_TICKERS) 밖입니다 — 중단(네트워크 미호출).")
+        return 1
+    _now = datetime.now(as_of_dt.tzinfo) if as_of_dt.tzinfo else datetime.now()
+    if as_of_dt > _now:
+        print("[smoke] --as-of 가 미래입니다 — 중단(네트워크 미호출).")
+        return 1
+    # 3) clear-cache 게이트 — --yes 없으면 파괴적 작업을 하지 않고 명확히 실패.
+    if args.clear_cache_for_ticker and not args.yes:
+        print("[smoke] --clear-cache-for-ticker 는 삭제 작업입니다. 삭제하려면 --yes 를 함께 지정하세요. 중단.")
+        return 1
+    if args.clear_cache_for_ticker:
+        clear_cache_for_ticker(args.ticker)  # 위에서 --yes 확인됨
 
     ok = True
-    # 2) cache 삭제(옵션·파괴적) — 다른 단계 전에.
-    if args.clear_cache_for_ticker:
-        clear_cache_for_ticker(args.ticker, confirmed=args.yes)
-
-    # 3) redis / openai / kis preflight(각 require에 따라).
-    if args.require_redis or args.check_cache:
+    # Redis preflight(비용 없음) — 항상 유용.
+    if args.require_redis or args.check_cache or args.preflight_only:
         ok = redis_preflight(args.ticker) and ok
-    if args.require_openai:
-        ok = openai_preflight(min(30.0, args.timeout_seconds)) and ok
-    if args.require_kis:
-        ok = kis_preflight(args.ticker, as_of_dt) and ok
 
-    # 4) agent e2e(가장 중요).
-    if args.via_agent:
-        ok = agent_e2e(args, as_of_dt) and ok
-
-    # 5) cache behavior(agent 실행 후 상태).
-    if args.check_cache:
-        cache_behavior(args.ticker, as_of_dt)
-
-    # 6) endpoint(opt-in).
-    if args.via_testclient:
-        ok = endpoint_smoke(args, as_of_dt) and ok
+    if args.preflight_only:
+        # 의존성 단독 점검 — agent/endpoint 실행 안 함(중복 호출·비용 최소화).
+        if args.require_openai:
+            ok = openai_preflight(min(30.0, args.timeout_seconds)) and ok
+        if args.require_kis:
+            ok = kis_preflight(args.ticker, as_of_dt) and ok
+    else:
+        # 실제 파이프라인 점검 — OpenAI/KIS는 agent e2e가 커버하므로 단독 preflight를 생략(중복 호출 방지).
+        if args.via_agent:
+            ok = agent_e2e(args, as_of_dt) and ok
+        if args.check_cache:
+            cache_behavior(args.ticker, as_of_dt)
+        if args.via_testclient:
+            ok = endpoint_smoke(args, as_of_dt) and ok
 
     print(f"=== RESULT: {'PASS' if ok else 'FAIL'} ===")
     return 0 if ok else 1
