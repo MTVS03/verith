@@ -1,0 +1,216 @@
+"""수급 신호 계산 — 순수 함수 계층.
+
+원리: "숫자는 코드가 결정론적으로 정한다." (CLAUDE.md 핵심 원칙)
+  이 파일에는 pykrx·LLM·네트워크 같은 외부 의존이 없다. 입력은 pandas DataFrame,
+  출력은 계산된 신호 dict뿐. 외부 의존이 없어야 테스트가 빠르고, 결과가 항상
+  같은 입력 → 같은 출력(결정론)이 된다. 검증 게이트가 믿을 수 있는 "팩트"는
+  바로 이 계층에서 나온다.
+
+기대하는 입력 DataFrame 스키마
+  - index: 날짜. **오름차순**(과거 → 최신). 즉 가장 최근 날짜가 마지막 행.
+  - 컬럼:
+      개인   : 개인 일별 순매수 (원)      — 양수=순매수, 음수=순매도
+      외국인 : 외국인 일별 순매수 (원)
+      기관   : 기관 일별 순매수 (원)
+      거래대금: 그 날 종목의 **총** 거래대금 (원)  — 3주체 공용(종목 규모 지표)
+  '거래대금'을 주체별이 아니라 종목 총액으로 두는 이유: 순매수 강도는
+  "종목 규모 대비 얼마나 샀나"를 보려는 것이므로 분모가 종목 전체 거래대금이어야
+  주체 간·종목 간 비교가 가능해진다.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from .. import config
+
+# ── DataFrame 컬럼 이름 (스키마 상수) ────────────────────────
+# 매직 스트링을 코드에 흩뿌리지 않기 위해 한 곳에 모은다.
+COL_INDI: str = "개인"
+COL_FORE: str = "외국인"
+COL_INST: str = "기관"
+COL_VALUE: str = "거래대금"
+COL_OWNERSHIP: str = "외국인한도소진율"  # 일별 한도소진율(%) Series 이름 (M2 심화 블록)
+# 식별자 'ownership'의 유래: KIS hts_frgn_ehrt(한도소진율). 한도 100% 종목은
+# 보유율과 같지만 한도 제한 종목(통신·항공)은 다르다 — 한국어 라벨은 소진율로 통일.
+
+# 순매수 주체 3인. 반복 계산에서 이 리스트를 돌린다.
+SUBJECTS: tuple[str, ...] = (COL_INDI, COL_FORE, COL_INST)
+
+# 기관계의 세부 7주체 — KIS 공식 한글명(공식 GitHub 필드 사전 기준).
+# 실물 확인: 세부 7개 합 ≈ 기관계(orgn) 항등식 성립(±1백만원 반올림 오차).
+INST_DETAIL: tuple[str, ...] = ("증권", "투자신탁", "사모펀드", "은행", "보험", "종금", "기금")
+
+
+def consecutive_net_buy_days(net: pd.Series) -> int:
+    """가장 최근 날짜부터 과거로 거꾸로 세어, 순매수(net > 0)가 끊기지 않고
+    이어진 일수를 반환한다. 순매수가 아닌 날(net <= 0)을 만나면 즉시 멈춘다.
+
+    원리: "지금 진행 중인 흐름"을 보려는 것이므로 최신부터 거꾸로 센다.
+      과거의 연속 매수는 이미 끝난 이야기고, 오늘로 이어지는 연속만이
+      "매집이 진행 중"이라는 신호다. 그래서 reversed 순회 + 첫 비매수에서 break.
+    """
+    days = 0
+    # index 오름차순 → 뒤에서부터(reversed)가 최신 → 과거 방향.
+    for value in reversed(net.tolist()):
+        if value > 0:
+            days += 1
+        else:
+            break
+    return days
+
+
+def calc_consecutive(df: pd.DataFrame) -> dict[str, dict[str, object]]:
+    """3주체 각각의 연속 순매수 일수와 신호 플래그.
+
+    signal = (연속 일수 >= config.CONSECUTIVE_THRESHOLD).
+    3일 미만은 노이즈로 간주(하루 반짝 매수와 의도적 매집을 가르는 문턱).
+    """
+    result: dict[str, dict[str, object]] = {}
+    for subject in SUBJECTS:
+        days = consecutive_net_buy_days(df[subject])
+        result[subject] = {
+            "days": days,
+            "signal": days >= config.CONSECUTIVE_THRESHOLD,
+        }
+    return result
+
+
+def calc_strength(df: pd.DataFrame) -> dict[str, dict[str, object]]:
+    """3주체 각각의 순매수 강도와 강한 매수 플래그.
+
+    강도 = 최근 RECENT_DAYS일 순매수 합 / 최근 RECENT_DAYS일 평균 거래대금.
+    strong = (강도 >= config.STRENGTH_THRESHOLD).
+
+    원리: 절대 금액은 큰 종목일수록 무조건 커 보인다. 종목 총 거래대금으로
+      나눠 비율로 봐야 규모가 다른 종목·주체를 같은 잣대로 비교할 수 있다.
+    """
+    recent = df.tail(config.RECENT_DAYS)
+    avg_value = recent[COL_VALUE].mean()
+
+    result: dict[str, dict[str, object]] = {}
+    for subject in SUBJECTS:
+        net_sum = recent[subject].sum()
+        # 분모 0/NaN 방어: 거래대금이 0이면 비율이 정의되지 않으므로 0.0으로 후퇴.
+        if not avg_value or pd.isna(avg_value):
+            ratio = 0.0
+        else:
+            ratio = float(net_sum) / float(avg_value)
+        result[subject] = {
+            "ratio": ratio,
+            "strong": ratio >= config.STRENGTH_THRESHOLD,
+        }
+    return result
+
+
+def calc_alignment(df: pd.DataFrame) -> str:
+    """외국인·기관 두 큰손의 최근 RECENT_DAYS일 구도.
+
+    반환: "동반매수" | "동반매도" | "엇갈림"
+      - 둘 다 5일 순매수 합 > 0  → 동반매수
+      - 둘 다 5일 순매수 합 < 0  → 동반매도
+      - 그 외(부호 불일치·0 포함) → 엇갈림
+
+    원리: 두 큰손이 같은 방향이면 신호가 강해지고, 엇갈리면 해석이 조심스러워진다.
+      이 구도가 뒤 해석 단계의 톤을 좌우하므로 여기서 결정론적으로 확정해 둔다.
+      5일 '합'의 부호를 쓰는 이유: 강도 계산과 같은 창(RECENT_DAYS)·같은 집계(합)를
+      써야 신호들 사이에 기준이 어긋나지 않는다.
+    """
+    recent = df.tail(config.RECENT_DAYS)
+    fore_sum = recent[COL_FORE].sum()
+    inst_sum = recent[COL_INST].sum()
+
+    if fore_sum > 0 and inst_sum > 0:
+        return "동반매수"
+    if fore_sum < 0 and inst_sum < 0:
+        return "동반매도"
+    return "엇갈림"
+
+
+def calc_persistence(df: pd.DataFrame) -> dict[str, dict[str, object]]:
+    """3주체 각각의 5일 vs 20일 순매수 합과 방향 일관 여부.
+
+    sum_5 / sum_20 : 최근 RECENT_DAYS / TREND_DAYS 일 순매수 합 (단위는 df 그대로).
+    consistent    : 두 합의 부호가 같고 둘 다 0이 아님 — "최근 흐름(5일)이
+                    20일 방향과 일관"의 최소 정의. 하루치 반짝과 꾸준한
+                    매집·매도를 가르는 축. 창 상수는 강도·daily 와 같은
+                    config 를 쓰므로 어긋날 수 없다.
+    """
+    recent = df.tail(config.RECENT_DAYS)
+    trend = df.tail(config.TREND_DAYS)
+    result: dict[str, dict[str, object]] = {}
+    for subject in SUBJECTS:
+        s5 = float(recent[subject].sum())
+        s20 = float(trend[subject].sum())
+        consistent = (s5 > 0 and s20 > 0) or (s5 < 0 and s20 < 0)
+        result[subject] = {"sum_5": s5, "sum_20": s20, "consistent": consistent}
+    return result
+
+
+def calc_inst_detail(df: pd.DataFrame) -> dict[str, float] | None:
+    """기관 세부 7주체의 최근 RECENT_DAYS일 순매수 합 (단위는 df 그대로).
+
+    df 에 세부 컬럼이 없으면(과거 스키마·간이 fixture) None — 주장하지 않으면
+    표시도 없다(placeholder 후퇴). 있으면 7주체 전부 합산해 담는다: 표시는
+    5개지만 검증(게이트2 항등식)은 7개 전체가 필요하다.
+    """
+    if not all(name in df.columns for name in INST_DETAIL):
+        return None
+    recent = df.tail(config.RECENT_DAYS)
+    return {name: float(recent[name].sum()) for name in INST_DETAIL}
+
+
+def extract_daily(df: pd.DataFrame) -> list[dict]:
+    """최근 TREND_DAYS일의 일별 순매수 팩트 목록 (오름차순, 최근이 마지막).
+
+    원리: 계산이 아니라 "있는 값의 직렬화".
+      df 의 행을 dict 목록으로 옮겨 담을 뿐, 어떤 값도 만들거나 바꾸지 않는다
+      (단위도 df 그대로 백만원). 일별 차트가 쓸 팩트를 signals dict(검증된
+      팩트 컨테이너)에 실어 보내기 위한 것 — 이 배열도 게이트2 규칙 4 가
+      원본 df 와 대조한다. 거래대금은 차트가 안 쓰므로 싣지 않는다(컨테이너
+      최소주의: 표시할 팩트만).
+    """
+    recent = df.tail(config.TREND_DAYS)
+    return [
+        {
+            "date": idx.date().isoformat(),
+            **{subject: float(row[subject]) for subject in SUBJECTS},
+        }
+        for idx, row in recent.iterrows()
+    ]
+
+
+def extract_ownership(ownership: pd.Series | None) -> list[dict] | None:
+    """최근 RECENT_DAYS일의 외국인 한도소진율(%) 팩트 목록 (오름차순, 최근이 마지막).
+
+    extract_daily 와 같은 원리 — 계산이 아니라 "있는 값의 직렬화".
+    입력은 kis_client.fetch_foreign_ownership 의 Series(오름차순·%).
+    None/빈 Series 면 None — 주장하지 않으면 표시도 없다(placeholder 후퇴).
+    이 배열도 게이트2 규칙 7 이 원본 Series·매매동향 df 와 대조한다.
+    """
+    if ownership is None or ownership.empty:
+        return None
+    recent = ownership.tail(config.RECENT_DAYS)
+    return [
+        {"date": idx.date().isoformat(), "ratio": float(value)}
+        for idx, value in recent.items()
+    ]
+
+
+def compute_signals(
+    df: pd.DataFrame,
+    ownership: pd.Series | None = None,   # M2: 한도소진율은 별도 API라 df 밖에서 온다
+) -> dict[str, object]:
+    """세 계산을 묶어 하나의 신호 dict로 반환한다.
+
+    이 dict가 다음 계층(검증 게이트 → 해석)으로 넘어가는 "검증된 팩트"의 원천이다.
+    """
+    return {
+        "consecutive": calc_consecutive(df),
+        "strength": calc_strength(df),
+        "alignment": calc_alignment(df),
+        "daily": extract_daily(df),          # M2: 일별 순매수 팩트(차트용)
+        "persistence": calc_persistence(df),  # M2: 지속성 5일 vs 20일
+        "inst_detail": calc_inst_detail(df),  # M2: 기관 세부 7주체 5일 합 (없으면 None)
+        "ownership": extract_ownership(ownership),  # M2: 한도소진율 5일 추이 (없으면 None)
+    }
