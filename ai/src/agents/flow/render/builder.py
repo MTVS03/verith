@@ -17,9 +17,11 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup, escape
 
 from .. import config
 from ..core.signals import COL_FORE, COL_INST, INST_DETAIL, SUBJECTS
@@ -254,9 +256,16 @@ def _price_table_view(signals: dict) -> list[dict] | None:
     price = signals.get("price_daily")
     if not price:
         return None
+    def _qty(v: float | None) -> dict:
+        """순매매량 셀 — 값이 없으면(출처 결손) '—' 로 정직하게 비운다."""
+        if v is None:
+            return {"txt": "—", "cls": "mut"}
+        return {"txt": f"{v:+,.0f}",
+                "cls": "buy" if v > 0 else "sell" if v < 0 else "mut"}
+
     rows = []
     for row in reversed(price):                     # 최신이 위 — 표시 순서만 뒤집음
-        chg, rate, fq = row["change"], row["change_rate"], row["frgn_qty"]
+        chg, rate = row["change"], row["change_rate"]
         chg_cls = "buy" if chg > 0 else "sell" if chg < 0 else "mut"
         rows.append({
             "label": row["date"][5:].replace("-", "/"),   # "07/04" (다른 블록과 동일)
@@ -265,10 +274,44 @@ def _price_table_view(signals: dict) -> list[dict] | None:
             "chg_cls": chg_cls,
             "rate": f"{rate:+.2f}%",
             "vol": f"{row['volume']:,.0f}",
-            "fq": f"{fq:+,.0f}",
-            "fq_cls": "buy" if fq > 0 else "sell" if fq < 0 else "mut",
+            "inst": _qty(row.get("inst_qty")),      # 기관 먼저 — 네이버 표 순서
+            "fore": _qty(row.get("frgn_qty")),
         })
     return rows
+
+
+# 해석 강조 마커(**…**) — 프롬프트가 1~2곳만 허용한 볼드 표시.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _interpretation_html(text: str | None) -> Markup | None:
+    """해석의 **강조** 마커 → <b> (표시용 마크업 변환만, 내용 불변).
+
+    본문 전체를 escape 한 뒤 우리 마커만 태그로 바꾼다 — LLM 이 HTML 을
+    흘려도 문자 그대로 보이고, 허용되는 마크업은 볼드 하나뿐이다.
+    """
+    if text is None:
+        return None
+    return Markup(_BOLD_RE.sub(r"<b>\1</b>", str(escape(text))))
+
+
+def _header_price(signals: dict) -> dict | None:
+    """헤더용 현재가 요약 — price_daily 마지막 행(기준일 종가)의 재표현.
+
+    시세 표와 같은 검증분(게이트2 규칙8)에서 최신 하루만 크게 보여준다.
+    값 변형 없음 — 포맷·부호 색만. 없으면 None → 헤더는 종전대로.
+    """
+    price = signals.get("price_daily")
+    if not price:
+        return None
+    last = price[-1]
+    chg, rate = last["change"], last["change_rate"]
+    return {
+        "close": f"{last['close']:,.0f}",
+        "chg": ("▲ " if chg > 0 else "▼ " if chg < 0 else "― ") + f"{abs(chg):,.0f}",
+        "rate": f"({rate:+.2f}%)",
+        "cls": "buy" if chg > 0 else "sell" if chg < 0 else "mut",
+    }
 
 
 def _headline(rows: list[dict]) -> str:
@@ -310,12 +353,14 @@ def build_report(
         "gauge": _gauge(signals),
         "headline": _headline(rows),
         "interpretation": interpretation,   # None이면 템플릿이 placeholder로 후퇴
+        "interpretation_html": _interpretation_html(interpretation),  # **…** → <b>
         "daily": _daily_view(signals),      # None이면 템플릿이 placeholder로 후퇴
         "persistence": _persistence_view(signals),  # None이면 placeholder로 후퇴
         "inst_detail": _inst_detail_view(signals),  # None이면 placeholder로 후퇴
         "ownership": _ownership_view(signals),      # None이면 placeholder로 후퇴
         "price_table": _price_table_view(signals),  # None이면 placeholder로 후퇴
         "price_days": config.PRICE_TABLE_DAYS,
+        "header_price": _header_price(signals),     # None이면 헤더는 종전대로
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",
