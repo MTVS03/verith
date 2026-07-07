@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+{#
+  veriθ 뉴스·심리 집중 리포트 — 데이터 주입 템플릿(TASK 09).
+  ReportModel + Answer 를 서버측(Jinja2)에서 렌더한다. autoescape 로 XSS·깨짐 방지.
+  기존 목업(veriθ News Report)의 레이아웃·톤·색(brand/ink/pos·neg)을 유지하되, 데이터가 들어가는
+  자리(종목·기간·게이지·요약·TOP 이슈·근거 칩)만 변수로 바꿨다. 없는 수집메타(원문/중복제거 건수)·
+  반응도는 지어내지 않는다(환각 금지, 절대규칙 5). '데이터 제한' 배지는 data_limited 와 연동한다.
+#}
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>veriθ — 뉴스/심리 집중 리포트 · {{ subject }}</title>
+<style>
+  :root{
+    --brand-50:#eef3ff; --brand-500:#3b66f5; --brand-600:#2451e6; --brand-700:#1c3fc9;
+    --ink-50:#f6f7f9; --ink-100:#eceef2; --ink-200:#dde1e8; --ink-300:#c3c9d4;
+    --ink-400:#959cac; --ink-500:#69707f; --ink-700:#363c48; --ink-800:#23272f; --ink-900:#13151b;
+    --pos:#0fa372; --neg:#ef3e6a; --neu:#aeb4c0;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  body{ font-family:'Pretendard',system-ui,-apple-system,sans-serif; color:var(--ink-900);
+        background:radial-gradient(1200px 600px at 50% -10%, #fff 0%, #eef0f4 55%, #e7e9ef 100%);
+        min-height:100vh; padding:48px 16px; display:flex; justify-content:center; }
+  .wrap{ width:100%; max-width:960px; }
+  .num{ font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  h1,h2,h3{ letter-spacing:-.02em; }
+  .lbl{ font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-400); }
+  .breadcrumb{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-500); margin:0 4px 20px; }
+  .breadcrumb b{ color:var(--ink-800); }
+  article{ background:#fff; border:1px solid var(--ink-100); border-radius:22px;
+           box-shadow:0 20px 60px -12px rgba(19,21,27,.18); overflow:hidden; }
+  header.hero{ padding:36px 36px 32px; }
+  .badge{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600;
+          color:var(--brand-700); background:var(--brand-50); border-radius:999px; padding:4px 10px; }
+  h1.title{ font-size:30px; font-weight:700; color:var(--ink-900); margin-top:12px; line-height:1.2; }
+  h1.title .sep{ color:var(--ink-300); font-weight:500; }
+  .meta{ font-size:13px; color:var(--ink-500); margin-top:8px; }
+  .meta b{ color:var(--ink-700); }
+  section{ padding:28px 36px; border-top:1px solid var(--ink-100); }
+  .overview{ display:grid; grid-template-columns:300px 1fr; gap:32px; align-items:center; border-top:none; padding-top:0; }
+  @media (max-width:720px){ .overview{ grid-template-columns:1fr; } }
+  .gauge-score{ font-size:40px; font-weight:700; line-height:1; }
+  .gauge-bar{ height:12px; border-radius:999px; overflow:hidden; display:flex; background:var(--ink-100); margin:14px 0 8px; }
+  .gauge-bar > span{ display:block; height:100%; }
+  .legend{ display:flex; gap:16px; font-size:12px; font-weight:500; margin-top:6px; }
+  .legend .dot{ display:inline-block; width:10px; height:10px; border-radius:999px; vertical-align:middle; margin-right:5px; }
+  .stat{ border:1px solid var(--ink-100); border-radius:16px; padding:22px; }
+  .stat .big{ font-size:34px; font-weight:700; color:var(--ink-900); line-height:1; margin-top:10px; }
+  .flow{ background:rgba(246,247,249,.6); }
+  .flow .card{ border:1px solid var(--ink-100); background:#fff; border-radius:16px; padding:20px; }
+  .flow p.body{ font-size:14.5px; color:var(--ink-700); line-height:1.8; white-space:pre-line; }
+  .chips{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid var(--ink-50); }
+  .chips .chip{ font-size:12px; font-weight:500; color:var(--ink-700); background:var(--ink-50);
+               border:1px solid var(--ink-100); border-radius:999px; padding:4px 10px; text-decoration:none; }
+  .issue{ border:1px solid var(--ink-100); background:#fff; border-radius:16px; padding:16px; margin-bottom:10px; }
+  .issue .row{ display:flex; align-items:flex-start; gap:16px; }
+  .issue .rank{ width:32px; text-align:center; font-size:19px; font-weight:700; color:var(--ink-300); }
+  .issue .rank.top{ color:var(--brand-600); }
+  .issue h3{ font-size:16px; font-weight:600; color:var(--ink-900); display:inline; }
+  .pill{ display:inline-flex; align-items:center; font-size:11px; font-weight:600; border-radius:999px; padding:2px 8px; margin-left:8px; }
+  .dist{ display:flex; align-items:center; gap:12px; margin-top:12px; }
+  .counts{ font-size:11.5px; font-weight:500; }
+  .counts .p{ color:var(--pos); } .counts .u{ color:var(--ink-400); } .counts .n{ color:var(--neg); }
+  .lead{ font-size:12.5px; color:var(--ink-400); margin-top:10px; }
+  .art-list{ list-style:none; margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+  .art-list li{ font-size:12.5px; color:var(--ink-500); }
+  .art-list a{ color:var(--ink-700); text-decoration:none; }
+  .limit{ margin:18px 36px; padding:14px 16px; border-radius:16px; background:#fff7ed;
+          border:1px solid #fed7aa; color:#9a3412; font-size:13px; display:flex; gap:10px; align-items:flex-start; }
+  footer{ padding:20px 36px; border-top:1px solid var(--ink-100); font-size:12.5px; color:var(--ink-500); }
+  .foot-note{ text-align:center; font-size:11.5px; color:var(--ink-400); margin-top:20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="breadcrumb"><b>veriθ</b> · 집중 리포트 · 뉴스 · 심리</div>
+
+  <article>
+    <!-- ===== HERO ===== -->
+    <header class="hero">
+      <span class="badge">News · Sentiment Worker</span>
+      <h1 class="title">{{ subject }} <span class="sep">·</span> 최근 뉴스 여론</h1>
+      <p class="meta">
+        {% if period_days %}최근 {{ period_days }}일 집계{% endif %}
+        · {{ generated_at }} 업데이트
+        {% if analyzed_count %} · 분석 기사 <b class="num">{{ analyzed_count }}</b>건{% endif %}
+      </p>
+    </header>
+
+    {% if data_limited %}
+    <div class="limit">
+      <span>⚠️</span>
+      <div><b>데이터 제한</b> — {{ note or "근거가 부족한 부분은 추정으로 채우지 않습니다." }}
+        추정으로 채우지 않습니다.</div>
+    </div>
+    {% endif %}
+
+    <!-- ===== SENTIMENT OVERVIEW ===== -->
+    <section class="overview">
+      <div>
+        <div class="lbl">전체 감성</div>
+        <div class="gauge-score num" style="color:{% if overall.score > 0 %}var(--pos){% elif overall.score < 0 %}var(--neg){% else %}var(--ink-500){% endif %}">
+          {{ "%+.2f"|format(overall.score) }}
+        </div>
+        <div class="gauge-bar">
+          <span style="width:{{ overall.pos_pct }}%;background:var(--pos)"></span>
+          <span style="width:{{ overall.neu_pct }}%;background:var(--ink-200)"></span>
+          <span style="width:{{ overall.neg_pct }}%;background:var(--neg)"></span>
+        </div>
+        <div class="legend num">
+          <span><span class="dot" style="background:var(--pos)"></span>긍정 {{ overall.pos_pct }}%</span>
+          <span><span class="dot" style="background:var(--neu)"></span>중립 {{ overall.neu_pct }}%</span>
+          <span><span class="dot" style="background:var(--neg)"></span>부정 {{ overall.neg_pct }}%</span>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="lbl">분석 기사 수</div>
+        <div class="big num">{{ analyzed_count }}<span style="font-size:15px;color:var(--ink-400)"> 건</span></div>
+        <div class="lead" style="margin-top:8px">중복 제거 후 감성 집계 대상</div>
+      </div>
+    </section>
+
+    <!-- ===== NEWS FLOW SUMMARY ===== -->
+    <section class="flow">
+      <h2 style="font-size:16px;color:var(--ink-900);margin-bottom:16px">뉴스 흐름 요약</h2>
+      <div class="card">
+        <p class="body">{{ answer_text }}</p>
+        {% if chips %}
+        <div class="chips">
+          <span style="font-size:11px;font-weight:600;color:var(--ink-400)">근거 이슈</span>
+          {% for chip in chips %}
+          <a class="chip" href="#issue-{{ chip.rank }}">#{{ chip.rank }} {{ chip.title }}</a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- ===== TOP ISSUES ===== -->
+    <section>
+      <h2 style="font-size:16px;color:var(--ink-900)">주요 이슈 TOP {{ events|length }}</h2>
+      <p class="lead" style="margin:6px 0 18px">중요도(importance) 순 · 감성은 단정하지 않고 분포로 표시합니다.</p>
+      {% if events %}
+      {% for ev in events %}
+      <div class="issue" id="issue-{{ ev.rank }}">
+        <div class="row">
+          <div class="rank {% if ev.rank <= 3 %}top{% endif %} num">{{ ev.rank }}</div>
+          <div style="flex:1;min-width:0">
+            <div>
+              <h3>{{ ev.title }}</h3>
+              <span class="pill" style="color:{% if ev.gauge.label == '대체로 긍정' %}var(--pos){% elif ev.gauge.label == '대체로 부정' %}var(--neg){% else %}#c2820a{% endif %};background:var(--ink-50)">{{ ev.gauge.label }}</span>
+              <span class="lead" style="margin-left:8px">기사 <b class="num">{{ ev.article_count }}</b>건 · 중요도 <span class="num">{{ "%.1f"|format(ev.importance) }}</span></span>
+            </div>
+            <div class="dist">
+              <div class="gauge-bar" style="flex:1;margin:0">
+                <span style="width:{{ ev.gauge.pos_pct }}%;background:var(--pos)"></span>
+                <span style="width:{{ ev.gauge.neu_pct }}%;background:var(--ink-200)"></span>
+                <span style="width:{{ ev.gauge.neg_pct }}%;background:var(--neg)"></span>
+              </div>
+              <div class="counts num">
+                <span class="p">긍 {{ ev.gauge.pos }}</span>
+                <span class="u">중 {{ ev.gauge.neu }}</span>
+                <span class="n">부 {{ ev.gauge.neg }}</span>
+              </div>
+            </div>
+            {% if ev.articles %}
+            <ul class="art-list">
+              {% for a in ev.articles %}
+              <li>· <a href="{{ a.url }}">{{ a.summary }}</a></li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="lead">표시할 이슈가 없습니다 (데이터 제한).</p>
+      {% endif %}
+    </section>
+
+    <!-- disclaimer -->
+    <footer>
+      이 데이터는 뉴스 여론 요약이며 <b>투자 권유가 아닙니다</b>. 모든 수치는 출처 기사에 연결되어 검증됩니다.
+    </footer>
+  </article>
+
+  <p class="foot-note">veriθ · Multi-agent Research · News/Sentiment Worker</p>
+</div>
+</body>
+</html>
