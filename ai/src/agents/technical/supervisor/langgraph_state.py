@@ -24,6 +24,7 @@ from typing import Any, TypedDict
 from ..nodes._llm_utils import LlmClient
 from ..nodes.focus_analysis import FocusResult
 from ..nodes.indicator_calculate import IndicatorBundle
+from ..nodes.normalize_question import NormalizeResult
 from ..observability.trace_logger import TraceLogger
 from ..regime.multiframe import MultiframeRegimeResult
 from ..runtime.deadline import Deadline
@@ -56,6 +57,7 @@ class TechnicalGraphState(TypedDict, total=False):
     intraday_fetcher: Any                 # MinuteFetcher(supervisor alias → Any)
 
     # ── 중간 산출(계산 helper 소유 — state는 전달만, raw prompt/response 없음) ────────────────────
+    normalized: NormalizeResult          # 노드 1 결과(정규화 질문). focus_analysis 노드가 입력으로 사용
     focus: FocusResult
     ohlcv: dict[str, list[OHLCV]]
     daily: list[OHLCV]

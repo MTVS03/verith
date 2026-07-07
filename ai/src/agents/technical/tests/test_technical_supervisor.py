@@ -20,6 +20,7 @@ from src.agents.technical.schemas.intraday import IntradayCandle, IntradayChartD
 from src.agents.technical.schemas.ohlcv import OHLCV
 from src.agents.technical.services.kis_client import IntradayFetchResult
 from src.agents.technical.supervisor import technical_supervisor as sup
+from src.agents.technical.supervisor import pipeline_steps as steps
 
 TICKER = "373220"  # LG에너지솔루션
 AS_OF = "2026-06-30T14:30:00+09:00"
@@ -89,8 +90,8 @@ def _good_interp_response(daily, weekly, monthly) -> str:
     score = run_signal_aggregate(daily)
     conf = run_confidence_calculate(score, bundle, regime_result)
     risks = run_risk_detect(score, bundle, regime_result)
-    regime = sup._to_regime_result(regime_result)
-    signal_summary = sup._to_signal_summary(score, conf)
+    regime = steps._to_regime_result(regime_result)
+    signal_summary = steps._to_signal_summary(score, conf)
     text = interp.fallback_interpretation(regime=regime, signal=signal_summary, risks=risks).text
     details = [
         {"indicator": s.indicator.value,
@@ -126,7 +127,7 @@ def _intraday_flag_off(monkeypatch):
     INTRADAY_FETCH_ENABLED가 .env/환경변수로 켜져 있어도(테스트 env override) 기본 fetch가
     실 KIS를 때리지 않도록 강제한다. flag ON을 검증하는 테스트는 각자 True로 override한다.
     """
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", False)
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", False)
 
 
 # ── SUP-01·02: 정상 출력 · trace_id ─────────────────────────────────────────
@@ -285,8 +286,8 @@ def _partial_bad_response(daily, weekly, monthly, *, bad_indicator="moving_avera
     score = run_signal_aggregate(daily)
     conf = run_confidence_calculate(score, bundle, regime_result)
     risks = run_risk_detect(score, bundle, regime_result)
-    regime = sup._to_regime_result(regime_result)
-    signal_summary = sup._to_signal_summary(score, conf)
+    regime = steps._to_regime_result(regime_result)
+    signal_summary = steps._to_signal_summary(score, conf)
     text = interp.fallback_interpretation(regime=regime, signal=signal_summary, risks=risks).text
     details = []
     for s in score.technical_signals:
@@ -316,7 +317,7 @@ def test_sup17_to_technical_signals_preserves_none():
     from src.agents.technical.synthesis.signal_score import IndicatorSignalResult
     isr = IndicatorSignalResult(IndicatorType.VOLUME, Signal.NEUTRAL, None, [], 0.20)
     detail = DetailResult("volume", "거래량은 중립 신호로 확인됩니다.", GenerationSource.LLM)
-    out = sup._to_technical_signals([isr], [detail])
+    out = steps._to_technical_signals([isr], [detail])
     assert out[0].value is None  # None 보존(0.0 날조 없음)
 
 
@@ -383,7 +384,7 @@ def _fetcher(t, *, end_date=None):
 
 # ── 미세 갭 1: REGEN_MAX_COUNT=0이면 regenerate 호출이 없어야 한다 ───────────
 def test_regen_max_count_zero_skips_regenerate(monkeypatch):
-    monkeypatch.setattr(sup, "REGEN_MAX_COUNT", 0)
+    monkeypatch.setattr(steps, "REGEN_MAX_COUNT", 0)
     # 1차 interpret 검증 실패(INTERP_BAD). 응답을 3개만 준다 — regenerate가 호출되면 pop 실패로 드러남.
     client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD])
     out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
@@ -394,7 +395,7 @@ def test_regen_max_count_zero_skips_regenerate(monkeypatch):
 
 
 def test_regen_max_count_one_regenerates_once(monkeypatch):
-    monkeypatch.setattr(sup, "REGEN_MAX_COUNT", 1)
+    monkeypatch.setattr(steps, "REGEN_MAX_COUNT", 1)
     client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
     out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
     assert len(client.prompts) == 4  # normalize + focus + interpret + regenerate 1회
@@ -477,7 +478,7 @@ def test_confidence_signal_unchanged_by_intraday():
 def test_intraday_failure_does_not_break_dwm(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("intraday build failed")
-    monkeypatch.setattr(sup, "build_intraday_chart_payload", boom)
+    monkeypatch.setattr(steps, "build_intraday_chart_payload", boom)
     out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 유지
     assert out.intraday_context is None  # 조립 실패 → 붙이지 않음
@@ -541,7 +542,7 @@ def test_final_regime_and_signal_unchanged_by_fetcher():
 
 # ── SUP intraday: INTRADAY_FETCH_ENABLED flag gate (C안) ─────────────────────
 def _default_minute_stub(called: dict, *, candles=None, previous_close=101.0):
-    """sup.fetch_minute_ohlcv 대체용 — 호출 카운트를 기록한다."""
+    """steps.fetch_minute_ohlcv 대체용 — 호출 카운트를 기록한다."""
     def stub(ticker, *, as_of=None, **kw):
         called["n"] += 1
         return IntradayFetchResult(
@@ -555,7 +556,7 @@ def _default_minute_stub(called: dict, *, candles=None, previous_close=101.0):
 def test_flag_off_default_no_intraday(monkeypatch):
     # flag 기본 False → 명시 fetcher/candles 없으면 기본 minute fetcher를 쓰지 않는다.
     called = {"n": 0}
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA)
     assert called["n"] == 0
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
@@ -564,8 +565,8 @@ def test_flag_off_default_no_intraday(monkeypatch):
 
 def test_flag_on_uses_default_minute_fetcher(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA)  # fetcher·candles 미주입
     assert called["n"] == 1  # flag ON → 기본 fetcher 호출
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
@@ -574,8 +575,8 @@ def test_flag_on_uses_default_minute_fetcher(monkeypatch):
 
 def test_flag_on_direct_candles_skip_default_fetcher(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert called["n"] == 0  # 직접 주입 우선 → 기본 fetcher 미호출
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
@@ -583,8 +584,8 @@ def test_flag_on_direct_candles_skip_default_fetcher(monkeypatch):
 
 def test_flag_on_explicit_fetcher_takes_precedence(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA, intraday_fetcher=_minute_fetcher(previous_close=200.0))
     assert called["n"] == 0  # 명시 fetcher 우선 → 기본 미호출
     assert out.intraday_context.previous_close == 200.0
@@ -593,8 +594,8 @@ def test_flag_on_explicit_fetcher_takes_precedence(monkeypatch):
 def test_flag_on_default_fetcher_exception_isolated(monkeypatch):
     def boom(ticker, *, as_of=None, **kw):
         raise RuntimeError("kis intraday down")
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", boom)
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", boom)
     out = _run(_INTRA)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
     assert out.intraday_context is None
@@ -602,8 +603,8 @@ def test_flag_on_default_fetcher_exception_isolated(monkeypatch):
 
 def test_flag_on_default_empty_candles_dwm_only(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called, candles=[]))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called, candles=[]))
     out = _run(_INTRA)
     assert called["n"] == 1
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
@@ -612,8 +613,8 @@ def test_flag_on_default_empty_candles_dwm_only(monkeypatch):
 
 def test_flag_on_final_regime_and_signal_unchanged(monkeypatch):
     without = _run(_INTRA)
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub({"n": 0}))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub({"n": 0}))
     with_flag = _run(_INTRA)
     assert with_flag.regime == without.regime      # final_regime 등 불변
     assert with_flag.signal == without.signal       # top-level confidence/signal_score 불변
@@ -635,11 +636,11 @@ _INTRADAY_OTHER_DATE = [
 
 def test_intraday_matches_as_of_helper():
     d = date(2026, 6, 30)
-    assert sup._intraday_matches_as_of(INTRADAY_CANDLES, d) is True         # 같은 날짜
-    assert sup._intraday_matches_as_of(_INTRADAY_OTHER_DATE, d) is False    # 다른 날짜
-    assert sup._intraday_matches_as_of(_INTRADAY_OTHER_DATE, None) is True  # as_of None → 기존 동작
-    assert sup._intraday_matches_as_of([], d) is True                       # empty → True(상위 처리)
-    assert sup._intraday_matches_as_of(INTRADAY_CANDLES + _INTRADAY_OTHER_DATE, d) is False  # 일부만 다름
+    assert steps._intraday_matches_as_of(INTRADAY_CANDLES, d) is True         # 같은 날짜
+    assert steps._intraday_matches_as_of(_INTRADAY_OTHER_DATE, d) is False    # 다른 날짜
+    assert steps._intraday_matches_as_of(_INTRADAY_OTHER_DATE, None) is True  # as_of None → 기존 동작
+    assert steps._intraday_matches_as_of([], d) is True                       # empty → True(상위 처리)
+    assert steps._intraday_matches_as_of(INTRADAY_CANDLES + _INTRADAY_OTHER_DATE, d) is False  # 일부만 다름
 
 
 def test_intraday_date_match_included():
@@ -712,7 +713,7 @@ def test_intraday_fetch_failure_logs_warning(caplog):
 def test_intraday_assemble_failure_logs_warning(monkeypatch, caplog):
     def boom(*a, **k):
         raise RuntimeError("assemble boom")
-    monkeypatch.setattr(sup, "build_intraday_chart_payload", boom)
+    monkeypatch.setattr(steps, "build_intraday_chart_payload", boom)
     with caplog.at_level(logging.WARNING, logger="src.agents.technical.supervisor.technical_supervisor"):
         out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
@@ -1043,7 +1044,7 @@ def test_expired_deadline_raises_before_preprocess():
 def test_deadline_checks_placed_at_stages(monkeypatch):
     # check_deadline이 주요 stage(전처리·데이터·재생성 포함)에 배치돼 있는지 — 호출 stage 기록
     seen: list[str] = []
-    monkeypatch.setattr(sup, "check_deadline", lambda dl, stage: seen.append(stage))
+    monkeypatch.setattr(steps, "check_deadline", lambda dl, stage: seen.append(stage))
     _run([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])     # regen 발생
     for stage in ("preprocess", "focus_analysis", "data_collect",
                   "regime_classify", "interpret_report", "interpret_regeneration"):
