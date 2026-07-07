@@ -47,8 +47,8 @@ candidates : [ { stock_code, stock_name, market, matched_text, match_type }, ...
 - **`not_found` 는 예외/HTTP 장애가 아니라 정상 200 도메인 결과다.** "이 질의에 확정 종목이 없다"만
   뜻하며, **전체 사용자 요청의 실패가 아니다** — 종목이 필요 없는 요청이면 상위 계층이 계속 진행한다.
 - **정상 `not_found` 와 도구/HTTP 장애는 구분한다.** `resolved`/`ambiguous`/`not_found` 는 **Backend 가
-  정상 응답했을 때의 도메인 결과**다. Backend 에 **도달하지 못한 경우**(timeout·연결 실패·5xx)는
-  **Resolver status 가 아니라** Step 4 의 AI HTTP 도구 계층 오류다 — `status` enum 에 `tool-error` 를
+  정상 응답했을 때의 도메인 결과**다. Backend 의 **정상 도메인 응답을 받지 못한 경우**(timeout·연결
+  실패·5xx)는 **Resolver status 가 아니라** Step 4 의 AI HTTP 도구 계층 오류다 — `status` enum 에 `tool-error` 를
   추가하지 않는다. 도구 장애를 `not_found` 로 위장하지 않는다(장애 ≠ 종목 없음).
 - **Resolver 는 Agent 를 선택하거나 intent 를 판별하지 않는다.** 어느 Agent(Technical/News/Flow/…)로
   보낼지는 **Resolver 밖(Top Supervisor)**의 책임이다.
@@ -98,11 +98,11 @@ resolve_stock @tool → HTTP: Backend POST /api/stocks/resolve
 아래 JSON 은 **Chat→Supervisor 입력이 아니라, 도구 호출 후 Supervisor 가 내부적으로 보유하는 실행
 context** 예시다(있을 수도, 없을 수도 있음):
 
-```json
+```jsonc
 // 비종목 요청 — 도구를 호출하지 않았거나 not_found → 종목 context 없음
 { "query": "로제 관련 뉴스 보여줘", "stock_context": null }
 ```
-```json
+```jsonc
 // 종목 필요 요청 — resolve_stock 호출 후 resolved → 내부 실행 context 로 보유
 { "query": "카카오 수급 분석해줘",
   "stock_context": { "stock_code": "035720", "stock_name": "카카오", "market": "KOSPI" } }
