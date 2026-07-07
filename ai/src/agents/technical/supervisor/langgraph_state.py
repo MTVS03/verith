@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, TypedDict
 
 from ..nodes._llm_utils import LlmClient
@@ -53,16 +54,16 @@ class TechnicalGraphState(TypedDict, total=False):
     cache: OhlcvCache | None              # runtime client — 저장 금지
     trace: TraceLogger                    # runtime 객체 — 저장 금지
     deadline: Deadline | None
-    intraday_candles: list[IntradayCandle] | None
+    intraday_candles: Sequence[IntradayCandle] | None  # run()이 Sequence로 받음
     intraday_fetcher: Any                 # MinuteFetcher(supervisor alias → Any)
 
     # ── 중간 산출(계산 helper 소유 — state는 전달만, raw prompt/response 없음) ────────────────────
     normalized: NormalizeResult          # 노드 1 결과(정규화 질문). focus_analysis 노드가 입력으로 사용
     focus: FocusResult
-    ohlcv: dict[str, list[OHLCV]]
-    daily: list[OHLCV]
-    weekly: list[OHLCV]
-    monthly: list[OHLCV]
+    ohlcv: dict[str, Sequence[OHLCV]]     # _collect_ohlcv 반환 타입과 일치
+    daily: Sequence[OHLCV]
+    weekly: Sequence[OHLCV]
+    monthly: Sequence[OHLCV]
     used_stale: bool
     source: str
     regime_result: MultiframeRegimeResult
