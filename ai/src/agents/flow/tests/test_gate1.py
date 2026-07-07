@@ -70,7 +70,7 @@ def test_collect_confirms_base_date_from_response(monkeypatch):
     """collect 가 base_date 를 응답의 마지막 행 날짜로 갱신한다(클램프 반영)."""
     monkeypatch.setattr(graph, "fetch_supply_demand",
                         lambda base_date, ticker: (df_foreign_5day_streak, "KOSPI200"))
-    monkeypatch.setattr(graph, "fetch_foreign_ownership", lambda base_date, ticker: None)
+    monkeypatch.setattr(graph, "fetch_daily_quotes", lambda base_date, ticker: None)
     state = SupplyDemandState(input=_inp(), base_date=date(2026, 7, 4))  # 토요일 후보
     out = graph.collect_node(state)
     assert out["base_date"] == df_foreign_5day_streak.index[-1].date()

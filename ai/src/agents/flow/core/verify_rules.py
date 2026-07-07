@@ -49,6 +49,7 @@ def verify_signals(
     df: pd.DataFrame,
     signals: dict,
     ownership: pd.Series | None = None,   # M2: 소진율 원본(별도 API) — 없으면 규칙7은 "주장 없음" 검사만
+    quotes: pd.DataFrame | None = None,   # 일자별 시세 원본 — 없으면 규칙8은 "주장 없음" 검사만
 ) -> GateResult:
     """신호 dict 의 팩트가 원본 df(+소진율 Series)와 정합한지 대조한다."""
     checks: list[str] = []
@@ -328,6 +329,73 @@ def verify_signals(
             )
         else:
             checks.append("소진율-순매수 교차 정합: 표시 창 전일에서 방향 모순 없음")
+
+    # ── 규칙 8: 일자별 시세(price_daily) 정합 ─────────────
+    # 원본이 별도 API(quotes df)라 규칙 7과 같은 비대칭 사다리로 처리한다.
+    # 8b 항등식이 이 규칙의 핵심: 종가·전일비·등락률은 같은 행 안에서
+    # 산술로 맞물려야 한다(전일비=종가차, 등락률=전일비÷전일종가) — 같은
+    # 출처의 내부 모순은 7c(다른 출처 간 방향)와 달리 진짜 손상이라 하드 실패.
+    claimed_price = signals.get("price_daily")
+    if quotes is None or quotes.empty:
+        if claimed_price is None:
+            checks.append("시세: 원본 없음 → 주장 없음(정합, 표시도 없음)")
+        else:
+            failures.append("시세 정합: 원본이 없는데 신호가 시세를 주장")
+    elif claimed_price is None:
+        failures.append("시세 정합: 원본이 있는데 price_daily 가 신호에 없음")
+    else:
+        # 8a 직렬화 정합: 주장 배열 ↔ 원본 tail(PRICE_TABLE_DAYS).
+        recent_q = quotes.tail(config.PRICE_TABLE_DAYS)
+        expected_dates = [idx.date().isoformat() for idx in recent_q.index]
+        claimed_dates = [row.get("date") for row in claimed_price]
+        _FIELD_TO_COL = {"close": sig.COL_CLOSE, "change": sig.COL_CHANGE,
+                         "change_rate": sig.COL_CHANGE_RATE, "volume": sig.COL_VOLUME,
+                         "frgn_qty": sig.COL_FORE_QTY}
+        if claimed_dates != expected_dates:
+            failures.append("시세 직렬화 정합: 날짜열이 원본과 불일치")
+        elif any(
+            row.get(field) is None or not math.isclose(
+                float(row[field]), float(recent_q.iloc[i][col]),
+                rel_tol=1e-9, abs_tol=1e-6,
+            )
+            for i, row in enumerate(claimed_price)
+            for field, col in _FIELD_TO_COL.items()
+        ):
+            failures.append("시세 직렬화 정합: 값이 원본과 불일치")
+        else:
+            checks.append(f"시세 직렬화 정합: {len(recent_q)}일 날짜·5필드가 원본과 일치")
+
+        # 8b 항등식: 전일비=종가(t)−종가(t−1) (±0.5원 — 원 단위 정수),
+        # 등락률=전일비÷전일종가×100 (±0.011%p — 소수 2자리 반올림 흡수).
+        # 전일 종가는 원본 quotes 에서 찾는다(표시 창 첫 행도 원본엔 전일이 있음).
+        # 원본의 첫 행(전일 없음)만 검사 생략 — 7c 의 pos==0 생략과 같은 원리.
+        identity_bad: list[str] = []
+        for idx in recent_q.index:
+            pos = quotes.index.get_loc(idx)
+            if pos == 0:
+                continue
+            close = float(quotes.iloc[pos][sig.COL_CLOSE])
+            prev_close = float(quotes.iloc[pos - 1][sig.COL_CLOSE])
+            change = float(quotes.iloc[pos][sig.COL_CHANGE])
+            rate = float(quotes.iloc[pos][sig.COL_CHANGE_RATE])
+            if abs(change - (close - prev_close)) > 0.5:
+                identity_bad.append(f"{idx.date().isoformat()} (전일비≠종가차)")
+            elif prev_close and abs(rate - change / prev_close * 100.0) > 0.011:
+                identity_bad.append(f"{idx.date().isoformat()} (등락률≠전일비÷전일종가)")
+        if identity_bad:
+            failures.append(
+                f"시세 항등식: {len(identity_bad)}일 불일치 (첫 건: {identity_bad[0]})"
+            )
+        else:
+            checks.append("시세 항등식: 표시 창 모두 전일비·등락률이 종가와 맞물림")
+
+        # 8c 달력 교차: 시세 표의 거래일은 매매동향의 마지막 거래일들과 같아야
+        # 한다(같은 거래소 달력·같은 확정일 절단). 다르면 두 수집이 어긋난 것.
+        expected_cal = [idx.date().isoformat() for idx in df.index[-len(claimed_dates):]]
+        if claimed_dates != expected_cal:
+            failures.append("시세-매매동향 교차 정합: 거래일 달력이 불일치")
+        else:
+            checks.append(f"시세-매매동향 교차 정합: {len(claimed_dates)}일 달력 일치")
 
     return GateResult(
         gate=2,

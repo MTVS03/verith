@@ -56,7 +56,18 @@
   .track .bar { position:absolute; top:5px; bottom:5px; border-radius:6px; }
   .track .bar.buy-bar  { left:50%; background:#F04452; }
   .track .bar.sell-bar { right:50%; background:#3182F6; }
-  .subjrow .val { width:80px; flex-shrink:0; font-size:14px; font-weight:800;
+  /* 날짜별 시세 표 (기준점) */
+  .ptab-wrap { overflow-x:auto; }
+  .ptab { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  .ptab th { text-align:right; font-weight:700; color:#8B95A1; font-size:12px;
+             padding:8px 10px; border-bottom:1px solid #E5E8EB; white-space:nowrap; }
+  .ptab td { text-align:right; padding:8px 10px; border-bottom:1px solid #F2F4F6;
+             color:#333D4B; white-space:nowrap; }
+  .ptab th:first-child, .ptab td:first-child { text-align:left; color:#4E5968; font-weight:700; }
+  .ptab tr:last-child td { border-bottom:none; }
+  .ptab td.buy { color:#F04452; } .ptab td.sell { color:#3182F6; } .ptab td.mut { color:#8B95A1; }
+  .subjrow .val .valsub { display:block; font-size:11px; font-weight:600; color:#8B95A1; }
+  .subjrow .val { width:96px; flex-shrink:0; font-size:14px; font-weight:800;
                   font-variant-numeric:tabular-nums; text-align:right; }
 
   /* placeholder (M2 예정 블록) */
@@ -213,11 +224,41 @@
               <div class="bar sell-bar" style="width:{{ r.bar_w }}%"></div>
             {% endif %}
           </div>
-          <span class="val {{ 'buy' if r.direction == '매수' else 'sell' if r.direction == '매도' else 'mut' }}">{{ r.pct }}</span>
+          <span class="val {{ 'buy' if r.direction == '매수' else 'sell' if r.direction == '매도' else 'mut' }}">{% if r.amt %}{{ r.amt }}<span class="valsub">거래대금의 {{ r.pct }}</span>{% else %}{{ r.pct }}{% endif %}</span>
         </div>
         {% endfor %}
-        <div class="cap" style="margin:8px 0 0">막대는 최근 {{ recent_days }}일 순매수 강도(총 거래대금 대비 비율)의 상대 크기 · +매수 −매도</div>
+        <div class="cap" style="margin:8px 0 0">금액은 최근 {{ recent_days }}일 순매수 합 · %는 같은 기간 하루평균 거래대금 대비 비율(강도) · +매수 −매도</div>
       </div>
+    </section>
+
+    {# ── [A] 날짜별 시세 — price_daily 팩트(게이트2 규칙8 검증분)를 그리기만 ── #}
+    <section class="card" id="price">
+      <h2>날짜별 시세</h2>
+      <div class="cap">최근 {{ price_days }}거래일 · 종가·전일비 원 · 거래량·외국인 순매매량 주 · 최신이 위</div>
+      {% if price_table %}
+      <div class="ptab-wrap">
+        <table class="ptab">
+          <thead><tr>
+            <th>날짜</th><th>종가</th><th>전일비</th><th>등락률</th>
+            <th>거래량</th><th>외국인 순매매량</th>
+          </tr></thead>
+          <tbody>
+          {% for r in price_table %}
+          <tr>
+            <td>{{ r.label }}</td>
+            <td>{{ r.close }}</td>
+            <td class="{{ r.chg_cls }}">{{ r.chg }}</td>
+            <td class="{{ r.chg_cls }}">{{ r.rate }}</td>
+            <td>{{ r.vol }}</td>
+            <td class="{{ r.fq_cls }}">{{ r.fq }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="placeholder">데이터 준비 중 — 날짜별 시세가 아직 없습니다.</div>
+      {% endif %}
     </section>
 
     {# ── [A] 투자자별 일별 순매수 — daily 팩트(게이트2 규칙4 검증분)를 그리기만 ── #}

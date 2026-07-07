@@ -34,6 +34,16 @@ COL_OWNERSHIP: str = "외국인한도소진율"  # 일별 한도소진율(%) Ser
 # 식별자 'ownership'의 유래: KIS hts_frgn_ehrt(한도소진율). 한도 100% 종목은
 # 보유율과 같지만 한도 제한 종목(통신·항공)은 다르다 — 한국어 라벨은 소진율로 통일.
 
+# 일자별 시세(quotes) DataFrame 컬럼 — kis_client.fetch_daily_quotes 가 만든다.
+# 리포트의 "기준점"(네이버식 날짜별 표) 용도. 단위: 종가·전일비=원,
+# 등락률=%, 거래량·외국인순매매량=주(소진율과 같은 API — 실물 확인 2026-07-07).
+COL_CLOSE: str = "종가"
+COL_CHANGE: str = "전일비"
+COL_CHANGE_RATE: str = "등락률"
+COL_VOLUME: str = "거래량"
+COL_FORE_QTY: str = "외국인순매매량"
+QUOTE_COLS: tuple[str, ...] = (COL_CLOSE, COL_CHANGE, COL_CHANGE_RATE, COL_VOLUME, COL_FORE_QTY)
+
 # 순매수 주체 3인. 반복 계산에서 이 리스트를 돌린다.
 SUBJECTS: tuple[str, ...] = (COL_INDI, COL_FORE, COL_INST)
 
@@ -197,9 +207,34 @@ def extract_ownership(ownership: pd.Series | None) -> list[dict] | None:
     ]
 
 
+def extract_price_daily(quotes: pd.DataFrame | None) -> list[dict] | None:
+    """최근 PRICE_TABLE_DAYS일의 일자별 시세 팩트 목록 (오름차순, 최근이 마지막).
+
+    extract_daily·extract_ownership 과 같은 원리 — 계산이 아니라 "있는 값의
+    직렬화". 입력은 kis_client.fetch_daily_quotes 의 DataFrame(오름차순).
+    None/빈 DataFrame 이면 None — 주장하지 않으면 표시도 없다(placeholder 후퇴).
+    이 배열도 게이트2 규칙 8 이 원본 quotes·매매동향 달력과 대조한다.
+    """
+    if quotes is None or quotes.empty:
+        return None
+    recent = quotes.tail(config.PRICE_TABLE_DAYS)
+    return [
+        {
+            "date": idx.date().isoformat(),
+            "close": float(row[COL_CLOSE]),
+            "change": float(row[COL_CHANGE]),
+            "change_rate": float(row[COL_CHANGE_RATE]),
+            "volume": float(row[COL_VOLUME]),
+            "frgn_qty": float(row[COL_FORE_QTY]),
+        }
+        for idx, row in recent.iterrows()
+    ]
+
+
 def compute_signals(
     df: pd.DataFrame,
     ownership: pd.Series | None = None,   # M2: 한도소진율은 별도 API라 df 밖에서 온다
+    quotes: pd.DataFrame | None = None,   # 일자별 시세 — 소진율과 같은 API에서 온다
 ) -> dict[str, object]:
     """세 계산을 묶어 하나의 신호 dict로 반환한다.
 
@@ -213,4 +248,5 @@ def compute_signals(
         "persistence": calc_persistence(df),  # M2: 지속성 5일 vs 20일
         "inst_detail": calc_inst_detail(df),  # M2: 기관 세부 7주체 5일 합 (없으면 None)
         "ownership": extract_ownership(ownership),  # M2: 한도소진율 5일 추이 (없으면 None)
+        "price_daily": extract_price_daily(quotes),  # 날짜별 시세 표 (없으면 None)
     }

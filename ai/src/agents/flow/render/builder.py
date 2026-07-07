@@ -44,6 +44,7 @@ def _fact_rows(signals: dict) -> list[dict]:
     """
     consecutive = signals.get("consecutive", {})
     strength = signals.get("strength", {})
+    persistence = signals.get("persistence", {})
 
     ratios = {
         s: strength.get(s, {}).get("ratio") for s in SUBJECTS
@@ -60,6 +61,11 @@ def _fact_rows(signals: dict) -> list[dict]:
             direction = "매수" if r > 0 else "매도" if r < 0 else "중립"
             pct = f"{r * 100:+.1f}%"
             bar_w = (abs(r) / max_abs * 50.0) if max_abs else 0.0
+        # amt: 강도와 같은 창(RECENT_DAYS)의 순매수 합 — persistence.sum_5 의
+        # 재표현(게이트2 규칙5 검증분). 백만원→억원은 ratio→% 와 같은 표시용
+        # 단위 재표현(값 자체는 signals 에 백만원 그대로). 없으면 None(구버전 방어).
+        v5 = persistence.get(subject, {}).get("sum_5")
+        amt = f"{v5 / 100:+,.1f}억원" if v5 is not None else None
         rows.append({
             "name": subject,
             "days": c.get("days"),
@@ -68,6 +74,7 @@ def _fact_rows(signals: dict) -> list[dict]:
             "strong": strength.get(subject, {}).get("strong"),
             "direction": direction,
             "pct": pct,
+            "amt": amt,
             "bar_w": round(bar_w, 1),
         })
     return rows
@@ -237,6 +244,33 @@ def _inst_detail_view(signals: dict) -> dict | None:
     return {"rows": rows, "leader": leader}
 
 
+def _price_table_view(signals: dict) -> list[dict] | None:
+    """일자별 시세 팩트 → 날짜별 표(기준점) 뷰. 값 변형 없음 — 표시 포맷·순서만.
+
+    최신이 위(내림차순)는 네이버 등 시세표의 읽기 관행 — 표시 순서 재배치일 뿐
+    값은 price_daily(게이트2 규칙8 검증분) 그대로. ▲/▼와 색은 부호의 재표현.
+    없으면 None → placeholder 후퇴.
+    """
+    price = signals.get("price_daily")
+    if not price:
+        return None
+    rows = []
+    for row in reversed(price):                     # 최신이 위 — 표시 순서만 뒤집음
+        chg, rate, fq = row["change"], row["change_rate"], row["frgn_qty"]
+        chg_cls = "buy" if chg > 0 else "sell" if chg < 0 else "mut"
+        rows.append({
+            "label": row["date"][5:].replace("-", "/"),   # "07/04" (다른 블록과 동일)
+            "close": f"{row['close']:,.0f}",
+            "chg": ("▲ " if chg > 0 else "▼ " if chg < 0 else "― ") + f"{abs(chg):,.0f}",
+            "chg_cls": chg_cls,
+            "rate": f"{rate:+.2f}%",
+            "vol": f"{row['volume']:,.0f}",
+            "fq": f"{fq:+,.0f}",
+            "fq_cls": "buy" if fq > 0 else "sell" if fq < 0 else "mut",
+        })
+    return rows
+
+
 def _headline(rows: list[dict]) -> str:
     """요약 헤드라인 — 각 주체 direction(이미 확정된 부호의 단어)을 문구로 조립.
 
@@ -280,6 +314,8 @@ def build_report(
         "persistence": _persistence_view(signals),  # None이면 placeholder로 후퇴
         "inst_detail": _inst_detail_view(signals),  # None이면 placeholder로 후퇴
         "ownership": _ownership_view(signals),      # None이면 placeholder로 후퇴
+        "price_table": _price_table_view(signals),  # None이면 placeholder로 후퇴
+        "price_days": config.PRICE_TABLE_DAYS,
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",
