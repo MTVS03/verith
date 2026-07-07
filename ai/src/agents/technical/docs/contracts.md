@@ -142,6 +142,8 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
 *`technical_signals`·`indicator`는 "전략"이 아니라 "지표"를 정확히 가리킨다(내용 정확성 + honest scoping). risk는 `items[]`로 flag·note·ref_price를 한 항목에 묶어 index 짝짓기 오류를 방지한다.*
 
+> **`technical_signals.pattern` ≠ chart 패턴 탐지기 (역할 분리):** `technical_signals`의 `pattern` 지표는 컵앤핸들·박스권 같은 **chart pattern detector가 아니다** — 현재는 **최신 candle의 방향성(bullish/bearish/neutral) 요약**에 가깝다(`synthesis/signal_score.py`). `cup_handle_candidate`·`box_breakout_candidate`는 **chart annotations**(`chart_annotation_spec.md §1.1·§7.1`)에서 표현되는 **패턴 후보**이며, v1에서는 `signal_score`·`final_regime`·top-level `confidence`/`risk`에 **직접 반영하지 않는다**(annotation-only). `pattern` 지표 이름 재검토는 계약 변경이라 별도 phase.*
+
 #### `technical_signals[]` — 코드 확정과 LLM 서술의 경계
 
 한 항목 안에서 필드마다 출처가 다르다. **판정·수치는 코드가 확정하고, 설명 문장만 LLM이 그 확정값을 서술한다.** 이 경계가 veriθ 신뢰성 설계의 축이며, 리포트 화면에서도 시각적으로 구분해 표시한다(코드=청록, LLM=보라).

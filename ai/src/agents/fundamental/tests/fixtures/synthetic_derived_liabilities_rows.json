@@ -1,0 +1,11 @@
+[
+  {"rcept_no":"20260318001622","sj_div":"BS","account_id":"ifrs-full_Assets","account_nm":"Assets","thstrm_amount":"4882022445703","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"BS","account_id":"ifrs-full_EquityAndLiabilities","account_nm":"Equity and liabilities","thstrm_amount":"4882022445703","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"BS","account_id":"ifrs-full_Equity","account_nm":"Equity","thstrm_amount":"2016007934583","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"BS","account_id":"ifrs-full_CurrentAssets","account_nm":"Current assets","thstrm_amount":"1390244218752","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"BS","account_id":"ifrs-full_CurrentLiabilities","account_nm":"Current liabilities","thstrm_amount":"1922081128259","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"CIS","account_id":"ifrs-full_Revenue","account_nm":"Revenue","thstrm_amount":"2531576384113","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"CIS","account_id":"dart_OperatingIncomeLoss","account_nm":"Operating income","thstrm_amount":"143309899725","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"CIS","account_id":"ifrs-full_ProfitLoss","account_nm":"Profit loss","thstrm_amount":"91587534892","currency":"KRW"},
+  {"rcept_no":"20260318001622","sj_div":"CIS","account_id":"ifrs-full_BasicEarningsLossPerShare","account_nm":"Basic EPS","thstrm_amount":"403","currency":"KRW"}
+]

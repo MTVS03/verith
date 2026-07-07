@@ -86,6 +86,8 @@ uv sync                                                    # 의존성 설치
 uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 9000
 ```
 
+> 처음 실행 시 모델이 자동 다운로드됩니다.
+
 ## 4. Backend 서버 (`:8000`)
 
 ```bash

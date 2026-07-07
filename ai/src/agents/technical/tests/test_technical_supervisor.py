@@ -20,6 +20,7 @@ from src.agents.technical.schemas.intraday import IntradayCandle, IntradayChartD
 from src.agents.technical.schemas.ohlcv import OHLCV
 from src.agents.technical.services.kis_client import IntradayFetchResult
 from src.agents.technical.supervisor import technical_supervisor as sup
+from src.agents.technical.supervisor import pipeline_steps as steps
 
 TICKER = "373220"  # LG에너지솔루션
 AS_OF = "2026-06-30T14:30:00+09:00"
@@ -89,8 +90,8 @@ def _good_interp_response(daily, weekly, monthly) -> str:
     score = run_signal_aggregate(daily)
     conf = run_confidence_calculate(score, bundle, regime_result)
     risks = run_risk_detect(score, bundle, regime_result)
-    regime = sup._to_regime_result(regime_result)
-    signal_summary = sup._to_signal_summary(score, conf)
+    regime = steps._to_regime_result(regime_result)
+    signal_summary = steps._to_signal_summary(score, conf)
     text = interp.fallback_interpretation(regime=regime, signal=signal_summary, risks=risks).text
     details = [
         {"indicator": s.indicator.value,
@@ -126,7 +127,7 @@ def _intraday_flag_off(monkeypatch):
     INTRADAY_FETCH_ENABLED가 .env/환경변수로 켜져 있어도(테스트 env override) 기본 fetch가
     실 KIS를 때리지 않도록 강제한다. flag ON을 검증하는 테스트는 각자 True로 override한다.
     """
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", False)
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", False)
 
 
 # ── SUP-01·02: 정상 출력 · trace_id ─────────────────────────────────────────
@@ -285,8 +286,8 @@ def _partial_bad_response(daily, weekly, monthly, *, bad_indicator="moving_avera
     score = run_signal_aggregate(daily)
     conf = run_confidence_calculate(score, bundle, regime_result)
     risks = run_risk_detect(score, bundle, regime_result)
-    regime = sup._to_regime_result(regime_result)
-    signal_summary = sup._to_signal_summary(score, conf)
+    regime = steps._to_regime_result(regime_result)
+    signal_summary = steps._to_signal_summary(score, conf)
     text = interp.fallback_interpretation(regime=regime, signal=signal_summary, risks=risks).text
     details = []
     for s in score.technical_signals:
@@ -316,7 +317,7 @@ def test_sup17_to_technical_signals_preserves_none():
     from src.agents.technical.synthesis.signal_score import IndicatorSignalResult
     isr = IndicatorSignalResult(IndicatorType.VOLUME, Signal.NEUTRAL, None, [], 0.20)
     detail = DetailResult("volume", "거래량은 중립 신호로 확인됩니다.", GenerationSource.LLM)
-    out = sup._to_technical_signals([isr], [detail])
+    out = steps._to_technical_signals([isr], [detail])
     assert out[0].value is None  # None 보존(0.0 날조 없음)
 
 
@@ -383,7 +384,7 @@ def _fetcher(t, *, end_date=None):
 
 # ── 미세 갭 1: REGEN_MAX_COUNT=0이면 regenerate 호출이 없어야 한다 ───────────
 def test_regen_max_count_zero_skips_regenerate(monkeypatch):
-    monkeypatch.setattr(sup, "REGEN_MAX_COUNT", 0)
+    monkeypatch.setattr(steps, "REGEN_MAX_COUNT", 0)
     # 1차 interpret 검증 실패(INTERP_BAD). 응답을 3개만 준다 — regenerate가 호출되면 pop 실패로 드러남.
     client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD])
     out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
@@ -394,7 +395,7 @@ def test_regen_max_count_zero_skips_regenerate(monkeypatch):
 
 
 def test_regen_max_count_one_regenerates_once(monkeypatch):
-    monkeypatch.setattr(sup, "REGEN_MAX_COUNT", 1)
+    monkeypatch.setattr(steps, "REGEN_MAX_COUNT", 1)
     client = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
     out = sup.run(_input(), llm_client=client, fetcher=_fetcher, trace_id="t")
     assert len(client.prompts) == 4  # normalize + focus + interpret + regenerate 1회
@@ -477,7 +478,7 @@ def test_confidence_signal_unchanged_by_intraday():
 def test_intraday_failure_does_not_break_dwm(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("intraday build failed")
-    monkeypatch.setattr(sup, "build_intraday_chart_payload", boom)
+    monkeypatch.setattr(steps, "build_intraday_chart_payload", boom)
     out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 유지
     assert out.intraday_context is None  # 조립 실패 → 붙이지 않음
@@ -541,7 +542,7 @@ def test_final_regime_and_signal_unchanged_by_fetcher():
 
 # ── SUP intraday: INTRADAY_FETCH_ENABLED flag gate (C안) ─────────────────────
 def _default_minute_stub(called: dict, *, candles=None, previous_close=101.0):
-    """sup.fetch_minute_ohlcv 대체용 — 호출 카운트를 기록한다."""
+    """steps.fetch_minute_ohlcv 대체용 — 호출 카운트를 기록한다."""
     def stub(ticker, *, as_of=None, **kw):
         called["n"] += 1
         return IntradayFetchResult(
@@ -555,7 +556,7 @@ def _default_minute_stub(called: dict, *, candles=None, previous_close=101.0):
 def test_flag_off_default_no_intraday(monkeypatch):
     # flag 기본 False → 명시 fetcher/candles 없으면 기본 minute fetcher를 쓰지 않는다.
     called = {"n": 0}
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA)
     assert called["n"] == 0
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
@@ -564,8 +565,8 @@ def test_flag_off_default_no_intraday(monkeypatch):
 
 def test_flag_on_uses_default_minute_fetcher(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA)  # fetcher·candles 미주입
     assert called["n"] == 1  # flag ON → 기본 fetcher 호출
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
@@ -574,8 +575,8 @@ def test_flag_on_uses_default_minute_fetcher(monkeypatch):
 
 def test_flag_on_direct_candles_skip_default_fetcher(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert called["n"] == 0  # 직접 주입 우선 → 기본 fetcher 미호출
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}
@@ -583,8 +584,8 @@ def test_flag_on_direct_candles_skip_default_fetcher(monkeypatch):
 
 def test_flag_on_explicit_fetcher_takes_precedence(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called))
     out = _run(_INTRA, intraday_fetcher=_minute_fetcher(previous_close=200.0))
     assert called["n"] == 0  # 명시 fetcher 우선 → 기본 미호출
     assert out.intraday_context.previous_close == 200.0
@@ -593,8 +594,8 @@ def test_flag_on_explicit_fetcher_takes_precedence(monkeypatch):
 def test_flag_on_default_fetcher_exception_isolated(monkeypatch):
     def boom(ticker, *, as_of=None, **kw):
         raise RuntimeError("kis intraday down")
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", boom)
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", boom)
     out = _run(_INTRA)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
     assert out.intraday_context is None
@@ -602,8 +603,8 @@ def test_flag_on_default_fetcher_exception_isolated(monkeypatch):
 
 def test_flag_on_default_empty_candles_dwm_only(monkeypatch):
     called = {"n": 0}
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub(called, candles=[]))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub(called, candles=[]))
     out = _run(_INTRA)
     assert called["n"] == 1
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
@@ -612,8 +613,8 @@ def test_flag_on_default_empty_candles_dwm_only(monkeypatch):
 
 def test_flag_on_final_regime_and_signal_unchanged(monkeypatch):
     without = _run(_INTRA)
-    monkeypatch.setattr(sup, "INTRADAY_FETCH_ENABLED", True)
-    monkeypatch.setattr(sup, "fetch_minute_ohlcv", _default_minute_stub({"n": 0}))
+    monkeypatch.setattr(steps, "INTRADAY_FETCH_ENABLED", True)
+    monkeypatch.setattr(steps, "fetch_minute_ohlcv", _default_minute_stub({"n": 0}))
     with_flag = _run(_INTRA)
     assert with_flag.regime == without.regime      # final_regime 등 불변
     assert with_flag.signal == without.signal       # top-level confidence/signal_score 불변
@@ -635,11 +636,11 @@ _INTRADAY_OTHER_DATE = [
 
 def test_intraday_matches_as_of_helper():
     d = date(2026, 6, 30)
-    assert sup._intraday_matches_as_of(INTRADAY_CANDLES, d) is True         # 같은 날짜
-    assert sup._intraday_matches_as_of(_INTRADAY_OTHER_DATE, d) is False    # 다른 날짜
-    assert sup._intraday_matches_as_of(_INTRADAY_OTHER_DATE, None) is True  # as_of None → 기존 동작
-    assert sup._intraday_matches_as_of([], d) is True                       # empty → True(상위 처리)
-    assert sup._intraday_matches_as_of(INTRADAY_CANDLES + _INTRADAY_OTHER_DATE, d) is False  # 일부만 다름
+    assert steps._intraday_matches_as_of(INTRADAY_CANDLES, d) is True         # 같은 날짜
+    assert steps._intraday_matches_as_of(_INTRADAY_OTHER_DATE, d) is False    # 다른 날짜
+    assert steps._intraday_matches_as_of(_INTRADAY_OTHER_DATE, None) is True  # as_of None → 기존 동작
+    assert steps._intraday_matches_as_of([], d) is True                       # empty → True(상위 처리)
+    assert steps._intraday_matches_as_of(INTRADAY_CANDLES + _INTRADAY_OTHER_DATE, d) is False  # 일부만 다름
 
 
 def test_intraday_date_match_included():
@@ -712,7 +713,7 @@ def test_intraday_fetch_failure_logs_warning(caplog):
 def test_intraday_assemble_failure_logs_warning(monkeypatch, caplog):
     def boom(*a, **k):
         raise RuntimeError("assemble boom")
-    monkeypatch.setattr(sup, "build_intraday_chart_payload", boom)
+    monkeypatch.setattr(steps, "build_intraday_chart_payload", boom)
     with caplog.at_level(logging.WARNING, logger="src.agents.technical.supervisor.technical_supervisor"):
         out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}  # D/W/M 정상
@@ -721,3 +722,330 @@ def test_intraday_assemble_failure_logs_warning(monkeypatch, caplog):
     assert any(r.getMessage() == "intraday_assemble_failed" for r in recs)
     rec = next(r for r in recs if r.getMessage() == "intraday_assemble_failed")
     assert rec.exc_info is not None and rec.stage == "assemble_intraday"
+
+
+# ── RES: cache-aware D/W/M 수집 (feat/technical-cache-service) ──────────────────
+from src.agents.technical.config import REGEN_MAX_COUNT  # noqa: E402
+from src.agents.technical.schemas.enums import DataStatus as _DataStatus  # noqa: E402
+from src.agents.technical.services.cache_service import CacheLookup  # noqa: E402
+from src.agents.technical.services.kis_client import KisApiError  # noqa: E402
+
+
+class _FakeCache:
+    """supervisor 배선용 fake 캐시. entries={tf: ("fresh"|"stale", candles)}. now 무시(결정론)."""
+
+    def __init__(self, entries=None):
+        self._entries = dict(entries or {})
+        self.sets = []
+
+    def get(self, ticker, tf, as_of_id, *, now):
+        e = self._entries.get(tf)
+        return CacheLookup(e[0], e[1]) if e is not None else CacheLookup("miss")
+
+    def set(self, ticker, tf, as_of_id, candles, *, now):
+        self.sets.append(tf)
+        self._entries[tf] = ("fresh", list(candles))
+
+
+_DWM_FRESH = {"D": ("fresh", DAILY), "W": ("fresh", WEEKLY), "M": ("fresh", MONTHLY)}
+_DWM_STALE = {"D": ("stale", DAILY), "W": ("stale", WEEKLY), "M": ("stale", MONTHLY)}
+
+
+def _run_cache(cache, *, fetcher):
+    responses = [NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1)
+    return sup.run(_input(), llm_client=ScriptedLlm(responses), fetcher=fetcher, cache=cache, trace_id="t")
+
+
+def _recording_fetcher():
+    calls = {"n": 0}
+
+    def fetch(t, *, end_date=None):
+        calls["n"] += 1
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    return fetch, calls
+
+
+def _kis_fail_fetcher(t, *, end_date=None):
+    raise KisApiError("KIS 최대 재시도 초과")     # 복구 가능한 KIS 통신 실패
+
+
+def _envelope_bad_fetcher(t, *, end_date=None):
+    return {"D": DAILY}                            # W/M 누락 → run_data_collect envelope ValueError
+
+
+def _type_error_fetcher(t, *, end_date=None):
+    raise TypeError("programming error")
+
+
+# ── 기본: fresh hit / miss→write / 하위호환 ────────────────────────────────────
+def test_res_cache_hit_skips_fetcher():
+    fetch, calls = _recording_fetcher()
+    out = _run_cache(_FakeCache(_DWM_FRESH), fetcher=fetch)
+    assert calls["n"] == 0                       # fresh 캐시 → KIS 미호출
+    assert out.source == "KIS"
+    assert out.data_status != _DataStatus.STALE_CACHE
+
+
+def test_res_cache_miss_fetches_and_writes():
+    fetch, calls = _recording_fetcher()
+    cache = _FakeCache()
+    out = _run_cache(cache, fetcher=fetch)
+    assert calls["n"] == 1                        # miss → KIS 1회
+    assert cache.sets == ["D", "W", "M"]          # 3종 write
+    assert out.source == "KIS"
+
+
+def test_res_no_cache_is_backward_compatible():
+    fetch, calls = _recording_fetcher()
+    out = sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1)),
+                  fetcher=fetch, trace_id="t")
+    assert calls["n"] == 1 and out.source == "KIS"
+
+
+# ── stale 폴백은 KisApiError만 허용, 나머지는 전파(fail-fast) ──────────────────
+def test_res_kis_apierror_uses_stale_cache():
+    out = _run_cache(_FakeCache(_DWM_STALE), fetcher=_kis_fail_fetcher)
+    assert out.source == "KIS (stale)"
+    assert out.data_status == _DataStatus.STALE_CACHE
+    assert {p.period.value for p in out.charts} == {"3m", "1y", "5y"}
+
+
+def test_res_envelope_error_propagates_even_with_stale():
+    with pytest.raises(ValueError):              # envelope 오류는 stale로 덮지 않음
+        _run_cache(_FakeCache(_DWM_STALE), fetcher=_envelope_bad_fetcher)
+
+
+def test_res_type_error_propagates_even_with_stale():
+    with pytest.raises(TypeError):              # 프로그래밍 오류 전파
+        _run_cache(_FakeCache(_DWM_STALE), fetcher=_type_error_fetcher)
+
+
+def test_res_bad_as_of_rejected_at_input():
+    # 미래 as_of는 이제 입력 계약(TechnicalAgentInput validator)에서 fail-fast로 거절된다
+    # (KIS/OpenAI/cache 이전). endpoint에서는 422 VALIDATION_ERROR로 매핑된다.
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        TechnicalAgentInput(ticker=TICKER, query="q", request_id="r",
+                            as_of="2099-01-01T00:00:00+09:00")
+
+
+# ── per-timeframe stale 재구성 (D 필수 · W/M optional) ────────────────────────
+def test_res_kis_fail_d_stale_only_continues():
+    # KIS 실패 + D stale만 있음(W/M 없음) → 실패하지 않고 제한 분석 진행
+    out = _run_cache(_FakeCache({"D": ("stale", DAILY)}), fetcher=_kis_fail_fetcher)
+    assert out.source == "KIS (stale)"
+    assert out.data_status == _DataStatus.STALE_CACHE
+    assert {"3m", "1y", "5y"} <= {p.period.value for p in out.charts}  # 산출됨(W/M 빈 데이터 허용)
+
+
+def test_res_kis_fail_no_d_stale_propagates():
+    # KIS 실패 + D stale 없음(W/M만 있음) → 재구성 불가 → KIS 예외 전파
+    with pytest.raises(KisApiError):
+        _run_cache(_FakeCache({"W": ("stale", WEEKLY), "M": ("stale", MONTHLY)}), fetcher=_kis_fail_fetcher)
+
+
+def test_res_mixed_fresh_and_stale_marks_stale():
+    # D fresh + W/M stale인데 전체 fresh가 아니라 KIS 시도 → 실패 → per-tf 재구성(D fresh·W/M stale)
+    entries = {"D": ("fresh", DAILY), "W": ("stale", WEEKLY), "M": ("stale", MONTHLY)}
+    out = _run_cache(_FakeCache(entries), fetcher=_kis_fail_fetcher)
+    assert out.source == "KIS (stale)"             # 하나라도 stale이면 stale 표기
+    assert out.data_status == _DataStatus.STALE_CACHE
+
+
+def test_res_redis_down_kis_ok_uses_live():
+    # Redis get 장애는 cache_service가 miss로 흡수 → miss 캐시로 모사. KIS 성공 → live.
+    fetch, calls = _recording_fetcher()
+    out = _run_cache(_FakeCache(), fetcher=fetch)
+    assert calls["n"] == 1 and out.source == "KIS"
+
+
+def test_res_redis_down_kis_fail_no_stale_propagates():
+    with pytest.raises(KisApiError):
+        _run_cache(_FakeCache(), fetcher=_kis_fail_fetcher)   # stale 없음 → KIS 실패 전파
+
+
+# ── TRACE: trace_sink 주입 관측 (feat/technical-trace-logger) ──────────────────
+from src.agents.technical.nodes._llm_utils import LlmCallError  # noqa: E402
+from src.agents.technical.observability.trace_logger import InMemoryTraceSink  # noqa: E402
+
+
+def _types(events):
+    return [(e["node"], e["event_type"], e["status"]) for e in events]
+
+
+def _run_trace(responses, *, fetcher=None, cache=None, agent_input=None):
+    sink = InMemoryTraceSink()
+    out = sup.run(
+        agent_input or _input(), llm_client=ScriptedLlm(responses),
+        fetcher=fetcher or (lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY}),
+        cache=cache, trace_id="t", trace_sink=sink,
+    )
+    return out, sink.events
+
+
+def test_trace_run_started_and_succeeded():
+    out, events = _run_trace([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    assert events[0]["event_type"] == "trace_start"
+    assert events[-1]["event_type"] == "trace_end" and events[-1]["status"] == "success"
+    assert events[-1]["output_summary"]["status"] == "completed"
+    assert events[-1]["output_summary"]["data_status"] == out.data_status.value
+    # 모든 event가 같은 trace_id, event_id 순번 부여
+    assert {e["trace_id"] for e in events} == {"t"}
+    assert all(e["event_id"] for e in events)
+
+
+def test_trace_query_hash_excludes_plaintext():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD],
+                              agent_input=_input(query="LG엔솔 지금 사도 돼?"))
+    dumped = json.dumps(events, ensure_ascii=False)
+    assert "지금 사도" not in dumped                      # 원문 평문 미기록
+    assert events[0]["input_summary"]["original_query_hash"].startswith("sha256:")
+
+
+def test_trace_major_node_events_present():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    seen = {(n, t) for n, t, _ in _types(events)}
+    for node in ("normalize_question", "focus_analysis", "data_collect", "regime_classify",
+                 "indicator_calculate", "signal_aggregate", "confidence_calculate",
+                 "risk_detect", "chart_generate", "interpret_report"):
+        assert (node, "node_start") in seen and (node, "node_end") in seen
+    # node_end에 duration_ms가 기록됨
+    ends = [e for e in events if e["event_type"] == "node_end" and e["status"] == "success"]
+    assert ends and all(isinstance(e["duration_ms"], int) for e in ends)
+
+
+def test_trace_run_failed_reraises_and_records():
+    sink = InMemoryTraceSink()
+    with pytest.raises(TypeError):
+        sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK]),
+                fetcher=_type_error_fetcher, trace_id="t", trace_sink=sink)
+    end = sink.events[-1]
+    assert end["event_type"] == "trace_end" and end["status"] == "failed"
+    assert end["error"]["error_type"] == "TypeError"       # safe_error 요약
+
+
+def test_trace_cache_hit_summary():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1),
+                              cache=_FakeCache(_DWM_FRESH))
+    dc_end = next(e for e in events if e["node"] == "data_collect" and e["event_type"] == "node_end")
+    assert dc_end["output_summary"]["source"] == "cache"
+    assert dc_end["output_summary"]["cache_hit_by_period"] == {"D": True, "W": True, "M": True}
+
+
+def test_trace_stale_fallback_event():
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1),
+                              cache=_FakeCache(_DWM_STALE), fetcher=_kis_fail_fetcher)
+    fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "data_collect"]
+    assert fb and fb[0]["output_summary"]["fallback_type"] == "stale_cache"
+
+
+def test_trace_regime_unavailable_skips_code_nodes():
+    short_daily = _series(40, day_stride=1, start="2023-01-02")
+    _out, events = _run_trace(
+        [NORM_OK, FOCUS_OK],
+        fetcher=lambda t, *, end_date=None: {"D": short_daily, "W": WEEKLY, "M": MONTHLY})
+    skipped = {e["node"] for e in events if e["status"] == "skipped"}
+    # 국면분류(gate)가 지표계산보다 먼저라 unavailable이면 indicator도 스킵(trace_schema §9.1)
+    assert skipped == {"indicator_calculate", "signal_aggregate", "confidence_calculate", "risk_detect"}
+    # chart_generate는 skip되지 않고 실행됨(unavailable 경로에서도 차트 제공)
+    assert any(e["node"] == "chart_generate" and e["event_type"] == "node_end"
+               and e["status"] == "success" for e in events)
+
+
+def test_trace_interpret_template_fallback_event():
+    # INTERP_BAD를 재생성까지 반복 → regen 소진 → template fallback 이벤트
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    retries = [e for e in events if e["event_type"] == "retry" and e["node"] == "interpret_report"]
+    fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "interpret_report"]
+    assert len(retries) == REGEN_MAX_COUNT               # 재생성 시도마다 retry
+    assert fb and fb[0]["output_summary"]["fallback_type"] == "template_fallback"
+
+
+def test_trace_llm_call_failure_preprocess_fallback():
+    _out, events = _run_trace([LlmCallError("boom"), FOCUS_OK, INTERP_BAD, INTERP_BAD])
+    fb = [e for e in events if e["event_type"] == "fallback" and e["node"] == "normalize_question"]
+    assert fb and fb[0]["output_summary"]["fallback_type"] == "template_fallback"
+
+
+def test_trace_validation_event_per_attempt():
+    # INTERP_BAD 반복 → attempt마다 validation 이벤트(검증③ 결과)가 기록됨
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    vals = [e for e in events if e["event_type"] == "validation" and e["node"] == "interpret_report"]
+    assert len(vals) == REGEN_MAX_COUNT + 1               # 1차 + 재생성 각각 검증
+    v0 = vals[0]["output_summary"]
+    assert v0["attempt"] == 0 and v0["validation_result"] == "failed"
+    assert "label_matched" in v0 and "failed_indicators" in v0
+    assert vals[0]["status"] == "failed"
+
+
+def test_trace_validation_pass_on_good_interpretation():
+    good = _good_interp_response(DAILY, WEEKLY, MONTHLY)
+    _out, events = _run_trace([NORM_OK, FOCUS_OK, good])
+    vals = [e for e in events if e["event_type"] == "validation"]
+    assert len(vals) == 1 and vals[0]["status"] == "success"
+    assert vals[0]["output_summary"]["validation_result"] == "passed"
+    # interpret_report node_end에 최종 source·regen·fallback 요약이 실린다
+    end = next(e for e in events if e["node"] == "interpret_report" and e["event_type"] == "node_end")
+    s = end["output_summary"]
+    assert "interpretation_source" in s and "detail_source_count" in s
+    assert s["template_fallback_used"] is False
+
+
+def test_trace_validation_has_no_raw_llm_response():
+    # INTERP_BAD의 raw 응답 문구가 validation/trace 어디에도 남지 않는다
+    _out, events = _run_trace([NORM_OK, FOCUS_OK] + [INTERP_BAD] * (REGEN_MAX_COUNT + 1))
+    dumped = json.dumps(events, ensure_ascii=False)
+    assert "흥미롭습니다" not in dumped                    # raw interpretation_text 미기록
+
+
+def test_trace_sink_failure_does_not_break_run():
+    class BoomSink:
+        def emit(self, event):
+            raise ConnectionError("sink down")
+    out = sup.run(_input(), llm_client=ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD]),
+                  fetcher=lambda t, *, end_date=None: {"D": DAILY, "W": WEEKLY, "M": MONTHLY},
+                  trace_id="t", trace_sink=BoomSink())
+    assert out.data_status == DataStatus.NORMAL          # sink 예외에도 정상 완주
+
+
+# ── ALLOWLIST + DEADLINE (feat/technical-ai-endpoint hardening) ────────────────
+import time as _time  # noqa: E402
+
+from src.agents.technical.runtime.deadline import Deadline, DeadlineExceeded  # noqa: E402
+from src.agents.technical.services.kis_client import OutOfScopeTickerError  # noqa: E402
+
+
+def _dwm_fetcher(t, *, end_date=None):
+    return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+
+
+def test_allowlist_rejects_before_llm_and_fetcher():
+    # allowlist 밖 ticker(형식은 6자리) → OpenAI/KIS 이전에 OutOfScopeTickerError
+    llm = ScriptedLlm([])  # 호출되면 안 됨(응답 없음)
+    calls = {"n": 0}
+
+    def fetch(t, *, end_date=None):
+        calls["n"] += 1
+        return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
+    bad = TechnicalAgentInput(ticker="999999", query="q", request_id="r", as_of=AS_OF)
+    with pytest.raises(OutOfScopeTickerError):
+        sup.run(bad, llm_client=llm, fetcher=fetch, trace_id="t")
+    assert llm.prompts == [] and calls["n"] == 0          # OpenAI·KIS 미호출
+
+
+def test_expired_deadline_raises_before_preprocess():
+    llm = ScriptedLlm([])
+    expired = Deadline(expires_at=_time.monotonic() - 1)  # 이미 만료
+    with pytest.raises(DeadlineExceeded):
+        sup.run(_input(), llm_client=llm, fetcher=_dwm_fetcher, deadline=expired, trace_id="t")
+    assert llm.prompts == []                              # 예산 초과 → LLM 미호출
+
+
+def test_deadline_checks_placed_at_stages(monkeypatch):
+    # check_deadline이 주요 stage(전처리·데이터·재생성 포함)에 배치돼 있는지 — 호출 stage 기록
+    seen: list[str] = []
+    monkeypatch.setattr(steps, "check_deadline", lambda dl, stage: seen.append(stage))
+    _run([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])     # regen 발생
+    for stage in ("preprocess", "focus_analysis", "data_collect",
+                  "regime_classify", "interpret_report", "interpret_regeneration"):
+        assert stage in seen

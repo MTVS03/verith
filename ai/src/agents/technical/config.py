@@ -200,6 +200,35 @@ KIS_MAX_CHUNKS = 10                   # 무한 루프 방지 상한
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7.2 데이터 캐시 (Redis) 상수 (config.md §7·§8). services/cache_service.py가 사용한다.
+#     D/W/M OHLCV 원본을 timeframe별로 캐시한다(리샘플 파생 없음). 1D 분봉 캐시는 범위 밖.
+#     key는 as_of를 포함하지 않는다(문서 계약) — as_of 정합은 entry에 저장한 as_of 비교로 보장한다.
+# ─────────────────────────────────────────────────────────────────────────────
+CACHE_KEY_BY_PERIOD = {               # Redis key 패턴(ticker만 포맷). D/W/M → daily/weekly/monthly
+    "D": "ohlcv:daily:{ticker}",
+    "W": "ohlcv:weekly:{ticker}",
+    "M": "ohlcv:monthly:{ticker}",
+}
+# primary(fresh) 서빙 판정: fetched_at 나이 ≤ 이 값이면 KIS 없이 캐시를 그대로 쓴다.
+# 시계열이 오늘/당주/당월 봉을 포함해 가변이므로 "오늘 일봉 15분"(config.md §7 CACHE_TTL_TODAY)을 쓴다.
+CACHE_FRESH_TTL_SECONDS = 60 * 15     # 15분
+# stale 폴백 허용 기간(일). Redis expire도 이 값으로 두어 그 안엔 stale로 재사용 가능하게 한다.
+STALE_CACHE_MAX_AGE_BY_PERIOD = {     # config.md §8
+    "D": 1,     # 1거래일
+    "W": 7,     # 약 1주
+    "M": 31,    # 약 1개월
+}
+CACHE_SECONDS_PER_DAY = 86400         # stale 일수 → Redis expire 초 환산
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7.3 Trace 로깅 상수 (trace_schema.md §13). observability/trace_logger.py가 사용한다.
+#     관측 전용 — 운영 결선(JSONL path·config sink 자동 생성)은 AI endpoint 브랜치에서 한다.
+# ─────────────────────────────────────────────────────────────────────────────
+TRACE_MAX_ERROR_MESSAGE_LENGTH = 300  # trace error message 최대 길이(secret/원문 박제 방지·축약)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 8. 신호 종합 상수 (config.md §4). synthesis/signal_score.py가 사용한다.
 # ─────────────────────────────────────────────────────────────────────────────
 INDICATOR_WEIGHTS = {                # 지표별 가중치 (합 = 1.0)
@@ -248,11 +277,22 @@ VOLUME_SPIKE_MULTIPLIER = 2.0          # 거래량 급증: 20봉 평균 × 배�
 TRADING_VALUE_SPIKE_MULTIPLIER = 2.0   # 거래대금 급증 배수
 BOX_LOOKBACK_DAYS = 40                 # 박스권 탐색 기간
 BOX_RANGE_THRESHOLD_PCT = 0.12         # 박스권 상·하단 범위 허용 폭
-BOX_MIN_TOUCH_COUNT = 2                # 박스권 왕복 최소 횟수
-CUP_LOOKBACK_DAYS = 120                # 컵앤핸들 탐색 기간 (MVP 미구현)
-CUP_MIN_DEPTH_PCT = 0.10               # 컵 최소 깊이 (MVP 미구현)
-CUP_MAX_DEPTH_PCT = 0.40               # 컵 최대 깊이 (MVP 미구현)
-HANDLE_MAX_PULLBACK_PCT = 0.15         # 핸들 최대 되돌림 (MVP 미구현)
+BOX_MIN_TOUCH_COUNT = 2                # 박스권 상·하단 각각 근접 최소 봉 수
+BOX_MIN_ALTERNATIONS = 2               # 상단↔하단 zone 전환 최소 횟수(왕복 — 단방향 추세 배제)
+# 컵앤핸들 후보(chart_annotation_spec §13). 탐색 창은 timeframe별 **봉(BARS)** 기준으로 분리한다
+# (같은 120이라도 일봉=120일·주봉=120주로 의미가 달라 DAYS 이름은 쓰지 않는다). 1y=일봉·5y=주봉만 대상,
+# 3m 제외. charts/chart_builder.py::_cup_handle_annotations가 사용한다(annotation-only, signal 미반영).
+CUP_HANDLE_DAILY_LOOKBACK_BARS = 120       # 1y 일봉 탐색 창(봉)
+CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78       # 5y 주봉 탐색 창(봉)
+CUP_HANDLE_RIM_TOLERANCE_PCT = 0.05        # 좌/우 rim 가격 차 허용(≤5%) — 회복 정도
+CUP_HANDLE_MIN_DEPTH_PCT = 0.10            # 컵 최소 깊이(rim 대비)
+CUP_HANDLE_MAX_DEPTH_PCT = 0.40            # 컵 최대 깊이(rim 대비)
+CUP_HANDLE_MIN_HANDLE_PULLBACK_PCT = 0.02  # 핸들 **최소** 되돌림(실제 조정 존재 강제 — no-handle 배제)
+CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15  # 핸들 최대 되돌림(우측 rim 대비)
+CUP_HANDLE_MIN_HANDLE_BARS = 5             # 핸들 최소 길이(봉)
+CUP_HANDLE_MAX_HANDLE_BARS = 30            # 핸들 최대 길이(봉)
+CUP_HANDLE_MIN_BOTTOM_BARS = 3            # 둥근 저점 최소 봉 수(단봉 V자 spike 배제)
+CUP_HANDLE_BOTTOM_TOLERANCE_PCT = 0.03   # bottom 근처 판정 폭(이 안에 MIN_BOTTOM_BARS 이상)
 
 # annotation 중복 제거 창 — candle(봉) index 거리 기준 (chart_annotation_spec §8.4).
 ANNOTATION_DEDUP_BARS = {
@@ -327,3 +367,61 @@ INTRADAY_RISK_NOTE_MAX_COUNT: int = 3             # intraday risk_notes 최대 �
 # services/kis_client.py — 분봉 역방향 페이징 상한
 INTRADAY_MINUTE_MAX_CALLS: int = 20               # 30건×20 ≈ 600봉(1일 ~391) — 무한 루프 방지 상한
 INTRADAY_MARKET_OPEN_HHMMSS: str = "090000"       # 이 시각 이전으로는 더 역방향 조회하지 않는다
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. OpenAI LLM client 설정 (services/openai_llm_client.py가 사용한다).
+#     .env(배포/실험별) = API key(secret) + MODEL(환경마다 갈리는 선택값). 코드에 값을 박제하지
+#     않고 반드시 .env/환경변수에서 읽는다(technical_coding_guidelines §2.2·§13.2). MODEL은
+#     import 시점이 아니라 load_openai_settings()에서 .env 로드 후 읽어야 실제로 override가 먹는다.
+#     아래 timeout/max_retries/temperature/max_tokens/store는 secret도 환경차도 아닌 "튜닝/안전 상수"
+#     이므로 여기(코드)에 둔다 — KIS_TIMEOUT_SECONDS와 같은 급이다(.env에 넣지 않는다).
+#     안전 정책: SDK 재시도는 끄고(max_retries=0) agent-level 재생성/fallback을 쓴다 — SDK retry는
+#     중복이자 60초 API 계약(api_spec §)을 초과할 위험이 있다. store=False로 OpenAI 측 저장을 끈다
+#     (stateless). 총 60초 deadline 완전 보장(호출 간 deadline 전파)은 후속 AI endpoint 범위.
+#     runtime wiring(run_technical_agent 자동 생성)은 이 브랜치 범위 밖 — 후속 AI endpoint에서 주입.
+# ─────────────────────────────────────────────────────────────────────────────
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"    # 키 "이름"만(값 아님) — 값은 .env
+OPENAI_MODEL_ENV = "OPENAI_MODEL"        # 모델 "이름"만 — 값은 .env(단일 출처, 코드에 기본값 없음)
+OPENAI_TIMEOUT_SECONDS: float = 20.0     # 1회 호출 timeout(초) — 60초 계약 안에서 보수적 하향
+OPENAI_MAX_RETRIES: int = 0              # SDK 재시도 끔 — agent-level 재생성/template fallback 우선
+OPENAI_TEMPERATURE: float | None = 0.0   # None이면 요청 파라미터에서 생략 — 튜닝 상수(코드)
+OPENAI_MAX_OUTPUT_TOKENS: int = 1200     # 응답 최대 토큰(보수적 기본) — 튜닝 상수(코드)
+OPENAI_STORE: bool = False               # OpenAI 측 application state 저장 끔(stateless). 분석 이력은 backend DB.
+
+
+@dataclass(frozen=True)
+class OpenAiSettings:
+    """.env에서 읽는 OpenAI 설정. api_key는 repr에서 제외(로그/repr 노출 방지, §13.2)."""
+    api_key: str = field(repr=False)
+    model: str
+
+
+def load_openai_settings() -> OpenAiSettings:
+    """.env(또는 환경변수)에서 OpenAI api_key·model을 읽어 반환한다(fail-fast).
+
+    KIS(§4)와 동일하게 코드에 하드코딩하지 않는다. **model도 .env가 단일 출처**이며 코드 기본값을
+    두지 않는다(중복 방지). 누락 시 어디에 무엇을 넣어야 하는지 명시하며 즉시 실패한다 —
+    이 config error는 client 생성 시점 오류이며 LlmCallError(호출 실패)와 구분된다.
+    반환값(키 문자열)은 로그·trace·repr 어디에도 남기지 않는다(dataclass repr에서 제외)."""
+    env_path = _find_env_file()
+    if env_path is not None:
+        load_dotenv(env_path, override=False)  # 실제 환경변수가 .env보다 우선
+    api_key = (os.getenv(OPENAI_API_KEY_ENV) or "").strip()
+    model = (os.getenv(OPENAI_MODEL_ENV) or "").strip()
+    missing = [name for name, val in ((OPENAI_API_KEY_ENV, api_key), (OPENAI_MODEL_ENV, model)) if not val]
+    if missing:
+        where = f"{env_path}" if env_path else "환경변수(.env 파일 미발견)"
+        raise RuntimeError(
+            f"[OpenAI config] 필수 설정 누락: {missing}. {where} 에 {', '.join(missing)} 를 설정하세요."
+        )
+    return OpenAiSettings(api_key=api_key, model=model)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 16. Technical Agent 전체 실행 예산 (api_spec.md §10). AI endpoint가 Deadline으로 사용한다.
+#     Backend→AI 계약 timeout은 60초 — 그보다 먼저 AI가 504를 돌려주도록 내부 예산은 55초로 둔다
+#     (직렬화·error response 여유). cooperative deadline이라 실행 중 sync 작업을 즉시 죽이진 못하고
+#     다음 stage check 지점에서 멈춘다(endpoint의 asyncio.wait_for가 응답 시간까지 바운딩).
+# ─────────────────────────────────────────────────────────────────────────────
+TECHNICAL_AGENT_TIMEOUT_SECONDS: float = 55.0  # 내부 budget(< 60초 계약). endpoint Deadline.after()에 사용
