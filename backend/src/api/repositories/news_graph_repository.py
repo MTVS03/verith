@@ -73,3 +73,55 @@ async def merge_graph(
             )
 
     await session.execute_write(_work)
+
+
+# ── 조회(질의 흐름) ──────────────────────────────────────────────────────────
+async def get_events_by_companies(
+    session: AsyncSession, companies: list[str]
+) -> list[dict]:
+    """single-hop: 주어진 회사들이 참여한 이벤트 목록.
+
+    각 이벤트의 전체 참여 회사(companies)도 함께 반환한다(감성·recency 집계는 PostgreSQL).
+    반환: [{canonical_id, canonical_title, importance, companies}].
+    """
+    if not companies:
+        return []
+    query = (
+        "MATCH (c:Company)-[:PARTICIPATES_IN]->(e:Event) WHERE c.key IN $companies "
+        "WITH DISTINCT e "
+        "OPTIONAL MATCH (co:Company)-[:PARTICIPATES_IN]->(e) "
+        "RETURN e.key AS canonical_id, e.canonical_title AS canonical_title, "
+        "       e.importance AS importance, collect(DISTINCT co.key) AS companies"
+    )
+    result = await session.run(query, companies=companies)
+    return [r.data() async for r in result]
+
+
+async def get_shared_events(
+    session: AsyncSession, company_a: str, company_b: str
+) -> list[dict]:
+    """multi-hop: 두 회사가 함께 참여한 공유 이벤트 목록(관계 질문). 반환 형태는 위와 동일."""
+    query = (
+        "MATCH (a:Company {key:$a})-[:PARTICIPATES_IN]->(e:Event)"
+        "<-[:PARTICIPATES_IN]-(b:Company {key:$b}) "
+        "WITH DISTINCT e "
+        "OPTIONAL MATCH (co:Company)-[:PARTICIPATES_IN]->(e) "
+        "RETURN e.key AS canonical_id, e.canonical_title AS canonical_title, "
+        "       e.importance AS importance, collect(DISTINCT co.key) AS companies"
+    )
+    result = await session.run(query, a=company_a, b=company_b)
+    return [r.data() async for r in result]
+
+
+async def companies_exist(
+    session: AsyncSession, companies: list[str]
+) -> bool:
+    """주어진 회사명 중 하나라도 Company 노드로 존재하면 True('없는 종목' 구분용)."""
+    if not companies:
+        return False
+    result = await session.run(
+        "MATCH (c:Company) WHERE c.key IN $companies RETURN count(c) AS n",
+        companies=companies,
+    )
+    rec = await result.single()
+    return bool(rec and rec["n"] > 0)

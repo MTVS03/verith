@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # ── 기사 원본 (ai Article 의 저장 대상 필드) ─────────────────────────────────
 # 한글 감성 계약값(ai Sentiment). None = 감성 미판정(집계에서 제외).
@@ -120,3 +120,84 @@ class EventArticleStats(BaseModel):
     sentiment_magnitude_sum: float = 0.0
     sentiment_count: int = 0
     updated_at: datetime | None = None
+
+
+# ── 질의(subject/shared) 응답 (ai schemas/report.py·event.py·response.py 미러) ──
+class SentimentGauge(BaseModel):
+    """긍/중/부 분포(backend 실시간 집계) + 표시용 파생값(비율·순점수·라벨). ai `SentimentGauge` 동일.
+
+    positive/neutral/negative 는 집계값(감성 None 제외). 파생 필드는 그 값에서 계산만 한다
+    (감성 재판정 아님 — 절대규칙 4). dump 시 함께 실려 프론트가 재계산할 필요가 없다.
+    """
+
+    positive: int = 0
+    neutral: int = 0
+    negative: int = 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total(self) -> int:
+        return self.positive + self.neutral + self.negative
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def positive_pct(self) -> int:
+        return round(self.positive / self.total * 100) if self.total else 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def negative_pct(self) -> int:
+        return round(self.negative / self.total * 100) if self.total else 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def neutral_pct(self) -> int:
+        return 100 - self.positive_pct - self.negative_pct if self.total else 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def score(self) -> float:
+        return round((self.positive - self.negative) / self.total, 2) if self.total else 0.0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def label(self) -> str:
+        if self.total <= 0:
+            return "데이터 제한"
+        if self.positive / self.total >= 0.6:
+            return "대체로 긍정"
+        if self.negative / self.total >= 0.6:
+            return "대체로 부정"
+        return "의견 갈림"
+
+
+class Event(BaseModel):
+    """Neo4j 중심 노드(ai `Event`). 감성 count 는 노드에 없음(조회 시 집계)."""
+
+    canonical_id: str | None = None
+    canonical_title: str
+    importance: float | None = None
+    companies: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
+
+
+class EventWithArticles(BaseModel):
+    """조회된 이벤트 1건 + 대표 근거 기사 소수 + 실시간 감성 게이지(ai `EventWithArticles`)."""
+
+    event: Event
+    article_count: int = 0
+    articles: list[ArticleRef] = Field(default_factory=list)
+    gauge: SentimentGauge = Field(default_factory=SentimentGauge)
+
+
+class SubjectQueryResponse(BaseModel):
+    """종목/공유 이벤트 조회 응답(ai `SubjectQueryResponse`). importance 내림차순 가정.
+
+    subject_found: '없는 종목'과 '종목은 있으나 뉴스 0건'을 구분(둘 다 events=[]).
+    overall_gauge: 전체 감성 집계(sentiment=None 제외) — backend 가 채운다(ai 재집계 안 함).
+    """
+
+    subject: str
+    subject_found: bool = True
+    events: list[EventWithArticles] = Field(default_factory=list)
+    overall_gauge: SentimentGauge = Field(default_factory=SentimentGauge)

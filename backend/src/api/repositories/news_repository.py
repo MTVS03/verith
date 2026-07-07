@@ -86,3 +86,30 @@ async def get_event_article_stats(
     ).where(News.event_id == event_id)
     row = (await session.execute(stmt)).one()
     return row if row.article_count > 0 else None
+
+
+async def get_event_aggregates(
+    session: AsyncSession, event_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, Row]:
+    """이벤트별 감성 게이지 카운트·기사수·최신 발행시각을 한 번에 집계.
+
+    반환 `{event_id: Row(article_count, positive, neutral, negative, recency)}`.
+    감성 라벨은 한글 계약값(긍정/중립/부정), sentiment=None 은 게이지에서 제외된다.
+    recency 는 `within_days` 필터(최신 발행시각)용.
+    """
+    if not event_ids:
+        return {}
+    stmt = (
+        select(
+            News.event_id.label("event_id"),
+            func.count().label("article_count"),
+            func.count().filter(News.sentiment == "긍정").label("positive"),
+            func.count().filter(News.sentiment == "중립").label("neutral"),
+            func.count().filter(News.sentiment == "부정").label("negative"),
+            func.max(News.published_at).label("recency"),
+        )
+        .where(News.event_id.in_(event_ids))
+        .group_by(News.event_id)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {r.event_id: r for r in rows}
