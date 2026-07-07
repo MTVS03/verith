@@ -201,7 +201,7 @@ UNIQUE (9): `technical_reports.request_id`, `news.url`, **`technical_report_sign
 
 **NOT NULL 정책(핵심):** 항상 존재하는 실행 메타데이터와 degraded에도 sentinel로 채워지는 컬럼만 NOT NULL. 예) `technical_reports`: `request_id`·`ticker`·`data_status`·`source`·`trace_id`·`as_of`·`input_payload`·`output_payload`·`final_regime`·`daily_regime`·`alignment_flag` = NOT NULL / `consensus`·`signal_score`·`confidence`·`weekly_trend`·`monthly_trend` = nullable(정본 §9). `news`: `title`·`url` NOT NULL. 통합 ERD 신규 컬럼(`timeframe`, `chart_*`)은 저장 정책 확정 전까지 nullable.
 
-명시 인덱스 (19, DESC 는 표현식 인덱스):
+명시 인덱스 (`ix_` 18개 + signals UNIQUE 제약 1, DESC 는 표현식 인덱스):
 ```
 agent_reports        (agent_type, created_at DESC) / (client_session_id, created_at DESC)
                      / (stock_code, created_at DESC) / (trace_id)
@@ -247,17 +247,60 @@ PostgreSQL 에는 `news.event_id`(nullable uuid)만 둬서 Neo4j `Event.canonica
 - 모델을 추가하면 **반드시 `backend/db/models/registry.py` 에 import 를 등록**한다
   (env.py 가 `Base.metadata` 를 이걸로 채워 autogenerate 가 인식한다).
 
-새 마이그레이션 만들기:
+---
 
+## 9-1. 테이블 추가·변경 절차 (⭐ 스키마 바꿀 때 이 순서대로)
+
+> **DB 컬럼·테이블을 바꾸면 반드시 이 절차를 따르고, 이 문서(§5·§6 카탈로그/FK/인덱스)도 같이 갱신한다.**
+> 코드(모델·마이그레이션)와 이 문서가 다르면 **코드가 정본**이지만, 문서를 안 고치면 다음 사람이 헤맨다.
+
+### 1) 문서 먼저 (권장)
+바꿀 테이블/컬럼을 §5 카탈로그 + §6 FK/UNIQUE/인덱스에 먼저 반영한다(코딩 가이드 §1.1).
+
+### 2) 모델 작성/수정 — `backend/db/models/<domain>/<file>.py`
+- `from db.base import Base` 상속, `from db.models._shared import uuid_pk, created_at` 재사용.
+- **타입 규칙(§4)**: uuid PK=`uuid_pk()`, 종목코드/ticker=varchar(숫자 금지), 시각=timestamptz,
+  JSON=jsonb, Numeric 컬럼의 파이썬 힌트는 `Decimal`, `news.embedding`=`Vector()`.
+- **제약 정책(이 스키마의 합의)**:
+  - 자식→부모 FK 는 `ForeignKey("parent.id", ondelete="CASCADE")` (report 종속 자식). **마스터(`stocks`) 참조는 CASCADE 금지(NO ACTION).**
+  - **FK 를 걸지 않는 것**: `agent_reports.agent_report_id`, `news.event_id`, `news_reports.evidence`, `owner_user_id`/`owner_session_id`(§6).
+  - NOT NULL 은 **항상 존재하는 실행 메타데이터 + degraded 에도 sentinel 로 채워지는 컬럼**만. degraded 에서 NULL 가능한 계산 결과는 nullable(§6 NOT NULL 정책 참고).
+  - 1:1 은 `unique=True`, "리포트당 N개 중복 방지"는 `UniqueConstraint(...)`.
+  - Neo4j 객체(Event/Company/…)는 **PostgreSQL 테이블로 만들지 않는다**(§8).
+
+### 3) registry 등록 (필수)
+새 모델 클래스를 **`backend/db/models/registry.py` 에 import + `__all__` 에 추가**.
+안 하면 autogenerate 가 테이블을 인식하지 못한다.
+
+### 4) 마이그레이션 자동생성
 ```bash
 cd backend
-export DATABASE_URL="postgresql+asyncpg://verith:verith1234@localhost:5433/verith"
+export DATABASE_URL="postgresql+asyncpg://verith:verith1234@localhost:5433/verith"  # 포트 5433(§2)
 uv run alembic revision --autogenerate -m "<메시지>"
-uv run alembic upgrade head
 ```
 
-> autogenerate 는 **`CREATE EXTENSION` 을 만들어주지 않는다.** 확장이 더 필요하면 수동으로
-> `op.execute(...)` 를 넣되, 기존 `pgcrypto`/`vector` 는 이미 존재하므로 다시 만들지 않는다.
+### 5) 생성된 마이그레이션 수동 점검 (autogenerate 가 못 하는 것)
+- **`CREATE EXTENSION` 은 자동생성 안 됨.** 새 확장이 필요하면 `op.execute("CREATE EXTENSION IF NOT EXISTS ...")` 를 upgrade 상단에 추가. **기존 `pgcrypto`/`vector` 는 이미 있으니 다시 만들지 않는다.**
+- `news.embedding` 같은 **pgvector 타입**이 새로 들어가면 마이그레이션 상단에 `import pgvector.sqlalchemy.vector` 가 있는지 확인.
+- **DESC/표현식 인덱스**(예: `created_at DESC`)는 `sa.text('... DESC')` 로 렌더됐는지 확인.
+- `ondelete='CASCADE'` 가 자식 FK 에 실제로 붙었는지 확인.
+- **확장 관리 규칙(§3)**: `pgcrypto`/`vector` 는 initial 마이그레이션에서만 생성/삭제. **후속 마이그레이션에서 extension 을 drop 하지 않는다.**
+
+### 6) 적용 + 정합성 검증
+```bash
+uv run alembic upgrade head
+uv run alembic check          # "No new upgrade operations detected" = 모델↔마이그레이션 동기
+uv run alembic downgrade base && uv run alembic upgrade head   # 가역성(왕복) 확인
+uv run ruff check db src
+```
+그리고 §10 검증 SQL 로 테이블/제약을 확인한다.
+
+### 7) 이 문서 갱신
+§5 카탈로그·§6 FK/UNIQUE/인덱스·(필요 시) revision 파일명을 최신 상태로 고친다.
+
+### ⚠️ 이미 공유·머지된 마이그레이션은 수정 금지
+- **아직 아무도 적용 안 한(브랜치 내부) 마이그레이션**이면 파일 수정/재생성 가능.
+- **이미 공유·머지되어 팀원 DB 에 적용된** 마이그레이션은 절대 고치지 말고 **새 마이그레이션으로 보강**(ALTER)한다. 안 그러면 팀원 DB 의 `alembic_version` 이 사라진 revision 을 가리켜 깨진다.
 
 ---
 

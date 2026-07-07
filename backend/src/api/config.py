@@ -6,13 +6,17 @@ API/AI 서버/JWT 등 나머지 설정은 각 담당자가 후속 브랜치에�
 **비밀값/DB URL 은 코드에 하드코딩하지 않는다**(backend_coding_guidelines §2.1/§2.2).
 `DATABASE_URL` 은 필수 환경변수이며(예: `postgresql+asyncpg://<user>:<pw>@<host>:5433/<db>`),
 없으면 설정 로딩 단계에서 즉시 에러를 낸다. 값은 환경변수 또는 `backend/.env` 로 주입한다.
+
+**secret-safe:** DATABASE_URL 검증은 pydantic 밖에서 수행한다. pydantic 의 `ValidationError`
+는 입력값(파싱된 `.env` dict 전체)을 오류에 실어 다른 비밀값(JWT/토큰 등)을 로그에 노출할 수
+있으므로(§2.2), 필수 필드로 두지 않고 **기본값 + 외부 RuntimeError** 로 처리한다.
+`hide_input_in_errors=True` 로 향후 다른 필드의 검증 오류에서도 입력 노출을 막는다.
 """
 
 from __future__ import annotations
 
 import pathlib
 
-from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # env_file 은 CWD 가 아니라 backend 루트 기준으로 고정한다
@@ -28,19 +32,29 @@ class Settings(BaseSettings):
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
+        # ValidationError 에 입력값(.env dict)을 실어 비밀값을 노출하지 않는다.
+        hide_input_in_errors=True,
     )
 
-    # SQLAlchemy async DSN. 필수 — 예: postgresql+asyncpg://<user>:<pw>@<host>:5433/<db>
-    DATABASE_URL: str
-
-    @model_validator(mode="after")
-    def _require_database_url(self) -> "Settings":
-        if not self.DATABASE_URL.strip():
-            raise ValueError(
-                "DATABASE_URL 이 비어 있습니다. 환경변수 또는 backend/.env 에 "
-                "postgresql+asyncpg://... DSN 을 설정하세요."
-            )
-        return self
+    # SQLAlchemy async DSN. 검증은 _load_settings() 에서(secret-safe). 예:
+    # postgresql+asyncpg://<user>:<pw>@<host>:5433/<db>
+    DATABASE_URL: str = ""
 
 
-settings = Settings()
+def _load_settings() -> Settings:
+    """설정 로드 + DATABASE_URL 필수 검증.
+
+    pydantic 필수 필드/validator 로 검증하면 ValidationError 가 파싱된 `.env` 입력 dict 를
+    실어 다른 비밀값을 노출할 수 있다. 따라서 검증을 pydantic 밖에서 수행하고, 입력값을 담지
+    않는 깔끔한 RuntimeError 만 던진다.
+    """
+    s = Settings()
+    if not s.DATABASE_URL.strip():
+        raise RuntimeError(
+            "DATABASE_URL 이 설정되지 않았습니다. 환경변수 또는 backend/.env 에 "
+            "postgresql+asyncpg://... DSN 을 설정하세요."
+        )
+    return s
+
+
+settings = _load_settings()
