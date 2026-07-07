@@ -49,6 +49,7 @@ def verify_signals(
     df: pd.DataFrame,
     signals: dict,
     ownership: pd.Series | None = None,   # M2: 소진율 원본(별도 API) — 없으면 규칙7은 "주장 없음" 검사만
+    quotes: pd.DataFrame | None = None,   # 일자별 시세 원본 — 없으면 규칙8은 "주장 없음" 검사만
 ) -> GateResult:
     """신호 dict 의 팩트가 원본 df(+소진율 Series)와 정합한지 대조한다."""
     checks: list[str] = []
@@ -290,31 +291,137 @@ def verify_signals(
         else:
             checks.append(f"소진율 직렬화 정합: {len(recent_own)}일 날짜·값이 원본과 일치")
 
-        # 7c 교차(출처가 다른 두 API 대조): 외국인이 순매수한 날 소진율이
-        # 내려가면(또는 그 반대) 두 소스가 모순 — 검증 못 한 숫자는 안 올린다.
-        # Δ는 원본 Series 에서 직접 계산(7b 로 주장==원본 이 이미 확인됨).
-        # Δ=0 및 ±반올림 허용: 소량 매매는 소수 2자리에서 변화 없음이 정상.
-        cross_bad: list[str] = []
+        # 7c 교차(출처가 다른 두 API 대조) — 판정이 아니라 '주석'이다.
+        # 매매동향(장내 거래대금)과 소진율(전체 보유주수)은 측정 범위가 다른
+        # 물리량이라, 방향 불일치가 데이터 오염의 증거가 못 된다 — 장외·시간외·
+        # 블록딜은 매매동향에 안 잡힌다(하이닉스 2026-07-01 실측: 장내 -114억원
+        # vs 보유 Δ+0.04%p ≈ 29만주 ≈ 575억원어치). 그래서 방향 상이는 실패가
+        # 아니라 참고로 기록해 리포트에 정직하게 남긴다(라벨 정직성 — SKT 소진율
+        # 교훈과 동일). 단 '거래일 자체가 안 맞음'은 두 API 가 같은 달력을 줘야
+        # 한다는 진짜 정합 조건이라 실패 유지. Δ=0·±반올림(소수 2자리)은
+        # 상이로 세지 않는다. Δ는 원본 Series 에서 직접 계산(7b 로 주장==원본
+        # 이 이미 확인됨).
+        cross_missing: list[str] = []
+        cross_notes: list[str] = []
         for idx in recent_own.index:
             pos = ownership.index.get_loc(idx)
             if pos == 0:
                 continue                      # 전일 값 없음 → Δ 계산 불능(검사 생략)
             if idx not in df.index:
-                cross_bad.append(f"{idx.date().isoformat()} (매매동향에 없는 거래일)")
+                cross_missing.append(idx.date().isoformat())
                 continue
             delta = float(ownership.iloc[pos]) - float(ownership.iloc[pos - 1])
             fore = float(df.loc[idx, sig.COL_FORE])
             if (fore > 0 and delta < -_EHRT_ROUND_TOL) or \
                (fore < 0 and delta > _EHRT_ROUND_TOL):
-                cross_bad.append(
-                    f"{idx.date().isoformat()} (순매수 {fore:+.0f}백만원인데 Δ{delta:+.2f}%p)"
+                cross_notes.append(
+                    f"{idx.date().isoformat()} (장내 순매수 {fore:+.0f}백만원 vs Δ{delta:+.2f}%p)"
                 )
-        if cross_bad:
+        if cross_missing:
             failures.append(
-                f"소진율-순매수 교차 정합: {len(cross_bad)}일 모순 (첫 건: {cross_bad[0]})"
+                f"소진율-순매수 교차 정합: 매매동향에 없는 거래일 "
+                f"{len(cross_missing)}건 (첫 건: {cross_missing[0]})"
+            )
+        elif cross_notes:
+            checks.append(
+                f"소진율-순매수 교차 정합: {len(cross_notes)}일 방향 상이 — "
+                f"장외·시간외 등 장내 밖 요인 가능, 참고 주석 (첫 건: {cross_notes[0]})"
             )
         else:
             checks.append("소진율-순매수 교차 정합: 표시 창 전일에서 방향 모순 없음")
+
+    # ── 규칙 8: 일자별 시세(price_daily) 정합 ─────────────
+    # 원본이 별도 API(quotes df)라 규칙 7과 같은 비대칭 사다리로 처리한다.
+    # 8b 항등식이 이 규칙의 핵심: 종가·전일비·등락률은 같은 행 안에서
+    # 산술로 맞물려야 한다(전일비=종가차, 등락률=전일비÷전일종가) — 같은
+    # 출처의 내부 모순은 7c(다른 출처 간 방향)와 달리 진짜 손상이라 하드 실패.
+    claimed_price = signals.get("price_daily")
+    if quotes is None or quotes.empty:
+        if claimed_price is None:
+            checks.append("시세: 원본 없음 → 주장 없음(정합, 표시도 없음)")
+        else:
+            failures.append("시세 정합: 원본이 없는데 신호가 시세를 주장")
+    elif claimed_price is None:
+        failures.append("시세 정합: 원본이 있는데 price_daily 가 신호에 없음")
+    else:
+        # 8a 직렬화 정합: 주장 배열 ↔ 원본 tail(PRICE_TABLE_DAYS).
+        # 시세 4필드는 quotes 와, 순매매량(주) 2필드는 매매동향 df 와 대조한다
+        # (두 출처 분리 근거는 signals.COL_FORE_QTY 주석 — 값이 다른 두 API).
+        recent_q = quotes.tail(config.PRICE_TABLE_DAYS)
+        expected_dates = [idx.date().isoformat() for idx in recent_q.index]
+        claimed_dates = [row.get("date") for row in claimed_price]
+        _QUOTE_FIELDS = {"close": sig.COL_CLOSE, "change": sig.COL_CHANGE,
+                         "change_rate": sig.COL_CHANGE_RATE, "volume": sig.COL_VOLUME}
+        _QTY_FIELDS = {"frgn_qty": sig.COL_FORE_QTY, "inst_qty": sig.COL_INST_QTY}
+        has_qty = all(col in df.columns for col in _QTY_FIELDS.values())
+
+        def _qty_ok(row: dict, idx) -> bool:
+            """수량 필드 정합: df 에 출처가 있으면 값 일치, 없으면 주장도 없어야
+            한다(비대칭 사다리의 필드 단위 축소판 — 출처 없는 숫자 차단)."""
+            for field, col in _QTY_FIELDS.items():
+                v = row.get(field)
+                if not has_qty or idx not in df.index:
+                    if v is not None:
+                        return False              # 원본 없는데 주장
+                elif v is None or not math.isclose(
+                    float(v), float(df.loc[idx, col]), rel_tol=1e-9, abs_tol=1e-6,
+                ):
+                    return False                  # 원본 있는데 누락/불일치
+            return True
+
+        if claimed_dates != expected_dates:
+            failures.append("시세 직렬화 정합: 날짜열이 원본과 불일치")
+        elif any(
+            row.get(field) is None or not math.isclose(
+                float(row[field]), float(recent_q.iloc[i][col]),
+                rel_tol=1e-9, abs_tol=1e-6,
+            )
+            for i, row in enumerate(claimed_price)
+            for field, col in _QUOTE_FIELDS.items()
+        ):
+            failures.append("시세 직렬화 정합: 값이 원본과 불일치")
+        elif any(
+            not _qty_ok(row, idx)
+            for row, idx in zip(claimed_price, recent_q.index)
+        ):
+            failures.append("시세 직렬화 정합: 순매매량(주)이 매매동향 원본과 불일치")
+        else:
+            checks.append(
+                f"시세 직렬화 정합: {len(recent_q)}일 날짜·시세 4필드"
+                f"{'·순매매량 2필드' if has_qty else ''}가 원본과 일치"
+            )
+
+        # 8b 항등식: 전일비=종가(t)−종가(t−1) (±0.5원 — 원 단위 정수),
+        # 등락률=전일비÷전일종가×100 (±0.011%p — 소수 2자리 반올림 흡수).
+        # 전일 종가는 원본 quotes 에서 찾는다(표시 창 첫 행도 원본엔 전일이 있음).
+        # 원본의 첫 행(전일 없음)만 검사 생략 — 7c 의 pos==0 생략과 같은 원리.
+        identity_bad: list[str] = []
+        for idx in recent_q.index:
+            pos = quotes.index.get_loc(idx)
+            if pos == 0:
+                continue
+            close = float(quotes.iloc[pos][sig.COL_CLOSE])
+            prev_close = float(quotes.iloc[pos - 1][sig.COL_CLOSE])
+            change = float(quotes.iloc[pos][sig.COL_CHANGE])
+            rate = float(quotes.iloc[pos][sig.COL_CHANGE_RATE])
+            if abs(change - (close - prev_close)) > 0.5:
+                identity_bad.append(f"{idx.date().isoformat()} (전일비≠종가차)")
+            elif prev_close and abs(rate - change / prev_close * 100.0) > 0.011:
+                identity_bad.append(f"{idx.date().isoformat()} (등락률≠전일비÷전일종가)")
+        if identity_bad:
+            failures.append(
+                f"시세 항등식: {len(identity_bad)}일 불일치 (첫 건: {identity_bad[0]})"
+            )
+        else:
+            checks.append("시세 항등식: 표시 창 모두 전일비·등락률이 종가와 맞물림")
+
+        # 8c 달력 교차: 시세 표의 거래일은 매매동향의 마지막 거래일들과 같아야
+        # 한다(같은 거래소 달력·같은 확정일 절단). 다르면 두 수집이 어긋난 것.
+        expected_cal = [idx.date().isoformat() for idx in df.index[-len(claimed_dates):]]
+        if claimed_dates != expected_cal:
+            failures.append("시세-매매동향 교차 정합: 거래일 달력이 불일치")
+        else:
+            checks.append(f"시세-매매동향 교차 정합: {len(claimed_dates)}일 달력 일치")
 
     return GateResult(
         gate=2,

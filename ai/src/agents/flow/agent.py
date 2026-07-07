@@ -31,7 +31,7 @@ def _get(final, key):
 def run(
     query: str = "",
     stock_name: str = config.TARGET_NAME,
-    ticker: str = config.TARGET_TICKER,
+    ticker: str | None = config.TARGET_TICKER,
     base_date: date | None = None,
 ) -> AgentOutput:
     """수급 리포트를 생성해 AgentOutput으로 반환한다.
@@ -39,6 +39,9 @@ def run(
     base_date=None(기본)이면 게이트1이 18시 규칙으로 후보일을 산출하고,
     수집 후 응답의 마지막 확정 거래일로 확정된다. 명시하면 그 날짜로
     게이트1 검증(미래·장중 미확정 차단)만 거친다.
+    ticker=None 이면 게이트1이 종목명으로 티커를 해석한다(KIS 종목 마스터,
+    stock_master.py) — 못 찾으면 게이트1 실패(예외). 메타의 티커는 해석
+    결과(최종 상태의 input)를 쓴다.
     query(사용자 원문)는 상태에만 담고 LLM 프롬프트엔 넣지 않는다(인젝션 방어).
     """
     # ── 초기 상태 구성 ───────────────────────────────────
@@ -57,6 +60,10 @@ def run(
     # base_date 는 collect 가 확정한 실제 거래일(입력 후보일이 아님 — 정직한 메타).
     confirmed = _get(final, "base_date")
     base_date_iso = confirmed.isoformat() if confirmed else None
+
+    # 티커는 게이트1의 해석 결과(최종 상태의 input)가 진실 — 입력 인자가 아니라.
+    final_input = _get(final, "input")
+    ticker = final_input.ticker if final_input is not None else ticker
 
     # ── JSON 출구 (배선 A): 검증된 state 를 옮겨 담기만 — 재계산·재검증 없음 ──
     payload = build_payload(

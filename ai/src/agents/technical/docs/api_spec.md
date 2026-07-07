@@ -60,13 +60,25 @@ GET  /api/technical/reports/{report_id}
 
 | 식별자 | 생성 주체 | 저장 여부 | 설명 |
 | --- | --- | --- | --- |
-| `request_id` | Backend 또는 Top Supervisor | DB 미저장 | 런타임 요청 추적 ID. contracts JSON 안에 포함, 저장·조회 대상 아님 |
-| `trace_id` | AI Technical Supervisor | DB 저장 | AI 실행 추적 ID. `technical_reports.trace_id`에 저장 |
+| `request_id` | Chat/Top Supervisor (technical API 직접 호출 시 Backend fallback) | **DB 저장** | 사용자 요청/Supervisor 실행 **1건 단위**. `technical_reports.request_id`(UNIQUE NOT NULL) + `agent_reports.request_id`에 저장(요청 추적·중복 식별 키). 한 요청의 하위 에이전트들이 공유(아래 4.1) |
+| `trace_id` | AI Technical Supervisor | DB 저장 | **개별 에이전트 실행** 추적 ID. `technical_reports.trace_id`에 검색키로 저장(실제 trace 이벤트는 별도 운영 sink) |
 | `report_id` | Backend | DB 저장 | API 조회용 ID. **별도 컬럼이 아니라 `technical_reports.id`(UUID)를 의미** |
+
+> **이 표(§4)가 식별자 소유권/저장의 정본이다.** contracts.md·trace_schema.md·schema.md 등은 이 표를 따른다.
 
 ### 4.1 request_id
 
-MVP 단독 구조에서는 백엔드가 생성한다. 전체 멀티에이전트 구조에서는 Top Supervisor가 생성한 값을 백엔드가 전달받아 AI에 넘긴다. 런타임 추적용이며 DB에는 저장하지 않는다(`contracts.md` 런타임 필드 규약).
+MVP 단독 구조에서는 백엔드가 생성한다. 전체 멀티에이전트 구조에서는 Top Supervisor가 생성한 값을 백엔드가 전달받아 AI에 넘긴다.
+
+> **갱신(물리 스키마 정본 반영):** 통합 backend 물리 스키마에서 `technical_reports.request_id`는
+> **UNIQUE NOT NULL 컬럼으로 저장**된다(요청 추적·중복 식별 키 — 향후 멱등 처리의 기반). backend 는
+> AI 응답의 `request_id`가 자신이 보낸 값과 일치하는지 검증한 뒤 저장한다. 따라서 이전의 "DB 미저장"
+> 규정은 폐기한다. (contracts.md 의 출력 JSON 에 런타임 필드로 포함되며, 생성·조회 응답의 `report`
+> 안에도 포함된다.)
+>
+> ※ 현재 UNIQUE 는 **중복 저장 거부**까지이며, 동일 요청 재수신 시 기존 리포트를 반환하는 멱등
+> 로직은 아직 없다(backend 가 매 요청마다 새 request_id 생성). 실제 멱등은 Top Supervisor 의
+> request_id 전달 + 기존 report 조회/반환이 구현된 뒤 확정한다.
 
 ### 4.2 trace_id
 
@@ -87,7 +99,7 @@ AI Technical Supervisor 진입 시 생성된다. AI 응답 JSON에 포함되며,
   - 프론트엔드는 `frontend_mapping.md` 기준으로 렌더링한다.
   - AI 최종 출력 구조는 `contracts.md`를 따른다.
   - **판단 불가·폴백도 가능한 경우 실패가 아니라 정상 응답으로 처리한다**(§8).
-- **응답 wrapper:** 백엔드 응답은 `{ report_id, report }` 형태다. `report`는 `contracts.md`의 Agent Output JSON을 그대로 담고, 백엔드는 `report_id`만 추가한다. `request_id`는 `report` 내부에 이미 있으므로 wrapper 최상위에 중복으로 두지 않는다. 단, **저장된 리포트 조회 응답에서는 `request_id`가 제외될 수 있다** — 런타임 필드라 DB에 저장하지 않기 때문이며, 영구 조회는 `report_id`·`trace_id`를 기준으로 한다(§6.2).
+- **응답 wrapper:** 백엔드 응답은 `{ report_id, report }` 형태다. `report`는 `contracts.md`의 Agent Output JSON을 그대로 담고, 백엔드는 `report_id`만 추가한다. `request_id`는 `report` 내부에 이미 있으므로 wrapper 최상위에 중복으로 두지 않는다. `request_id`는 backend 가 저장하며(§4), **생성·조회 응답 모두 `report` 안에 포함된다.**
 
 ---
 
@@ -159,6 +171,7 @@ GET /api/technical/reports/{report_id}
 {
   "report_id": "550e8400-e29b-41d4-a716-446655440000",
   "report": {
+    "request_id": "req_abc123",
     "ticker": "373220",
     "as_of": "2026-06-30T14:30:00+09:00",
     "source": "KIS",
@@ -175,7 +188,7 @@ GET /api/technical/reports/{report_id}
 }
 ```
 
-> `request_id`는 런타임 필드라 DB에 저장하지 않으므로, **저장된 리포트 조회 응답에는 포함되지 않는다**(`contracts.md` 런타임 필드 규약). 영구 조회·디버깅은 `report_id`·`trace_id`를 기준으로 한다. 그 외 `report` 구조는 생성 응답과 동일하게 contracts를 따른다.
+> `request_id`는 backend 가 `technical_reports.request_id`(UNIQUE NOT NULL)에 저장하므로(§4), **저장된 리포트 조회 응답의 `report` 안에도 포함된다.** 영구 조회·디버깅은 `report_id`·`trace_id`·`request_id`로 가능하다. `report` 구조는 생성 응답과 동일하게 contracts를 따른다.
 
 | 상태 | 의미 |
 | --- | --- |

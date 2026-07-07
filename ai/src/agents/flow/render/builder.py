@@ -17,9 +17,11 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup, escape
 
 from .. import config
 from ..core.signals import COL_FORE, COL_INST, INST_DETAIL, SUBJECTS
@@ -44,6 +46,7 @@ def _fact_rows(signals: dict) -> list[dict]:
     """
     consecutive = signals.get("consecutive", {})
     strength = signals.get("strength", {})
+    persistence = signals.get("persistence", {})
 
     ratios = {
         s: strength.get(s, {}).get("ratio") for s in SUBJECTS
@@ -60,6 +63,11 @@ def _fact_rows(signals: dict) -> list[dict]:
             direction = "매수" if r > 0 else "매도" if r < 0 else "중립"
             pct = f"{r * 100:+.1f}%"
             bar_w = (abs(r) / max_abs * 50.0) if max_abs else 0.0
+        # amt: 강도와 같은 창(RECENT_DAYS)의 순매수 합 — persistence.sum_5 의
+        # 재표현(게이트2 규칙5 검증분). 백만원→억원은 ratio→% 와 같은 표시용
+        # 단위 재표현(값 자체는 signals 에 백만원 그대로). 없으면 None(구버전 방어).
+        v5 = persistence.get(subject, {}).get("sum_5")
+        amt = f"{v5 / 100:+,.1f}억원" if v5 is not None else None
         rows.append({
             "name": subject,
             "days": c.get("days"),
@@ -68,6 +76,7 @@ def _fact_rows(signals: dict) -> list[dict]:
             "strong": strength.get(subject, {}).get("strong"),
             "direction": direction,
             "pct": pct,
+            "amt": amt,
             "bar_w": round(bar_w, 1),
         })
     return rows
@@ -237,6 +246,77 @@ def _inst_detail_view(signals: dict) -> dict | None:
     return {"rows": rows, "leader": leader}
 
 
+def _price_table_view(signals: dict) -> list[dict] | None:
+    """일자별 시세 팩트 → 날짜별 표(기준점) 뷰. 값 변형 없음 — 표시 포맷·순서만.
+
+    최신이 위(내림차순)는 네이버 등 시세표의 읽기 관행 — 표시 순서 재배치일 뿐
+    값은 price_daily(게이트2 규칙8 검증분) 그대로. ▲/▼와 색은 부호의 재표현.
+    없으면 None → placeholder 후퇴.
+    """
+    price = signals.get("price_daily")
+    if not price:
+        return None
+    def _qty(v: float | None) -> dict:
+        """순매매량 셀 — 값이 없으면(출처 결손) '—' 로 정직하게 비운다."""
+        if v is None:
+            return {"txt": "—", "cls": "mut"}
+        return {"txt": f"{v:+,.0f}",
+                "cls": "buy" if v > 0 else "sell" if v < 0 else "mut"}
+
+    rows = []
+    for row in reversed(price):                     # 최신이 위 — 표시 순서만 뒤집음
+        chg, rate = row["change"], row["change_rate"]
+        chg_cls = "buy" if chg > 0 else "sell" if chg < 0 else "mut"
+        rows.append({
+            "label": row["date"][5:].replace("-", "/"),   # "07/04" (다른 블록과 동일)
+            "close": f"{row['close']:,.0f}",
+            "chg": ("▲ " if chg > 0 else "▼ " if chg < 0 else "― ") + f"{abs(chg):,.0f}",
+            "chg_cls": chg_cls,
+            "rate": f"{rate:+.2f}%",
+            "vol": f"{row['volume']:,.0f}",
+            "inst": _qty(row.get("inst_qty")),      # 기관 먼저 — 네이버 표 순서
+            "fore": _qty(row.get("frgn_qty")),
+        })
+    return rows
+
+
+# 해석 강조 마커(**…**) — 프롬프트가 1~2곳만 허용한 볼드 표시.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _interpretation_html(text: str | None) -> Markup | None:
+    """해석의 **강조** 마커 → <b>, 줄바꿈 → 문단(<p>) (표시용 마크업 변환만).
+
+    본문 전체를 escape 한 뒤 우리 마커만 태그로 바꾼다 — LLM 이 HTML 을
+    흘려도 문자 그대로 보이고, 허용되는 마크업은 볼드·문단 둘뿐이다.
+    문단은 프롬프트가 지시한 빈 줄(또는 단일 줄바꿈) 기준으로 나눈다.
+    """
+    if text is None:
+        return None
+    escaped = _BOLD_RE.sub(r"<b>\1</b>", str(escape(text)))
+    paragraphs = [p.strip() for p in re.split(r"\n+", escaped) if p.strip()]
+    return Markup("".join(f"<p>{p}</p>" for p in paragraphs))
+
+
+def _header_price(signals: dict) -> dict | None:
+    """헤더용 현재가 요약 — price_daily 마지막 행(기준일 종가)의 재표현.
+
+    시세 표와 같은 검증분(게이트2 규칙8)에서 최신 하루만 크게 보여준다.
+    값 변형 없음 — 포맷·부호 색만. 없으면 None → 헤더는 종전대로.
+    """
+    price = signals.get("price_daily")
+    if not price:
+        return None
+    last = price[-1]
+    chg, rate = last["change"], last["change_rate"]
+    return {
+        "close": f"{last['close']:,.0f}",
+        "chg": ("▲ " if chg > 0 else "▼ " if chg < 0 else "― ") + f"{abs(chg):,.0f}",
+        "rate": f"({rate:+.2f}%)",
+        "cls": "buy" if chg > 0 else "sell" if chg < 0 else "mut",
+    }
+
+
 def _headline(rows: list[dict]) -> str:
     """요약 헤드라인 — 각 주체 direction(이미 확정된 부호의 단어)을 문구로 조립.
 
@@ -276,10 +356,14 @@ def build_report(
         "gauge": _gauge(signals),
         "headline": _headline(rows),
         "interpretation": interpretation,   # None이면 템플릿이 placeholder로 후퇴
+        "interpretation_html": _interpretation_html(interpretation),  # **…** → <b>
         "daily": _daily_view(signals),      # None이면 템플릿이 placeholder로 후퇴
         "persistence": _persistence_view(signals),  # None이면 placeholder로 후퇴
         "inst_detail": _inst_detail_view(signals),  # None이면 placeholder로 후퇴
         "ownership": _ownership_view(signals),      # None이면 placeholder로 후퇴
+        "price_table": _price_table_view(signals),  # None이면 placeholder로 후퇴
+        "price_days": config.PRICE_TABLE_DAYS,
+        "header_price": _header_price(signals),     # None이면 헤더는 종전대로
         # 임계값 표기는 config 를 '표시'하는 것(재계산 아님).
         "consec_threshold": config.CONSECUTIVE_THRESHOLD,
         "strength_threshold": f"{config.STRENGTH_THRESHOLD * 100:.0f}%",
