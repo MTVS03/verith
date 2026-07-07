@@ -21,7 +21,6 @@ dependencies = [
     "transformers>=5.13.0",
     "torch>=2.12.1",
     "apscheduler>=3.10.0",
-    "pykrx>=1.2.8",
 ]
 
 [dependency-groups]

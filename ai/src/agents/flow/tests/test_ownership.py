@@ -1,9 +1,11 @@
 """외국인 소진율(ownership) — 직렬화 + 게이트2 규칙7의 '거짓 차단' 검증.
 
 원리: 규칙 7c(교차)는 유일하게 서로 다른 두 API(매매동향 df ↔ 소진율 Series)를
-  맞대는 검사다. 두 출처가 모순이면 어느 쪽이 틀렸는지 몰라도 "표시하면 안 된다"는
-  판정은 확실하다. 반올림 허용(±0.01%p)이 정상 흔들림은 흡수하되 진짜 모순은
-  잡는지 경계 양쪽을 확인하고, 7a(범위)·7b(직렬화)와 비대칭 사다리도 겨냥한다.
+  맞대는 검사다. 단 두 출처는 측정 범위가 다른 물리량(장내 거래대금 vs 전체
+  보유주수)이라 방향 불일치는 오염의 증거가 못 된다(장외·시간외·블록딜) —
+  그래서 방향 상이는 차단이 아니라 '참고 주석'으로 기록되는지를 검증한다.
+  거래일 불일치(같은 달력이어야 함)만 하드 실패다. 7a(범위)·7b(직렬화)와
+  비대칭 사다리는 종전대로 '거짓 차단'을 겨냥한다.
 """
 
 import copy
@@ -68,16 +70,27 @@ def test_rule7b_catches_tampered_serialization():
     assert any("소진율 직렬화 정합" in f for f in result.failures)
 
 
-def test_rule7c_catches_cross_source_contradiction():
-    """외국인이 순매수(+)인데 소진율이 매일 하락 → 두 출처 모순 → 규칙 7c 실패."""
-    contradicting = pd.Series(
+def test_rule7c_notes_direction_disagreement_without_blocking():
+    """순매수(+)인데 소진율 하락 → 장내 밖 요인 가능 → 차단 아님, 주석으로 기록."""
+    disagreeing = pd.Series(
         [47.00 - 0.05 * i for i in range(25)], index=_IDX, name="외국인한도소진율"
     )
     result = verify_rules.verify_signals(
-        _df, signals.compute_signals(_df, contradicting), contradicting
+        _df, signals.compute_signals(_df, disagreeing), disagreeing
+    )
+    assert result.passed is True                                  # 리포트는 막지 않는다
+    assert not any("교차 정합" in f for f in result.failures)
+    assert any("방향 상이" in c for c in result.checks)            # 정직한 주석은 남긴다
+
+
+def test_rule7c_fails_on_calendar_mismatch():
+    """소진율에 있는 거래일이 매매동향에 없음 → 두 API 달력 불일치 → 하드 실패."""
+    df_missing_day = _df.drop(_IDX[-2])   # 표시 창(최근 5일) 안의 하루를 매매동향에서 제거
+    result = verify_rules.verify_signals(
+        df_missing_day, signals.compute_signals(df_missing_day, _own), _own
     )
     assert result.passed is False
-    assert any("교차 정합" in f for f in result.failures)
+    assert any("매매동향에 없는 거래일" in f for f in result.failures)
 
 
 def test_rule7c_tolerates_rounding_wobble():

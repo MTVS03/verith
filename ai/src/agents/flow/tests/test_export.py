@@ -32,7 +32,7 @@ from agents.flow.schemas import AgentInput, GateResult, SupplyDemandState  # noq
 _NOW = datetime(2026, 7, 6, 19, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 _INPUT = AgentInput(query="", stock_name="삼성전자", ticker="005930")
 _SIGNALS = sig.compute_signals(df_foreign_5day_streak)
-_GATE1, _ = verify_input(_INPUT, date(2026, 7, 3), now=_NOW)
+_GATE1, _, _ = verify_input(_INPUT, date(2026, 7, 3), now=_NOW)
 _GATE2 = verify_signals(df_foreign_5day_streak, _SIGNALS)
 _META = {"stock_name": "삼성전자", "ticker": "005930",
          "market": "KOSPI200", "base_date": "2026-07-03"}
@@ -90,11 +90,11 @@ def test_run_wires_payload_into_agent_output(monkeypatch):
 
     monkeypatch.setattr(graph, "fetch_supply_demand",
                         lambda base_date, ticker: (df_foreign_5day_streak, "KOSPI200"))
-    monkeypatch.setattr(graph, "fetch_foreign_ownership", lambda base_date, ticker: None)
+    monkeypatch.setattr(graph, "fetch_daily_quotes", lambda base_date, ticker: None)
     # 게이트2 강제 실패 → explain(LLM) 없이 render 후퇴 — 외부 경계 없이 배선만 본다.
     monkeypatch.setattr(
         graph, "verify_signals",
-        lambda df, signals, ownership=None: GateResult(
+        lambda df, signals, ownership=None, quotes=None: GateResult(
             gate=2, passed=False, failures=["강제 실패(테스트)"]),
     )
 

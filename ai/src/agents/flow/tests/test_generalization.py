@@ -42,19 +42,22 @@ def test_collect_without_ticker_raises_instead_of_silent_default():
 
 
 def test_run_rejects_malformed_ticker():
-    """6자리 숫자가 아니면 API 호출 전에 차단(최소 방어 — 정식 검증은 게이트1)."""
-    for bad in ("12345", "ABC123", ""):
+    """6자리 숫자가 아니면 API 호출 전에 차단(최소 방어 — 정식 검증은 게이트1).
+
+    빈 값·None 은 이제 '종목명→티커 해석' 경로라 여기서 다루지 않는다
+    (오프라인 검증은 test_ticker_resolve 가 master 주입으로 담당)."""
+    for bad in ("12345", "ABC123"):
         with pytest.raises(ValueError, match="6자리"):
             agent.run(ticker=bad)
 
 
 def test_market_flows_from_adapter_to_report(monkeypatch):
     """어댑터의 시장명이 원본 그대로 헤더에 실리고, 없으면(None) 표기가 생략된다."""
-    monkeypatch.setattr(graph, "fetch_foreign_ownership", lambda base_date, ticker: None)
+    monkeypatch.setattr(graph, "fetch_daily_quotes", lambda base_date, ticker: None)
     # 게이트2 강제 실패 → explain 건너뛰고 render (외부 경계 최소화, 헤더는 항상 그려짐)
     monkeypatch.setattr(
         graph, "verify_signals",
-        lambda df, signals, ownership=None: GateResult(
+        lambda df, signals, ownership=None, quotes=None: GateResult(
             gate=2, passed=False, failures=["강제 실패(테스트)"]),
     )
 
