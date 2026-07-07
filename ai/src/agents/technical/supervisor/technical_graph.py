@@ -1,22 +1,23 @@
 """Technical Agent 실행 흐름을 LangGraph StateGraph로 표현한다(`feat/technical-langgraph-orchestration`).
 
-**흐름 표현만 바꾼다** — 계산·판단·output schema는 그대로다. 각 node는 기존 supervisor helper를
-**그대로 호출하는 얇은 wrapper**이며 새 로직을 만들지 않는다. helper는 `technical_supervisor`에 남아
-있고 여기서 `_sup.<name>`으로 참조한다(→ 순환 import는 run()의 lazy import로 끊고, deadline
-monkeypatch는 `_sup.check_deadline` 참조로 그대로 동작한다).
+**흐름 표현만 담당한다** — 계산·판단·output schema는 그대로다. 각 node는 `pipeline_steps`(steps)의
+계산 helper를 호출하는 **얇은 wrapper**다. **`technical_supervisor`를 import하지 않는다**
+(`supervisor → graph → pipeline_steps` 단방향).
 
-trace(`trace_start`/`trace_end`)와 allowlist는 `run()` 레벨에 있고 이 graph는 **그 사이 파이프라인**만
-담당한다. deadline stage 문자열·trace node 이름은 기존과 동일하게 유지한다(테스트 계약).
+trace(`trace_start`/`trace_end`)와 allowlist는 `run()`(supervisor) 레벨에 있고, 이 graph는 그 사이
+파이프라인만 담당한다. deadline stage 문자열·trace node 이름은 기존과 동일(테스트 계약). deadline
+check는 `steps.check_deadline`으로 호출한다 — steps 내부 helper의 check와 같은 모듈 attribute라
+테스트가 `pipeline_steps.check_deadline` 한 번 patch로 전부 잡는다.
 
 conditional edge는 **2개뿐**: (1) 빈 일봉 → data_limited, (2) regime unavailable → 안전 착지.
-그 외 fallback/재생성/template fallback은 helper 내부 로직을 그대로 쓴다. checkpointer는 쓰지 않는다.
+그 외 fallback/재생성/template fallback은 steps helper 내부 로직 그대로. checkpointer는 쓰지 않는다.
 """
 
 from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from . import technical_supervisor as _sup
+from . import pipeline_steps as steps
 from .langgraph_state import TechnicalGraphState
 from ..nodes.chart_generate import run_chart_generate
 from ..nodes.confidence_calculate import run_confidence_calculate
@@ -27,26 +28,27 @@ from ..nodes.signal_aggregate import run_signal_aggregate
 from ..schemas.contracts import RiskSummary, TechnicalAgentOutput
 from ..schemas.enums import DataStatus, Regime
 
-# `_sup.<name>`으로 접근하는 심볼(런타임 조회) — 테스트가 sup에 monkeypatch하는 것들과 supervisor가
-# 소유한 helper: check_deadline·INTRADAY_FETCH_ENABLED·fetch_minute_ohlcv·_preprocess·_collect_ohlcv·
-# _interpret·_to_*·_unavailable_output·_empty_regime·_resolve_intraday·_assemble_intraday·
-# _emit_regime_unavailable_skips·_chart_summary·_data_status. (run_* 노드는 위에서 직접 import.)
+
+# ── node wrapper (pipeline_steps helper 호출만) ───────────────────────────────
+def _n_normalize_question(state: TechnicalGraphState) -> dict:
+    steps.check_deadline(state.get("deadline"), "preprocess")
+    normalized = steps.normalize_step(state["llm_client"], state["payload"], state["trace"])
+    return {"normalized": normalized}
 
 
-# ── node wrapper (기존 helper 호출만) ─────────────────────────────────────────
-def _n_preprocess(state: TechnicalGraphState) -> dict:
-    _sup.check_deadline(state.get("deadline"), "preprocess")
-    _normalized, focus = _sup._preprocess(
-        state["llm_client"], state["payload"], state["trace"], state.get("deadline"))
+def _n_focus_analysis(state: TechnicalGraphState) -> dict:
+    steps.check_deadline(state.get("deadline"), "focus_analysis")
+    focus = steps.focus_step(
+        state["llm_client"], state["payload"], state["normalized"], state["trace"])
     return {"focus": focus}
 
 
 def _n_data_collect(state: TechnicalGraphState) -> dict:
     deadline, payload = state.get("deadline"), state["payload"]
-    _sup.check_deadline(deadline, "data_collect")
-    ohlcv, used_stale = _sup._collect_ohlcv(
+    steps.check_deadline(deadline, "data_collect")
+    ohlcv, used_stale = steps._collect_ohlcv(
         payload.ticker, payload.as_of, state["fetcher"], state.get("cache"), state["trace"])
-    _sup.check_deadline(deadline, "post_data_collect")
+    steps.check_deadline(deadline, "post_data_collect")
     return {
         "ohlcv": ohlcv, "used_stale": used_stale,
         "daily": ohlcv["D"], "weekly": ohlcv["W"], "monthly": ohlcv["M"],
@@ -56,16 +58,16 @@ def _n_data_collect(state: TechnicalGraphState) -> dict:
 
 def _n_output_data_limited(state: TechnicalGraphState) -> dict:
     # 빈 일봉 → 안전 착지(data_limited-B). 기존 early-return과 동일.
-    output = _sup._unavailable_output(
+    output = steps._unavailable_output(
         state["payload"], state["trace_id"], DataStatus.DATA_LIMITED,
-        regime=_sup._empty_regime("시세 데이터를 확보하지 못해 국면을 판정하지 않습니다."),
+        regime=steps._empty_regime("시세 데이터를 확보하지 못해 국면을 판정하지 않습니다."),
         charts=[], source=state["source"],
     )
     return {"output": output}
 
 
 def _n_regime_classify(state: TechnicalGraphState) -> dict:
-    _sup.check_deadline(state.get("deadline"), "regime_classify")
+    steps.check_deadline(state.get("deadline"), "regime_classify")
     with state["trace"].node("regime_classify") as span:
         rr = run_regime_classify(state["daily"], state["weekly"], state["monthly"])
         span.output_summary = {
@@ -77,21 +79,21 @@ def _n_regime_classify(state: TechnicalGraphState) -> dict:
 
 
 def _n_output_regime_unavailable(state: TechnicalGraphState) -> dict:
-    # regime 판단 불가 → 노드 6·7·8 skipped + chart 후 안전 착지. 기존 early-return과 동일.
+    # regime 판단 불가 → 노드 4·6·7·8 skipped + chart 후 안전 착지. 기존 early-return과 동일.
     trace = state["trace"]
-    _sup._emit_regime_unavailable_skips(trace)
+    steps._emit_regime_unavailable_skips(trace)
     with trace.node("chart_generate") as span:
         charts = run_chart_generate(state["daily"], state["weekly"], state["monthly"])
-        span.output_summary = _sup._chart_summary(charts)
-    output = _sup._unavailable_output(
+        span.output_summary = steps._chart_summary(charts)
+    output = steps._unavailable_output(
         state["payload"], state["trace_id"], DataStatus.REGIME_UNAVAILABLE,
-        regime=_sup._to_regime_result(state["regime_result"]), charts=charts, source=state["source"],
+        regime=steps._to_regime_result(state["regime_result"]), charts=charts, source=state["source"],
     )
     return {"output": output}
 
 
 def _n_indicator_calculate(state: TechnicalGraphState) -> dict:
-    _sup.check_deadline(state.get("deadline"), "indicator_calculate")
+    steps.check_deadline(state.get("deadline"), "indicator_calculate")
     with state["trace"].node("indicator_calculate") as span:
         bundle = run_indicator_calculate(state["daily"])
         span.output_summary = {"bar_count": len(state["daily"])}
@@ -124,15 +126,15 @@ def _n_risk_detect(state: TechnicalGraphState) -> dict:
 def _n_chart_generate(state: TechnicalGraphState) -> dict:
     with state["trace"].node("chart_generate") as span:
         charts = run_chart_generate(state["daily"], state["weekly"], state["monthly"])
-        span.output_summary = _sup._chart_summary(charts)
+        span.output_summary = steps._chart_summary(charts)
     return {"charts": charts}
 
 
 def _n_interpret_report(state: TechnicalGraphState) -> dict:
-    regime = _sup._to_regime_result(state["regime_result"])
-    signal_summary = _sup._to_signal_summary(state["signal_result"], state["confidence"])
-    _sup.check_deadline(state.get("deadline"), "interpret_report")
-    result = _sup._interpret(
+    regime = steps._to_regime_result(state["regime_result"])
+    signal_summary = steps._to_signal_summary(state["signal_result"], state["confidence"])
+    steps.check_deadline(state.get("deadline"), "interpret_report")
+    result = steps._interpret(
         state["llm_client"], regime=regime, signal=signal_summary,
         signals=state["signal_result"].technical_signals, risks=state["risk_items"],
         focus=state["focus"], trace=state["trace"], deadline=state.get("deadline"),
@@ -142,16 +144,16 @@ def _n_interpret_report(state: TechnicalGraphState) -> dict:
 
 def _n_build_output(state: TechnicalGraphState) -> dict:
     payload, result, rr = state["payload"], state["interpretation"], state["regime_result"]
-    technical_signals = _sup._to_technical_signals(state["signal_result"].technical_signals, result.details)
-    data_status = DataStatus.STALE_CACHE if state["used_stale"] else _sup._data_status(rr)
+    technical_signals = steps._to_technical_signals(state["signal_result"].technical_signals, result.details)
+    data_status = DataStatus.STALE_CACHE if state["used_stale"] else steps._data_status(rr)
 
-    # 선택적 1D intraday(best-effort) — 기존 tail 로직 그대로.
+    # 선택적 1D intraday(best-effort) — 기존 tail 로직 그대로. flag·fetcher는 steps attribute(테스트 patch).
     intraday_fetcher = state.get("intraday_fetcher")
-    if intraday_fetcher is None and _sup.INTRADAY_FETCH_ENABLED:
-        intraday_fetcher = _sup.fetch_minute_ohlcv
-    resolved = _sup._resolve_intraday(
+    if intraday_fetcher is None and steps.INTRADAY_FETCH_ENABLED:
+        intraday_fetcher = steps.fetch_minute_ohlcv
+    resolved = steps._resolve_intraday(
         state.get("intraday_candles"), intraday_fetcher, payload.ticker, payload.as_of)
-    intraday_charts, intraday_context = _sup._assemble_intraday(
+    intraday_charts, intraday_context = steps._assemble_intraday(
         resolved, daily=state["daily"], as_of=payload.as_of, final_regime=state["regime"].final_regime)
 
     output = TechnicalAgentOutput(
@@ -185,7 +187,8 @@ def _route_after_regime(state: TechnicalGraphState) -> str:
 # ── graph build/compile (요청별 state·client를 담지 않음 → module-level 캐시) ──
 def _build() -> object:
     g = StateGraph(TechnicalGraphState)
-    g.add_node("preprocess", _n_preprocess)
+    g.add_node("normalize_question", _n_normalize_question)
+    g.add_node("focus_analysis", _n_focus_analysis)
     g.add_node("data_collect", _n_data_collect)
     g.add_node("output_data_limited", _n_output_data_limited)
     g.add_node("regime_classify", _n_regime_classify)
@@ -198,8 +201,9 @@ def _build() -> object:
     g.add_node("interpret_report", _n_interpret_report)
     g.add_node("build_output", _n_build_output)
 
-    g.add_edge(START, "preprocess")
-    g.add_edge("preprocess", "data_collect")
+    g.add_edge(START, "normalize_question")
+    g.add_edge("normalize_question", "focus_analysis")
+    g.add_edge("focus_analysis", "data_collect")
     g.add_conditional_edges("data_collect", _route_after_data,
                             {"data_limited": "output_data_limited", "continue": "regime_classify"})
     g.add_edge("output_data_limited", END)
@@ -213,9 +217,9 @@ def _build() -> object:
     g.add_edge("chart_generate", "interpret_report")
     g.add_edge("interpret_report", "build_output")
     g.add_edge("build_output", END)
-    # checkpointer 없음(단일 요청). **금지: state가 정화되기 전까지 checkpointer·persistent memory·
+    # checkpointer 없음(단일 요청). **금지: state 정화 전까지 checkpointer·persistent memory·
     # LangSmith state tracing을 켜지 않는다** — state에 원본 query(PII)·runtime client가 있어 저장/관측
-    # 시 노출된다(langgraph_state.py 보안 경계). known debt: 결합·노드 분리는 후속 브랜치.
+    # 시 노출된다(langgraph_state.py 보안 경계).
     return g.compile()
 
 

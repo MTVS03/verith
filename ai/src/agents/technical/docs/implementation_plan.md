@@ -91,16 +91,17 @@ src/ai/
         │   ├── risk_detect.py           # 8. 리스크관찰점 (코드)
         │   ├── chart_generate.py        # 9. 차트생성 (코드)
         │   └── interpret_report.py      # 10. 국면해석·리포트 (LLM). prompts/*.md + trajectory_eval 사용
-        ├── supervisor/
-        │   ├── technical_supervisor.py # run() 진입점(allowlist·trace_start/end) + 노드 helper 소유
-        │   ├── technical_graph.py      # LangGraph StateGraph 조율(node=helper wrapper, conditional edge 2개)
-        │   └── langgraph_state.py      # TechnicalGraphState(주입 의존성+중간 산출 채널, secret 미저장)
+        ├── supervisor/                 # 단방향 의존: supervisor → technical_graph → pipeline_steps
+        │   ├── technical_supervisor.py # run() 진입점(allowlist·trace lifecycle·graph.invoke·예외 분기)
+        │   ├── technical_graph.py      # LangGraph StateGraph 조율(node=steps wrapper, conditional edge 2개)
+        │   ├── pipeline_steps.py       # 노드 계산/조립 step helper(normalize/focus/data/interpret/output 등)
+        │   └── langgraph_state.py      # TechnicalGraphState(주입 의존성+중간 산출 채널, runtime-only·저장 금지)
         └── tests/                    # test_plan.md 기준 단위테스트
 ```
 
 폴더 경로는 구현 시 이 문서의 구조를 기준으로 한다. `observability/`·`regime/`·`synthesis/`·`nodes/` 하위는 설계 문서(test_plan·trace_schema·regime_rules·architecture)에서 이미 명시한 경로와 일치한다.
 
-**프롬프트·노드·검증의 3분할(노드 10 기준):** ① `prompts/interpret_report.md`·`regenerate_report.md`는 LLM에 넘길 **텍스트 자원**이고(숫자·라벨 생성 금지, `technical_coding_guidelines §6.1`·`prompts.md §4.1`), ② `nodes/interpret_report.py`는 payload 구성·LLM 응답 파싱·`observability/trajectory_eval.py` 검증 호출·`detail`/`interpretation.text` 병합·template fallback 문장 생성을 맡는 **얇은 노드**이며, ③ **1차 생성→검증 실패→재생성 1회→재검증→최종 fallback 전체 orchestration(재생성 루프)은 `supervisor/technical_supervisor.py`가 소유**한다. `architecture.md §3`이 서술한 "Node는 얇은 어댑터, 로직은 옆 모듈에 위임" 원칙과 일치한다.
+**프롬프트·노드·검증의 3분할(노드 10 기준):** ① `prompts/interpret_report.md`·`regenerate_report.md`는 LLM에 넘길 **텍스트 자원**이고(숫자·라벨 생성 금지, `technical_coding_guidelines §6.1`·`prompts.md §4.1`), ② `nodes/interpret_report.py`는 payload 구성·LLM 응답 파싱·`observability/trajectory_eval.py` 검증 호출·`detail`/`interpretation.text` 병합·template fallback 문장 생성을 맡는 **얇은 노드**이며, ③ **1차 생성→검증 실패→재생성 1회→재검증→최종 fallback 전체 orchestration(재생성 루프)은 `supervisor/pipeline_steps.py::_interpret`가 소유**하고, LangGraph `interpret_report` 노드가 이를 호출한다. `architecture.md §3`이 서술한 "Node는 얇은 어댑터, 로직은 옆 모듈에 위임" 원칙과 일치한다.
 
 **3~9번 코드 노드 어댑터 규약:** `nodes/data_collect.py`·`indicator_calculate.py`·`regime_classify.py`·`signal_aggregate.py`·`confidence_calculate.py`·`risk_detect.py`·`chart_generate.py`는 기존 계산 모듈(`services/kis_client`·`indicators/*`·`regime/*`·`synthesis/*`·`charts/chart_builder`)을 호출하는 **얇은 wrapper**다. 규약:
 - 계산 로직을 노드 안에 다시 만들지 않는다. 모듈 함수만 호출한다.
@@ -141,8 +142,9 @@ src/ai/
 | `observability/trajectory_eval.py` | 검증 ③ LLM 라벨 왜곡 판정 | `test_plan.md`, `trace_schema.md` |
 | `observability/keyword_rules.py` | 검증 ③ 키워드 사전(금지어·라벨 충돌) | `test_plan.md`, `prompts.md` |
 | `nodes/*.py` | LangGraph 노드 어댑터(state 받아 모듈·프롬프트 호출 → state에 결과 얹음). 계산 로직은 옆 모듈, 순서 조율은 supervisor. `nodes/interpret_report.py`가 **10번 노드**(prompts/*.md·trajectory_eval 사용, 재생성 루프는 supervisor) | `architecture.md`, `prompts.md`, `contracts.md` |
-| `supervisor/technical_supervisor.py` | `run()` 진입점(allowlist 선검증·trace_start/end·예외 분기) + 노드 계산 helper 소유. **노드 1~10 실행 순서는 `technical_graph`(LangGraph)가 조율**한다. trace_id 생성, 검증 ③ 재생성 루프(REGEN_MAX_COUNT=1)→template fallback도 helper에 유지 | `architecture.md`, `trace_schema.md`, `contracts.md` |
-| `supervisor/technical_graph.py` | **LangGraph StateGraph 조율**(`feat/technical-langgraph-orchestration`). 각 node는 기존 helper를 호출하는 얇은 wrapper — 계산·output schema 무변경. conditional edge 2개(빈 일봉→data_limited, regime unavailable→안전 착지). checkpointer 미사용, 요청별 client/state는 graph에 담지 않음(module-level 캐시). `run()`이 allowlist·trace_start 뒤 `graph.invoke(state)`로 호출 | `architecture.md`, `trace_schema.md` |
+| `supervisor/technical_supervisor.py` | **`run()` 진입점만**(allowlist 선검증·trace_start/end·`graph.invoke`·top-level 예외 분기). 노드 실행 순서는 `technical_graph`, 계산/조립 helper는 `pipeline_steps`가 소유한다(단방향 의존). `_trace_end_summary`만 여기 유지 | `architecture.md`, `trace_schema.md`, `contracts.md` |
+| `supervisor/technical_graph.py` | **LangGraph StateGraph 조율**. 각 node는 `pipeline_steps`(steps) helper를 호출하는 얇은 wrapper — 계산·output schema 무변경. **`technical_supervisor`를 import하지 않음**(순환 결합 제거, `refactor/technical-graph-pipeline-steps`). conditional edge 2개(빈 일봉→data_limited, regime unavailable→안전 착지). normalize_question·focus_analysis는 실제 별도 node. checkpointer 미사용, 요청별 client/state는 graph에 담지 않음(module-level 캐시) | `architecture.md`, `trace_schema.md` |
+| `supervisor/pipeline_steps.py` | 노드별 **계산/조립 step helper**(`normalize_step`·`focus_step`·`_collect_ohlcv`·`_interpret`·재생성 루프+template fallback·`_to_*`·`_unavailable_output`·intraday resolve/assemble·chart summary·regime_unavailable skipped). leaf만 import(supervisor/graph 미참조). `check_deadline`·`INTRADAY_FETCH_ENABLED`·`fetch_minute_ohlcv`·`REGEN_MAX_COUNT`·`build_intraday_chart_payload`는 이 모듈 attribute(테스트 monkeypatch 지점) | `config.md`, `trace_schema.md` |
 | `agent.py` | 외부 진입점(얇은 wrapper) `run_technical_agent(payload, *, llm_client, fetcher=None, trace_id=None, trace_sink=None)`: 입력 검증(`TechnicalAgentInput` \| dict) → `technical_supervisor.run` 위임 → `TechnicalAgentOutput` 반환. `trace_sink`는 생성하지 않고 그대로 통과(경로·config 모름). node/KIS/LLM/계산 로직을 직접 호출하지 않는다 | `contracts.md` |
 | *(상위)* `src/api/technical.py` | `/internal/technical/analyze`·`/health` FastAPI 라우터(구현). 의존성 주입(`src/api/dependencies.py`: OpenAI client·KIS fetcher·Redis cache·trace sink) → `run_technical_agent` 위임 → §9 error envelope(`src/api/errors.py`). sync agent는 `run_in_threadpool`로 실행. 인증·전체 deadline·PostgreSQL 저장은 후속 | `api_spec.md`, `contracts.md` |
 
