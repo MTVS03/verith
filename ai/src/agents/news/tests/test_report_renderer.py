@@ -1,7 +1,8 @@
-# tests/test_report_renderer.py — 리포트 조립·렌더(TASK 09) 테스트
-"""build_report_model(importance순 TOP N·대표 소수·backend 게이지) + render_html(요약·칩·이스케이프·데이터 제한).
+# tests/test_report_renderer.py — 리포트 조립(TASK 09) 테스트
+"""build_report_model(importance순 TOP N·대표 소수·backend 게이지·④ 답변 내장) → JSON 계약.
 
-DB·LLM 은 부르지 않는다 — 렌더러는 이미 조회·생성된 데이터를 소비만 한다(감성·importance 재계산 없음).
+출력은 HTML 이 아니라 JSON 이다(팀 계약: ai·backend·frontend JSON 통일). 렌더러는 이미 조회·생성된
+데이터를 소비만 한다(감성·importance 재계산 없음). DB·LLM 은 부르지 않는다.
 """
 from __future__ import annotations
 
@@ -61,7 +62,7 @@ def test_subject_not_found_is_data_limited():
     assert "데이터 제한" in (model.note or "")
 
 
-def test_render_html_injects_answer_and_chips():
+def test_report_json_embeds_answer_and_evidence():
     overall = SentimentGauge(positive=41, neutral=31, negative=28)
     events = [
         _ewa("e1", "4분기 실적 발표", 9.0, 4, SentimentGauge(positive=20, neutral=2, negative=4)),
@@ -71,38 +72,63 @@ def test_render_html_injects_answer_and_chips():
     answer = Answer(text="실적 발표가 흐름을 주도했습니다.", evidence_news_ids=[0, 1],
                     cited_event_ids=["e1"], data_limited=False)
     model = rr.build_report_model(_understanding(), resp, answer)
-    html = rr.render_html(model, answer)
+    payload = model.model_dump(mode="json")   # 프론트/백엔드로 나가는 JSON 계약
 
-    # 핵심 목업 섹션 존재
-    for section in ("뉴스 흐름 요약", "주요 이슈", "전체 감성", "분석 기사 수"):
-        assert section in html
-    # ④ 답변 텍스트가 요약 자리에 들어감
-    assert "실적 발표가 흐름을 주도했습니다." in html
-    # 근거 칩(cited_event_ids → 이벤트 제목)
-    assert "4분기 실적 발표" in html
+    # ④ 답변 본문·근거가 JSON 에 내장됨(별도 텍스트 채널 없음)
+    assert payload["answer_text"] == "실적 발표가 흐름을 주도했습니다."
+    assert payload["evidence_news_ids"] == [0, 1]
+    assert payload["cited_event_ids"] == ["e1"]
     # TOP 순서: 실적(9.0)이 HBM(7.0)보다 앞
-    assert html.index("4분기 실적 발표") < html.index("HBM 공급 계약")
-    # 없는 수집메타·반응도는 지어내지 않음
-    for fabricated in ("318", "1.8배", "평소比"):
-        assert fabricated not in html
+    titles = [e["canonical_title"] for e in payload["top_events"]]
+    assert titles == ["4분기 실적 발표", "HBM 공급 계약"]
+    # 없는 수집메타·반응도는 지어내지 않음(그런 키가 애초에 없음)
+    for fabricated in ("collected_count", "dedup_count", "reactivity"):
+        assert fabricated not in payload
 
 
-def test_render_html_data_limited_badge():
+def test_report_json_gauge_ratios_are_computed():
+    """게이지 비율·순점수·라벨을 AI 가 계산해 JSON 에 담는다(프론트 재계산 불필요). 감성 판정 아님."""
+    overall = SentimentGauge(positive=60, neutral=10, negative=30)
+    resp = SubjectQueryResponse(subject="삼성전자", subject_found=True,
+                                events=[_ewa("e1", "이슈", 1.0, 1, SentimentGauge(positive=1))],
+                                overall_gauge=overall)
+    payload = rr.build_report_model(_understanding(), resp, Answer(text="t")).model_dump(mode="json")
+
+    g = payload["overall_gauge"]
+    assert g["total"] == 100
+    assert g["positive_pct"] == 60
+    assert g["negative_pct"] == 30
+    assert g["neutral_pct"] == 10          # 100 - 60 - 30, 합이 100
+    assert g["score"] == 0.3               # (60 - 30) / 100
+    assert g["label"] == "대체로 긍정"      # 긍정 비율 >= 0.6
+
+
+def test_report_json_data_limited_flag_and_note():
     resp = SubjectQueryResponse(subject="없는종목", subject_found=False, events=[])
     answer = Answer(text="데이터 제한으로 표기합니다.", data_limited=True)
-    model = rr.build_report_model(_understanding(), resp, answer)
-    html = rr.render_html(model, answer)
-    assert "데이터 제한" in html
-    assert "추정으로 채우지 않습니다" in html
+    payload = rr.build_report_model(_understanding(), resp, answer).model_dump(mode="json")
+    assert payload["data_limited"] is True
+    assert "데이터 제한" in (payload["note"] or "")
+    # 빈 게이지의 라벨은 '데이터 제한'
+    assert payload["overall_gauge"]["label"] == "데이터 제한"
 
 
-def test_render_html_escapes_special_chars():
-    overall = SentimentGauge(positive=1, neutral=0, negative=0)
-    events = [_ewa("e1", "<script>alert(1)</script>", 9.0, 1, SentimentGauge(positive=1))]
-    resp = SubjectQueryResponse(subject="삼성전자", subject_found=True, events=events, overall_gauge=overall)
+def test_report_json_preserves_special_chars_verbatim():
+    """JSON 은 값을 그대로 실어 보낸다(이스케이프는 렌더하는 프론트 책임). 데이터 유실·변형이 없어야 함."""
+    events = [_ewa("e1", "<b>실적</b> & \"발표\"", 9.0, 1, SentimentGauge(positive=1))]
+    resp = SubjectQueryResponse(subject="삼성전자", subject_found=True, events=events,
+                                overall_gauge=SentimentGauge(positive=1))
     answer = Answer(text="정상 <b>텍스트</b>", cited_event_ids=["e1"])
-    model = rr.build_report_model(_understanding(), resp, answer)
-    html = rr.render_html(model, answer)
-    # 원시 <script> 가 그대로 들어가지 않고 이스케이프됨(XSS 방지)
-    assert "<script>alert(1)</script>" not in html
-    assert "&lt;script&gt;" in html
+    payload = rr.build_report_model(_understanding(), resp, answer).model_dump(mode="json")
+    # 원문이 손실·변형 없이 그대로 담김
+    assert payload["top_events"][0]["canonical_title"] == "<b>실적</b> & \"발표\""
+    assert payload["answer_text"] == "정상 <b>텍스트</b>"
+
+
+def test_fallback_report_json_conforms_to_schema():
+    payload = rr.fallback_report_json(_understanding())
+    assert payload["data_limited"] is True
+    assert "데이터 제한" in (payload["note"] or "")
+    assert payload["top_events"] == []
+    assert payload["answer_text"] == ""
+    assert "overall_gauge" in payload and "total" in payload["overall_gauge"]

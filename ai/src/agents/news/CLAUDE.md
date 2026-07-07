@@ -8,10 +8,10 @@
 ## 1. 이 에이전트가 하는 일
 
 국내 언론사 뉴스를 수집·분석해 종목별 여론과 핵심 이벤트를 지식 그래프로 구성하고,
-최종적으로 **HTML 리포트**를 출력하는 자기완결 에이전트.
+최종적으로 **JSON 리포트**를 출력하는 자기완결 에이전트.
 
 - **입력**: 자유 질문 문장 또는 종목(= "이 종목 요약해줘" 프리셋 질문). 질의 흐름은 자유 질문형(B) 확정.
-- **출력**: HTML 리포트 하나 (감성 게이지 + TOP 이벤트). ④ 답변 텍스트는 별도 채널이 아니라 리포트 안 `뉴스 흐름 요약` 섹션 + 근거 이슈 칩으로 내장.
+- **출력**: JSON 리포트 하나 (감성 게이지 + TOP 이벤트). ④ 답변 텍스트는 별도 채널이 아니라 리포트 안 `뉴스 흐름 요약` 섹션(`answer_text`) + 근거 이슈 칩(`cited_event_ids`)으로 내장. **팀 계약: ai·backend·frontend 모두 JSON 통일** — ai가 만든 리포트 JSON을 backend가 저장하고 frontend가 받아 렌더한다(HTML은 ai가 만들지 않는다).
 - Supervisor는 `graph.py`만 호출한다. 내부는 이 에이전트가 자기완결로 처리.
 
 ---
@@ -46,7 +46,7 @@ graph → query → report
         → ② 그래프순회(Neo4j single/multi-hop)
         → ③ 원문요약조회(PostgreSQL)
         → ④ 답변생성(Qwen3, 근거 news_id)
-  report = HTML 리포트 하나. ④ 답변은 "뉴스 흐름 요약" 섹션(+ 근거 이슈 칩)으로 내장(별도 텍스트 출력 없음).
+  report = JSON 리포트 하나(ReportModel). ④ 답변은 "뉴스 흐름 요약" 섹션(answer_text + 근거 이슈 칩)으로 내장(별도 텍스트 출력 없음). backend 저장·frontend 렌더.
 ```
 저장된 데이터를 읽어 답하고 그린다. 수집·분석하지 않는다. 상세: docs/query_spec.md.
 
@@ -104,7 +104,7 @@ RSS_CANDIDATES = [
 - `schemas/` 에 질의측 **`query.py` 추가 예정**(질문 파싱 결과 + 답변 구조: answer 텍스트 + evidence news_id[]). 아직 미작성.
 - `schemas/` : Pydantic 데이터 구조
 - `scheduler/` : 매시간 배치 (RSS 수집·7일 삭제)
-- `templates/` : HTML 출력 (report.html + css/js)
+- `templates/` : 리포트 UI 목업(report.html + css/js) — **frontend 렌더 참고용 디자인 자산**. ai 코드는 이제 이 파일을 렌더하지 않는다(출력은 JSON, frontend가 렌더). 프론트 레포로 이관 대상.
 - `utils/` : 파싱·유사도·시간 보조
 - `tests/` : mock 기반 테스트
 - `docs/` : 설계 문서 (왜 이렇게 만드는지)

@@ -44,7 +44,7 @@ def test_query_state_keys_and_types_match_contract():
         "query_response": "SubjectQueryResponse",
         "answer": "Answer",
         "report_model": "ReportModel",
-        "html": "str",
+        "report_json": "dict",
     }
 
 

@@ -35,11 +35,11 @@ class BatchState(TypedDict, total=False):
 
 
 class QueryState(TypedDict, total=False):
-    """질의 흐름(query → report)의 상태 키 계약. Supervisor 는 question 을 넣고 html 을 받는다(§3.1)."""
+    """질의 흐름(query → report)의 상태 키 계약. Supervisor 는 question 을 넣고 report_json 을 받는다(§3.1)."""
 
     question: str                                  # 진입(Supervisor 입력. 종목 프리셋도 문자열) → query
     understanding: QueryUnderstanding              # query(09, ①) → query·report
     query_response: SubjectQueryResponse           # query(②) → query·report
     answer: Answer                                 # query(④) → report
     report_model: ReportModel                      # report(09) → report
-    html: str                                      # report(최종 산출) → Supervisor 최종 출력
+    report_json: dict                              # report(최종 산출, JSON) → Supervisor·backend·frontend

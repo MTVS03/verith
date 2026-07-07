@@ -1,6 +1,6 @@
 # tests/test_query_report_nodes.py — 얇은 노드(TASK 09) 테스트
 """query_node/report_node 가 서비스만 호출하고(backend·LLM 직접 호출 없음), 한 단계 실패해도
-예외 없이 '데이터 제한' 리포트로 통과하며 state["html"] 을 채우는지 검증한다.
+예외 없이 '데이터 제한' 리포트로 통과하며 state["report_json"](JSON 계약)을 채우는지 검증한다.
 """
 from __future__ import annotations
 
@@ -67,20 +67,23 @@ def test_query_node_degrades_on_step_failure(monkeypatch):
     assert state["answer"].data_limited is True
 
 
-def test_report_node_fills_html():
+def test_report_node_fills_report_json():
     state = {
         "understanding": QueryUnderstanding(companies=["삼성전자"], period_days=7),
         "query_response": SubjectQueryResponse(subject="삼성전자", subject_found=True),
         "answer": Answer(text="요약 본문", data_limited=True),
     }
     out = report_node_mod.report_node(state)
-    assert isinstance(out["html"], str)
-    assert "<html" in out["html"].lower()
-    assert "요약 본문" in out["html"]
+    payload = out["report_json"]
+    assert isinstance(payload, dict)
+    # ④ 답변이 JSON 리포트 안에 내장됨(별도 텍스트 출력 없음)
+    assert payload["answer_text"] == "요약 본문"
+    assert payload["subject"] == "삼성전자"
+    assert payload["data_limited"] is True
 
 
 def test_report_node_survives_render_failure(monkeypatch):
-    # build_report_model 이 던져도 노드는 최소 HTML 로 통과(흐름 안 죽임).
+    # build_report_model 이 던져도 노드는 최소 JSON 으로 통과(흐름 안 죽임).
     import services.report_renderer as rr
     monkeypatch.setattr(rr, "build_report_model",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("render boom")))
@@ -90,8 +93,9 @@ def test_report_node_survives_render_failure(monkeypatch):
         "answer": Answer(text="x"),
     }
     out = report_node_mod.report_node(state)
-    assert isinstance(out["html"], str)
-    assert "데이터 제한" in out["html"]
+    assert isinstance(out["report_json"], dict)
+    assert out["report_json"]["data_limited"] is True
+    assert "데이터 제한" in (out["report_json"]["note"] or "")
 
 
 def test_nodes_do_not_import_backend_or_llm_directly():

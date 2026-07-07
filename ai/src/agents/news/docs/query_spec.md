@@ -2,14 +2,15 @@
 
 > 사용자 질문을 받아 지식그래프를 순회해 근거 있는 답변 + 리포트를 내는 흐름.
 > 배치 흐름(수집·저장)은 그대로. 이 문서는 "질의 흐름"만 다룬다.
-> 목표 출력(target UI): `veriθ News Report.html` 목업.
+> 출력 = JSON 리포트 하나(ReportModel). frontend가 이 JSON을 받아 렌더한다.
+> 목표 UI 목업(디자인 참고): `veriθ News Report.html` — 프론트 렌더 기준(ai는 렌더하지 않음).
 
 ---
 
 ## 0. 확정 사항
 
 - **B(자유 질문형)로 확정.** A(종목 선택형)는 B에 흡수(프리셋 질문).
-- **출력 = HTML 리포트 하나.** ④ 답변(텍스트)은 **별도 채널이 아니라 리포트 안 `뉴스 흐름 요약` 섹션 + 근거 이슈 칩**으로 삽입한다(목업 구조 그대로). 텍스트만 따로 내보내지 않는다.
+- **출력 = JSON 리포트 하나(ReportModel).** ④ 답변(텍스트)은 **별도 채널이 아니라 리포트 안 `뉴스 흐름 요약` 섹션(answer_text) + 근거 이슈 칩(cited_event_ids)**으로 내장한다. 텍스트만 따로 내보내지 않는다. **팀 계약: ai·backend·frontend 모두 JSON 통일** — ai가 만든 리포트 JSON을 backend가 저장하고 frontend가 목업 UI로 렌더한다(ai는 HTML을 만들지 않는다).
 - **요약·답변 생성 모델 = Qwen3** (목업의 "Gemma" 표기는 Qwen3로 통일).
 - **관련도 점수 = 미확정.** 잠정은 importance순 정렬로 대체(§6).
 
@@ -28,8 +29,8 @@
    ↓
 ④ 답변 생성 (LLM=Qwen3)              근거(news_id) 표시 + 데이터 없으면 "데이터 제한"
    ↓
-출력:  HTML 리포트 하나
-        └ ④ 답변이 "뉴스 흐름 요약" 섹션(+ 근거 이슈 칩)으로 내장 · 감성 게이지 · Top 이벤트
+출력:  JSON 리포트 하나(ReportModel) — backend 저장·frontend 렌더
+        └ ④ 답변이 "뉴스 흐름 요약" 섹션(answer_text + 근거 이슈 칩)으로 내장 · 감성 게이지 · Top 이벤트
 ```
 
 ---
@@ -41,7 +42,7 @@
 - 출력(Pydantic): `companies[]`, `period`(기본 최근 7일), `intent`(관계 / 이유 / 요약 / 현황).
 - **회사명 추출은 LLM 단독이 아니라 "사전(규칙) 우선 → LLM 보완" 2단계로 처리**(§①-1). 기간·의도 파싱은 LLM이 담당.
 - 종목 선택은 `intent=요약, companies=[해당종목]` 프리셋으로 변환.
-- **intent는 "뉴스 흐름 요약" 섹션의 초점·분량을 결정**(별도 텍스트 채널 on/off가 아님, 항상 HTML 안에 들어감):
+- **intent는 "뉴스 흐름 요약" 섹션의 초점·분량을 결정**(별도 텍스트 채널 on/off가 아님, 항상 리포트 JSON 안에 들어감):
   - 관계·이유 → 요약 섹션이 서사(왜/관계) 중심으로 길고 상세.
   - 요약·현황 → 요약 섹션이 짧고 분포·핵심 이슈 중심.
   - 근거가 부족하면 지어내지 말고 해당 섹션에 "데이터 제한" 표기(절대규칙 5).
@@ -103,16 +104,16 @@
 
 ### ④ 답변 생성 (LLM=Qwen3)
 - ③의 요약을 근거로 답변 작성.
-- **이 답변 텍스트가 곧 HTML의 `뉴스 흐름 요약` 섹션 본문**이다. 언급한 핵심 이슈는 "근거 이슈 칩"(예: `#1 4분기 실적 발표`)으로 이벤트에 링크한다.
+- **이 답변 텍스트가 곧 리포트 JSON의 `뉴스 흐름 요약` 섹션 본문(answer_text)**이다. 언급한 핵심 이슈는 "근거 이슈 칩"(cited_event_ids, 예: `#1 4분기 실적 발표`)으로 이벤트에 링크한다(frontend가 칩↔TOP 이벤트를 연결).
 - **모든 주장에 근거 news_id 부착**(어떤 기사가 근거인지 추적 가능). 칩→이벤트→기사 순으로 추적된다.
 - 관련 데이터 없으면 지어내지 말고 섹션에 "데이터 제한" 표기(절대규칙 5).
-- report_renderer가 이 답변을 목업의 `뉴스 흐름 요약` 블록 자리에 렌더한다(별도 텍스트 출력 없음).
+- report_renderer가 이 답변을 `ReportModel.answer_text`에 담아 JSON 리포트로 조립한다(별도 텍스트 출력 없음. 렌더는 frontend).
 
 ---
 
 ## 3. 목표 출력 (target UI) → 데이터 매핑
 
-`veriθ News Report.html` 목업의 각 요소가 어느 단계 산출물인지:
+`veriθ News Report.html` 목업의 각 요소가 어느 단계 산출물인지(= 리포트 JSON의 어느 필드가 그 UI에 매핑되는지). ai는 이 필드를 채운 JSON을 내고, frontend가 목업 UI로 렌더한다:
 
 | UI 요소 | 내용 | 출처 단계 |
 |---|---|---|
@@ -135,7 +136,7 @@
 - **별칭 사전** — `config.py`의 `COMPANY_ALIASES`(별칭→canonical). 규모가 커지면 별도 데이터 모듈로 분리 가능. canonical은 그래프 Company 노드명과 일치. **신규 추가 예정.**
 - `services/graph_query.py` — ② Neo4j 탐색 설계(single/multi-hop). **신규 추가 예정.**
 - `services/backend/query_client.py` — ②③ backend HTTP 조회 + 회사명 그래프 검증(③).
-- `nodes/report.py` + `services/report_renderer.py` + `templates/report.html` — 답변+리포트 렌더.
+- `nodes/report.py` + `services/report_renderer.py` — 답변+리포트를 `ReportModel`로 조립해 JSON(report_json)으로 산출. `templates/report.html`(+css/js)은 **frontend 렌더용 목업 디자인 자산**(ai는 렌더하지 않음).
 - `schemas/query.py` — 질문 파싱 결과(`companies[]`·`period`·`intent`, + 관측용 `dropped_tokens[]`) + 답변 구조(answer 텍스트 + evidence news_id[]). **신규 추가 예정.**
 
 > 위 "신규 추가 예정" 파일은 아직 미작성. 이 문서는 계획이며 코드는 별도 작업에서 만든다.

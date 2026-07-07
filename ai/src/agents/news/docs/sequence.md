@@ -29,7 +29,7 @@ sequenceDiagram
   N->>SV: save_client.py 저장 요청
   SV->>BE: [HTTP] 뉴스·이벤트 저장
   BE-->>SV: 저장 완료
-  Note over N,BE: HTML은 만들지 않음 (데이터만 저장)
+  Note over N,BE: 리포트는 만들지 않음 (데이터만 저장)
 ```
 
 ## 2. 질의(리포트) 흐름 (사용자 요청) — 자유 질문형 B
@@ -53,11 +53,11 @@ sequenceDiagram
   BE-->>SV: 기사 요약·감성·출처
   N->>SV: llm.py ④ 답변생성(Qwen3, 근거 news_id)
   SV-->>N: 답변 텍스트 + evidence news_id[]
-  N->>SV: report_renderer.py HTML 생성(④ 답변을 "뉴스 흐름 요약" 섹션에 삽입)
-  SV-->>N: HTML (뉴스 흐름 요약+근거 칩·게이지·TOP이벤트)
-  N-->>G: HTML 리포트 하나
-  G-->>U: 최종 출력
-  Note over N,BE: 수집·분석 안 함. 답변은 HTML 안에 내장(별도 텍스트 출력 없음)
+  N->>SV: report_renderer.py JSON 리포트 조립(④ 답변을 "뉴스 흐름 요약" 섹션에 내장)
+  SV-->>N: ReportModel (뉴스 흐름 요약+근거 칩·게이지·TOP이벤트)
+  N-->>G: JSON 리포트 하나(report_json)
+  G-->>U: 최종 출력(JSON) — backend 저장·frontend 렌더
+  Note over N,BE: 수집·분석 안 함. 답변은 리포트 JSON 안에 내장(별도 텍스트 출력 없음)
 ```
 
 ## 3. 삭제 흐름 (매시간)

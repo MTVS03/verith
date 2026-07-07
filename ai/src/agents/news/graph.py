@@ -132,12 +132,14 @@ def run_batch(state: BatchState | None = None) -> BatchState:
     return app.invoke(dict(state or {}), config=_run_config())
 
 
-def run_query(question: str) -> str:
-    """질의 그래프를 질문 문자열로 invoke 해 최종 HTML(state["html"])을 반환한다.
+def run_query(question: str) -> dict:
+    """질의 그래프를 질문 문자열로 invoke 해 최종 JSON 리포트(state["report_json"])를 반환한다.
 
-    Supervisor 진입점(CLAUDE.md §1: Supervisor 는 graph.py 만 호출). 종목 프리셋도 question 문자열로 온다.
-    렌더 실패 시에도 report 노드가 최소 '데이터 제한' HTML 로 degrade 하므로(TASK 09) 항상 문자열을 돌려준다.
+    Supervisor 진입점(CLAUDE.md §1: Supervisor 는 graph.py 만 호출). 출력은 HTML 이 아니라 JSON 이다
+    (팀 계약: ai·backend·frontend JSON 통일 — backend 저장·frontend 렌더). 종목 프리셋도 question
+    문자열로 온다. 렌더 실패 시에도 report 노드가 최소 '데이터 제한' JSON 으로 degrade 하므로(TASK 09)
+    항상 dict 를 돌려준다.
     """
     app = build_query_graph()
     result = app.invoke({"question": question}, config=_run_config())
-    return result.get("html", "")
+    return result.get("report_json") or {}

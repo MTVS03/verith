@@ -24,15 +24,17 @@ Table news [note: '기사 원본. Neo4j엔 news_id 참조만 두고 본문은 �
 }
 
 // ─────────── PostgreSQL (리포트 저장) ───────────
-// 질의 흐름 산출물(HTML 리포트 하나)의 식별·이력 저장.
-// ④ 답변 텍스트는 별도 출력이 아니라 HTML 안 "뉴스 흐름 요약" 섹션으로 렌더된다.
+// 질의 흐름 산출물(JSON 리포트 하나)의 식별·이력 저장.
+// 팀 계약: ai·backend·frontend 모두 JSON 통일 — ai가 ReportModel JSON을 만들고 backend가 저장,
+// frontend가 report_json을 받아 렌더한다(HTML은 ai가 만들지 않는다).
+// ④ 답변 텍스트는 별도 출력이 아니라 report_json 안 answer_text("뉴스 흐름 요약" 섹션)로 내장된다.
 Table reports [note: '질의 결과 리포트. report_id는 uuid4(랜덤), 시간순 정렬은 created_at으로'] {
   report_id      uuid      [pk, note: 'Pydantic Field(default_factory=lambda: str(uuid.uuid4())). 컬럼 타입 UUID 권장(TEXT도 무방, backend와 합의)']
   question       text      [note: '사용자 질문(또는 종목 프리셋)']
   intent         varchar   [note: '관계/이유/요약/현황']
-  answer_text    text      [note: '④ 답변 텍스트(원본). HTML "뉴스 흐름 요약" 섹션으로 렌더됨']
-  evidence       jsonb     [note: '근거 news_id 목록(근거 이슈 칩→이벤트→기사 추적)']
-  html           text      [note: '렌더된 HTML 리포트(답변 내장). 또는 경로']
+  answer_text    text      [note: '④ 답변 텍스트(원본). report_json.answer_text와 동일 값 — 조회·검색 편의용 별도 컬럼(backend와 합의)']
+  evidence       jsonb     [note: '근거 news_id 목록(근거 이슈 칩→이벤트→기사 추적). report_json.evidence_news_ids와 동일']
+  report_json    jsonb     [note: '리포트 전체(ReportModel.model_dump(mode="json")). frontend가 이 JSON을 받아 렌더. 답변·게이지·TOP 이벤트 내장']
   created_at     timestamp [note: '시간순 정렬 기준(아이디에 시간정보 안 넣음)']
 }
 
