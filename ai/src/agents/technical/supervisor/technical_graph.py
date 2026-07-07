@@ -19,6 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from . import pipeline_steps as steps
 from .langgraph_state import TechnicalGraphState
+from ..config import KIS_PERIOD_DAILY, KIS_PERIOD_MONTHLY, KIS_PERIOD_WEEKLY
 from ..nodes.chart_generate import run_chart_generate
 from ..nodes.confidence_calculate import run_confidence_calculate
 from ..nodes.indicator_calculate import run_indicator_calculate
@@ -51,7 +52,8 @@ def _n_data_collect(state: TechnicalGraphState) -> dict:
     steps.check_deadline(deadline, "post_data_collect")
     return {
         "ohlcv": ohlcv, "used_stale": used_stale,
-        "daily": ohlcv["D"], "weekly": ohlcv["W"], "monthly": ohlcv["M"],
+        "daily": ohlcv[KIS_PERIOD_DAILY], "weekly": ohlcv[KIS_PERIOD_WEEKLY],
+        "monthly": ohlcv[KIS_PERIOD_MONTHLY],
         "source": "KIS (stale)" if used_stale else "KIS",
     }
 

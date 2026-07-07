@@ -141,18 +141,30 @@ def test_state_is_runtime_only_not_persisted():
     assert "흥미롭습니다" not in final["output"].model_dump_json()  # INTERP_BAD raw → template fallback 대체
 
 
-# ── 단방향 의존: graph는 supervisor를 import하지 않고 pipeline_steps만 참조 ─────
-def test_graph_does_not_import_supervisor():
+# ── 단방향 의존: supervisor → technical_graph → pipeline_steps (역방향 import 없음) ──
+def _imported_modules(module) -> set:
     import ast
     import pathlib
-    src = pathlib.Path(tg.__file__).read_text(encoding="utf-8")
-    imported = set()
-    for node in ast.walk(ast.parse(src)):
+    names: set = set()
+    for node in ast.walk(ast.parse(pathlib.Path(module.__file__).read_text(encoding="utf-8"))):
         if isinstance(node, ast.ImportFrom):
-            imported.add(node.module or "")
-            imported.update(a.name for a in node.names)  # `from . import pipeline_steps` 대비
+            names.add(node.module or "")
+            names.update(a.name for a in node.names)  # `from . import X` 대비
+        elif isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+    return names
+
+
+def test_graph_does_not_import_supervisor():
+    imported = _imported_modules(tg)
     assert not any("technical_supervisor" in m for m in imported)  # 순환 결합 제거
     assert "pipeline_steps" in imported                           # steps만 참조
+
+
+def test_pipeline_steps_does_not_import_graph_or_supervisor():
+    # 단방향 강제: pipeline_steps는 leaf만 import — graph/supervisor를 참조하지 않는다
+    imported = _imported_modules(steps)
+    assert not any(("technical_graph" in m or "technical_supervisor" in m) for m in imported)
 
 
 def test_graph_node_wrappers_call_pipeline_steps():

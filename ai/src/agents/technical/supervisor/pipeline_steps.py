@@ -22,7 +22,7 @@ from datetime import date, datetime, timezone
 
 # INTRADAY_FETCH_ENABLED는 이 모듈 코드가 직접 쓰진 않지만 technical_graph가 `steps.`로 조회하고
 # 테스트가 이 모듈에 monkeypatch하므로 유지한다(fetch_minute_ohlcv도 동일).
-from ..config import BATTERY_TICKERS, REGEN_MAX_COUNT
+from ..config import BATTERY_TICKERS, KIS_PERIOD_DAILY, KIS_PERIOD_MONTHLY, KIS_PERIOD_WEEKLY, REGEN_MAX_COUNT
 from ..config import INTRADAY_FETCH_ENABLED  # noqa: F401 - technical_graph가 steps로 참조·테스트 monkeypatch
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
 from ..charts.intraday_context_builder import build_intraday_context
@@ -74,7 +74,8 @@ OhlcvFetcher = Callable[[str], dict[str, Sequence[OHLCV]]]
 # 1D 분봉 fetcher(선택 주입). (ticker, *, as_of) → IntradayFetchResult. 기본 None(주입 시에만 호출).
 MinuteFetcher = Callable[..., IntradayFetchResult]
 
-_DWM = ("D", "W", "M")
+# D/W/M 리터럴 금지(가이드 §2.1·§8.1) — config의 KIS_PERIOD_* 상수로 가져온다.
+_DWM = (KIS_PERIOD_DAILY, KIS_PERIOD_WEEKLY, KIS_PERIOD_MONTHLY)
 
 # 노드 1·2 LLM 호출 실패 시 내부 대체값(출력에 실리지 않는 orchestration 정보).
 _DEFAULT_FOCUS = ["trend", "momentum", "volume", "support_resistance", "risk"]
@@ -585,7 +586,7 @@ def _stale_reconstruct(
             out[tf] = look.candles
             if look.status == "stale":
                 used_stale = True
-        elif tf == "D":
+        elif tf == KIS_PERIOD_DAILY:
             return None      # 일봉이 없으면 분석 불가 → 원 KIS 예외 전파
         else:
             out[tf] = []     # W/M 없음 → 빈 리스트(regime unavailable·chart 빈 5y로 안전 처리)
