@@ -290,28 +290,41 @@ def verify_signals(
         else:
             checks.append(f"소진율 직렬화 정합: {len(recent_own)}일 날짜·값이 원본과 일치")
 
-        # 7c 교차(출처가 다른 두 API 대조): 외국인이 순매수한 날 소진율이
-        # 내려가면(또는 그 반대) 두 소스가 모순 — 검증 못 한 숫자는 안 올린다.
-        # Δ는 원본 Series 에서 직접 계산(7b 로 주장==원본 이 이미 확인됨).
-        # Δ=0 및 ±반올림 허용: 소량 매매는 소수 2자리에서 변화 없음이 정상.
-        cross_bad: list[str] = []
+        # 7c 교차(출처가 다른 두 API 대조) — 판정이 아니라 '주석'이다.
+        # 매매동향(장내 거래대금)과 소진율(전체 보유주수)은 측정 범위가 다른
+        # 물리량이라, 방향 불일치가 데이터 오염의 증거가 못 된다 — 장외·시간외·
+        # 블록딜은 매매동향에 안 잡힌다(하이닉스 2026-07-01 실측: 장내 -114억원
+        # vs 보유 Δ+0.04%p ≈ 29만주 ≈ 575억원어치). 그래서 방향 상이는 실패가
+        # 아니라 참고로 기록해 리포트에 정직하게 남긴다(라벨 정직성 — SKT 소진율
+        # 교훈과 동일). 단 '거래일 자체가 안 맞음'은 두 API 가 같은 달력을 줘야
+        # 한다는 진짜 정합 조건이라 실패 유지. Δ=0·±반올림(소수 2자리)은
+        # 상이로 세지 않는다. Δ는 원본 Series 에서 직접 계산(7b 로 주장==원본
+        # 이 이미 확인됨).
+        cross_missing: list[str] = []
+        cross_notes: list[str] = []
         for idx in recent_own.index:
             pos = ownership.index.get_loc(idx)
             if pos == 0:
                 continue                      # 전일 값 없음 → Δ 계산 불능(검사 생략)
             if idx not in df.index:
-                cross_bad.append(f"{idx.date().isoformat()} (매매동향에 없는 거래일)")
+                cross_missing.append(idx.date().isoformat())
                 continue
             delta = float(ownership.iloc[pos]) - float(ownership.iloc[pos - 1])
             fore = float(df.loc[idx, sig.COL_FORE])
             if (fore > 0 and delta < -_EHRT_ROUND_TOL) or \
                (fore < 0 and delta > _EHRT_ROUND_TOL):
-                cross_bad.append(
-                    f"{idx.date().isoformat()} (순매수 {fore:+.0f}백만원인데 Δ{delta:+.2f}%p)"
+                cross_notes.append(
+                    f"{idx.date().isoformat()} (장내 순매수 {fore:+.0f}백만원 vs Δ{delta:+.2f}%p)"
                 )
-        if cross_bad:
+        if cross_missing:
             failures.append(
-                f"소진율-순매수 교차 정합: {len(cross_bad)}일 모순 (첫 건: {cross_bad[0]})"
+                f"소진율-순매수 교차 정합: 매매동향에 없는 거래일 "
+                f"{len(cross_missing)}건 (첫 건: {cross_missing[0]})"
+            )
+        elif cross_notes:
+            checks.append(
+                f"소진율-순매수 교차 정합: {len(cross_notes)}일 방향 상이 — "
+                f"장외·시간외 등 장내 밖 요인 가능, 참고 주석 (첫 건: {cross_notes[0]})"
             )
         else:
             checks.append("소진율-순매수 교차 정합: 표시 창 전일에서 방향 모순 없음")
