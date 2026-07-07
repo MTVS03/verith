@@ -254,6 +254,7 @@ MVP는 전체 JSONL 원문이 아니라 요약만 반환한다. 전체 trace log
 > - **deadline**: `TECHNICAL_AGENT_TIMEOUT_SECONDS`(기본 55초 < 60초 계약)로 `Deadline`을 만들어 agent→supervisor에 전달, stage마다 cooperative check(초과 시 `DeadlineExceeded`). endpoint는 `asyncio.wait_for`로 응답 시간까지 바운딩. OpenAI 어댑터는 per-call timeout을 남은 예산 이하로 줄인다. 둘 다 초과 시 504 AI_TIMEOUT. **협조적이라 실행 중 sync 작업을 즉시 죽이진 못하고 다음 check에서 멈춘다** — 진짜 강제 취소(스레드 종료)는 후속.
 > - **인증 미구현**(§7.1 "내부망 또는 내부 토큰" 전제). **이 endpoint는 절대 공개 노출 금지 — production 배포 전 네트워크 격리 또는 내부 인증(gateway/internal token) 필수**. 임의 header는 backend/gateway와 조율해 후속에서 도입.
 > - **후속**: client lifecycle(app lifespan singleton for OpenAI·Redis pool)·PostgreSQL 저장/조회는 backend integration 범위. OpenAI `store=False`(stateless)이며 분석 이력·follow-up context는 backend PostgreSQL이 관리한다(이 브랜치 미구현).
+> - **통합 smoke**: 실제 KIS+Redis+OpenAI로 endpoint/agent 배선을 수동 확인하려면 `scripts/smoke_technical_integration.py`(`--via-testclient`로 이 endpoint 경로 포함). 가이드·비용 주의: `docs/integration_smoke.md`. 기본 `pytest`는 network-free.
 
 ### 7.1 분석 실행
 

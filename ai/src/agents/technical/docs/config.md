@@ -419,7 +419,7 @@ if ticker not in BATTERY_TICKERS:
 - **예외 정책**: OpenAI SDK 예외(timeout·rate limit·auth·connection·API·BadRequest)는 모두 `LlmCallError`로 변환(메시지는 type 이름만). **`raise ... from None`으로 exception chain을 끊어** 원본 OpenAIError가 상위 `logger.exception` traceback에 raw로 노출되지 않게 한다. 실패 시 안전 breadcrumb(`error_type`·`model`·`duration_ms`)만 로깅한다. `OPENAI_API_KEY`·`OPENAI_MODEL` 누락은 `default_openai_client()` 생성 시점의 **config error(fail-fast)** 로 `LlmCallError`와 구분한다.
 - **last_usage**: `complete()` 진입 시 `None`으로 리셋하고 **text 추출 성공 후에만** 저장한다 → 어떤 실패(빈 output·SDK 예외)든 `last_usage=None`. best-effort 메타데이터이며 동시 실행에서 request-scoped state로 신뢰하지 않는다(공유 client면 다른 요청이 덮을 수 있음).
 - **secret/trace**: raw prompt·raw response·API key·Authorization 헤더를 로그·trace·test snapshot에 남기지 않는다. 어댑터는 `model`·`last_usage`(토큰수)를 optional 노출하지만, **trace sink 배선은 이 브랜치 밖**(후속 AI endpoint 통합).
-- **테스트/실행**: `pytest`는 **network-free**(fake SDK 주입). 실제 연결은 수동 smoke(`scripts/smoke_openai_llm.py`, 비용 발생)로만 확인한다.
+- **테스트/실행**: `pytest`는 **network-free**(fake SDK 주입). 실제 연결은 수동 smoke(`scripts/smoke_openai_llm.py`, 비용 발생)로만 확인한다. KIS+Redis+OpenAI **통합** e2e smoke는 `scripts/smoke_technical_integration.py`(가이드: `docs/integration_smoke.md`).
 - **runtime wiring**: `run_technical_agent`는 이 client를 **자동 생성하지 않는다**(계속 주입식, A안). 운영에서는 endpoint가 `default_openai_client()`를 주입한다.
 
 ### 15.1 분석 이력 저장 정책 (store=False + backend DB)
