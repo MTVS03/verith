@@ -423,7 +423,7 @@ def main() -> int:
     print("\n" + "=" * 78)
     print("[요약]")
     print("=" * 78)
-    print(f"단일종목(373220) 결과: " + ", ".join(
+    print("단일종목(373220) 결과: " + ", ".join(
         f"{p}={'OK' if single.get(p, {}).get('ok') else 'FAIL'}" for p in PERIODS))
     print(f"구간 파라미터 동작: {single.get('range_param_works')}")
     ok_cnt = len(results)
