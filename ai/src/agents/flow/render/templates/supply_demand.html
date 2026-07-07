@@ -183,6 +183,7 @@
 
   /* 종합 결론 */
   .concl { font-size:16.5px; line-height:1.75; font-weight:500; }
+  .concl p + p { margin-top:12px; }
   .concl b { font-weight:800; background:linear-gradient(transparent 62%, #FFE3A3 62%);
              padding:0 1px; }
 
@@ -466,7 +467,7 @@
       {% if interpretation %}
         <div class="cap"><span class="tip"
           data-tip="이 해석 문장은 위 팩트와 모순되지 않는지 코드로 대조(검증)를 마친 것입니다">✓ 팩트 대조를 마친 해석</span></div>
-        <p class="concl">{{ interpretation_html }}</p>
+        <div class="concl">{{ interpretation_html }}</div>
       {% else %}
         <div class="placeholder">해석 생략 — 검증을 통과한 해석이 없어 팩트만 표시합니다.</div>
       {% endif %}

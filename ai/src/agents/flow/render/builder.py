@@ -285,14 +285,17 @@ _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 
 
 def _interpretation_html(text: str | None) -> Markup | None:
-    """해석의 **강조** 마커 → <b> (표시용 마크업 변환만, 내용 불변).
+    """해석의 **강조** 마커 → <b>, 줄바꿈 → 문단(<p>) (표시용 마크업 변환만).
 
     본문 전체를 escape 한 뒤 우리 마커만 태그로 바꾼다 — LLM 이 HTML 을
-    흘려도 문자 그대로 보이고, 허용되는 마크업은 볼드 하나뿐이다.
+    흘려도 문자 그대로 보이고, 허용되는 마크업은 볼드·문단 둘뿐이다.
+    문단은 프롬프트가 지시한 빈 줄(또는 단일 줄바꿈) 기준으로 나눈다.
     """
     if text is None:
         return None
-    return Markup(_BOLD_RE.sub(r"<b>\1</b>", str(escape(text))))
+    escaped = _BOLD_RE.sub(r"<b>\1</b>", str(escape(text)))
+    paragraphs = [p.strip() for p in re.split(r"\n+", escaped) if p.strip()]
+    return Markup("".join(f"<p>{p}</p>" for p in paragraphs))
 
 
 def _header_price(signals: dict) -> dict | None:
