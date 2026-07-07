@@ -1,0 +1,13 @@
+[
+  {"rcept_no":"20260313001195","sj_div":"BS","account_id":"ifrs-full_Assets","account_nm":"Assets","thstrm_amount":"101061661000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"BS","account_id":"ifrs-full_CurrentAssets","account_nm":"Current assets","thstrm_amount":"32526899000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"BS","account_id":"ifrs-full_Equity","account_nm":"Equity","thstrm_amount":"47105545000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"BS","account_id":"ifrs-full_EquityAndLiabilities","account_nm":"Equity and liabilities","thstrm_amount":"101061661000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"BS","account_id":"ifrs-full_CurrentLiabilities","account_nm":"Current liabilities","thstrm_amount":"26137148000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"BS","account_id":"ifrs-full_Liabilities","account_nm":"Liabilities","thstrm_amount":"53956116000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"IS","account_id":"ifrs-full_Revenue","account_nm":"Revenue","thstrm_amount":"45932167000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"IS","account_id":"dart_OperatingIncomeLoss","account_nm":"Operating income loss","thstrm_amount":"1180900000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"IS","account_id":"ifrs-full_ProfitLoss","account_nm":"Profit loss","thstrm_amount":"-977063000000","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"IS","account_id":"dart_BasicEarningsLossPerSharePreferredStock","account_nm":"Preferred basic EPS","thstrm_amount":"-33712","currency":"KRW"},
+  {"rcept_no":"20260313001195","sj_div":"IS","account_id":"ifrs-full_BasicEarningsLossPerShare","account_nm":"Basic EPS","thstrm_amount":"-23244","currency":"KRW"}
+]
