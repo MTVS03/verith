@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # SQLAlchemy async DSN. 검증은 _load_settings() 에서(secret-safe).
     DATABASE_URL: str = ""
 
+    # Neo4j(뉴스 지식그래프) 접속. PostgreSQL 과 마찬가지로 별도 DB 서버이며,
+    # bolt 드라이버로 접속한다(예: bolt://localhost:7687). 값·비밀번호는 코드에 박지 않고
+    # .env/환경변수에서 읽는다. 검증은 _load_settings() 에서(secret-safe).
+    NEO4J_URI: str = ""
+    NEO4J_USER: str = ""
+    NEO4J_PASSWORD: str = ""
+
     # AI(technical) 서버 base URL. 코드에 경로를 박지 않고 .env/환경변수에서 읽는다.
     # 없으면 _load_settings() 에서 에러
     AI_SERVICE_URL: str = ""
@@ -58,6 +65,16 @@ def _load_settings() -> Settings:
         raise RuntimeError(
             "DATABASE_URL 이 설정되지 않았습니다. 환경변수 또는 backend/.env 에 "
             "postgresql+asyncpg://... DSN 을 설정하세요."
+        )
+    if not s.NEO4J_URI.strip():
+        raise RuntimeError(
+            "NEO4J_URI 가 설정되지 않았습니다. 환경변수 또는 backend/.env 에 "
+            "bolt://<host>:7687 형태의 URI 를 설정하세요."
+        )
+    if not s.NEO4J_USER.strip() or not s.NEO4J_PASSWORD.strip():
+        raise RuntimeError(
+            "NEO4J_USER / NEO4J_PASSWORD 가 설정되지 않았습니다. 환경변수 또는 "
+            "backend/.env 에 Neo4j 계정 정보를 설정하세요."
         )
     if not s.AI_SERVICE_URL.strip():
         raise RuntimeError(
