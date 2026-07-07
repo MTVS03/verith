@@ -6,6 +6,10 @@
 - Technical 지원 범위(BATTERY_TICKERS)와 무관 — Resolver 는 지원 여부/Agent/intent 를 판단하지 않는다.
 - 응답 계약(Pydantic StockResolveResponse)에 agent/intent/query 키가 없다(문자열 검사 아님).
 - 네트워크 호출 없음. 원문 query 미노출. 카카오 fixture 는 트랜잭션 격리(롤백).
+
+이 테스트는 **Resolver 자체의 방어 동작**만 검증한다. 실제 Top Supervisor 가 비종목 질의에서
+Resolver 를 조건부로 호출/미호출하는지는 **Step 4 의 AI 테스트**에서 검증하며, 여기서는 Supervisor
+동작을 가정하거나 흉내 내지 않는다(stock_resolver.md §6).
 """
 
 from __future__ import annotations
@@ -39,6 +43,10 @@ def test_response_contract_has_no_agent_intent_query():
 
 # ── 비종목 문장 → 200 + not_found/no_match (거부 아님) ───────────────────────
 async def test_non_stock_sentences_are_not_found_200(client, db_session):
+    """방어 테스트: 실제 Supervisor 는 비종목 질의에서 Resolver 를 호출하지 않을 수 있으나,
+    실수로/복합 질의로 호출되더라도 비종목 문장을 **장애가 아닌 안전한 not_found** 로 반환한다.
+    (Supervisor 의 조건부 호출 자체는 Step 4 AI 테스트 범위 — 여기서 가정하지 않는다.)
+    """
     await _seed(db_session)
     for q in ["로제 관련 뉴스 보여줘", "2차전지 산업 뉴스"]:
         r = await client.post(_URL, json={"query": q})
