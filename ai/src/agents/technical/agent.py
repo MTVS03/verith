@@ -13,6 +13,9 @@ from __future__ import annotations
 from typing import Protocol
 
 from .schemas.contracts import TechnicalAgentInput, TechnicalAgentOutput
+from .observability.trace_logger import TraceSink
+from .runtime.deadline import Deadline
+from .services.cache_service import OhlcvCache
 from .supervisor import technical_supervisor
 from .supervisor.technical_supervisor import OhlcvFetcher
 
@@ -32,13 +35,17 @@ def run_technical_agent(
     llm_client: LlmClient,
     fetcher: OhlcvFetcher | None = None,
     trace_id: str | None = None,
+    trace_sink: TraceSink | None = None,
+    cache: OhlcvCache | None = None,
+    deadline: Deadline | None = None,
 ) -> TechnicalAgentOutput:
     """외부 입력을 검증해 `technical_supervisor.run`에 위임한다.
 
     payload가 `TechnicalAgentInput`이면 그대로, dict면 `model_validate`로 검증한다(수동 파싱 안 함).
     그 외 타입은 `TypeError`. `fetcher`가 None이면 supervisor 기본 fetcher를 쓰도록 인자를 넘기지
     않는다(얇은 wrapper — 기본값 중복 정의 금지). `llm_client`·`trace_id`는 그대로 전달한다.
-    """
+    `trace_sink`·`cache`·`deadline`(선택)도 그대로 전달한다 — agent.py는 sink/cache/deadline을
+    **만들지 않고**(경로·config·Redis client·timeout 값 모름) 주입만 통과시킨다(endpoint가 생성)."""
     if isinstance(payload, TechnicalAgentInput):
         agent_input = payload
     elif isinstance(payload, dict):
@@ -48,7 +55,10 @@ def run_technical_agent(
             f"payload는 TechnicalAgentInput 또는 dict여야 합니다: {type(payload).__name__}"
         )
 
-    kwargs = {"llm_client": llm_client, "trace_id": trace_id}
+    kwargs = {
+        "llm_client": llm_client, "trace_id": trace_id, "trace_sink": trace_sink, "cache": cache,
+        "deadline": deadline,
+    }
     if fetcher is not None:  # None이면 supervisor 기본 fetcher 사용(전달 생략)
         kwargs["fetcher"] = fetcher
     return technical_supervisor.run(agent_input, **kwargs)
