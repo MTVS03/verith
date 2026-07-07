@@ -8,7 +8,7 @@ from src.api.deps import get_technical_report_service
 from src.api.schemas.agent_report import ReportsListResponse
 from src.api.services.technical_report_service import TechnicalReportService
 
-router = APIRouter(prefix="/reports", tags=["reports"])
+router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
 @router.get("", response_model=ReportsListResponse)

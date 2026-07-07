@@ -1,16 +1,21 @@
 """테스트용 AI(technical) output 픽스처 — TechnicalAgentOutput 형태의 dict.
 
 실제 AI 계약(ai/src/agents/technical/schemas/contracts.py)의 필드/enum 값과 정합.
-NORMAL_OUTPUT 은 정상 리포트이며, technical_signals 에 **중복 indicator(rsi)** 를 포함해
-UNIQUE(report_id, indicator) 처리(dedup)를 검증할 수 있게 한다.
+NORMAL_OUTPUT 은 계약을 지키는 정상 응답(중복 indicator 없음)이며, 계약 위반 케이스는
+DUP_/MISMATCH_/MALFORMED_ 로 별도 제공한다.
 """
 
 from __future__ import annotations
 
+import copy
+
 TICKER = "373220"
 
+# 저장 시 backend 가 생성한 request_id 로 교체된다(테스트 헬퍼가 주입).
+_PLACEHOLDER_REQUEST_ID = "__REQUEST_ID__"
+
 NORMAL_OUTPUT: dict = {
-    "request_id": "ai-req-xyz",  # 저장 시엔 backend 생성 request_id 를 쓴다(이 값은 무시)
+    "request_id": _PLACEHOLDER_REQUEST_ID,
     "ticker": TICKER,
     "as_of": "2026-07-06T00:00:00+09:00",
     "source": "KIS",
@@ -51,16 +56,6 @@ NORMAL_OUTPUT: dict = {
             "weight": 0.25,
         },
         {
-            # 중복 indicator(rsi) — dedup 대상. 대표 1개만 저장돼야 한다.
-            "indicator": "rsi",
-            "signal": "neutral",
-            "value": 58.0,
-            "metrics": ["RSI 58.0 (weekly)"],
-            "detail": "주봉 기준",
-            "detail_source": "llm",
-            "weight": 0.25,
-        },
-        {
             "indicator": "volume",
             "signal": "neutral",
             "value": None,
@@ -70,17 +65,8 @@ NORMAL_OUTPUT: dict = {
             "weight": 0.2,
         },
     ],
-    "risk": {
-        "items": [
-            {"flag": "near_resistance", "note": "저항 부근", "ref_price": 90000.0},
-        ]
-    },
-    "charts": [
-        {
-            "period": "3m",
-            "chart_data": {"candle_unit": "D", "candles": [], "overlays": []},
-        },
-    ],
+    "risk": {"items": [{"flag": "near_resistance", "note": "저항 부근", "ref_price": 90000.0}]},
+    "charts": [{"period": "3m", "chart_data": {"candle_unit": "D", "candles": [], "overlays": []}}],
     "interpretation": {"text": "전반적으로 강세 흐름입니다.", "source": "llm"},
     "verification": {
         "calc_passed": True,
@@ -92,5 +78,32 @@ NORMAL_OUTPUT: dict = {
     "intraday_context": None,
 }
 
-# 이 output 기준 기대값
-UNIQUE_INDICATORS = {"moving_average", "rsi", "volume"}  # dedup 후 3개
+INDICATORS = ["moving_average", "rsi", "volume"]  # NORMAL_OUTPUT 기준 3개(중복 없음)
+
+
+def _clone(**overrides) -> dict:
+    d = copy.deepcopy(NORMAL_OUTPUT)
+    d.update(overrides)
+    return d
+
+
+# 계약 위반 1: 중복 indicator(rsi 2개) → 502
+DUP_OUTPUT: dict = copy.deepcopy(NORMAL_OUTPUT)
+DUP_OUTPUT["technical_signals"].append(
+    {
+        "indicator": "rsi",
+        "signal": "neutral",
+        "value": 58.0,
+        "metrics": ["RSI 58.0 (weekly)"],
+        "detail": "주봉 기준",
+        "detail_source": "llm",
+        "weight": 0.25,
+    }
+)
+
+# 계약 위반 2: 요청과 다른 ticker → 502
+MISMATCH_TICKER_OUTPUT: dict = _clone(ticker="005930")
+
+# 계약 위반 3: 구조 누락(regime 없음) → 502
+MALFORMED_OUTPUT: dict = copy.deepcopy(NORMAL_OUTPUT)
+del MALFORMED_OUTPUT["regime"]

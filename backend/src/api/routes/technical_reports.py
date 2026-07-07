@@ -1,4 +1,4 @@
-"""technical report 라우트 — POST/GET/DELETE /technical/reports."""
+"""technical report 라우트 — POST/GET/DELETE /api/technical/reports (api_spec §6)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from src.api.clients.ai_client import (
+    AIContractError,
     AITimeoutError,
     AIUnavailableError,
     AIValidationError,
@@ -14,39 +15,40 @@ from src.api.clients.ai_client import (
 from src.api.deps import get_technical_report_service
 from src.api.schemas.technical_report import (
     TechnicalReportCreateRequest,
-    TechnicalReportDetail,
-    TechnicalReportSummary,
+    TechnicalReportEnvelope,
 )
 from src.api.services.technical_report_service import TechnicalReportService
 
-router = APIRouter(prefix="/technical/reports", tags=["technical-reports"])
+router = APIRouter(prefix="/api/technical/reports", tags=["technical-reports"])
 
 
-@router.post("", response_model=TechnicalReportSummary, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TechnicalReportEnvelope, status_code=status.HTTP_201_CREATED)
 async def create_technical_report(
     req: TechnicalReportCreateRequest,
     service: TechnicalReportService = Depends(get_technical_report_service),
-) -> TechnicalReportSummary:
-    """AI 분석 호출 → 결과 저장 → 요약 반환. AI 실패는 상태코드로 매핑."""
+) -> TechnicalReportEnvelope:
+    """AI 분석 호출 → 응답 검증 → 저장 → { report_id, report } 반환(api_spec §6.1)."""
     try:
         return await service.create_report(req)
     except AIValidationError as exc:
+        # AI 가 요청(ticker/query)을 거부(422) → 클라이언트 입력 문제
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except (AIContractError, AIUnavailableError) as exc:
+        # 응답 계약 위반·AI 사용 불가 = upstream 오류 → 502
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except AITimeoutError as exc:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
-    except AIUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
-@router.get("/{report_id}", response_model=TechnicalReportDetail)
+@router.get("/{report_id}", response_model=TechnicalReportEnvelope)
 async def get_technical_report(
     report_id: UUID,
     service: TechnicalReportService = Depends(get_technical_report_service),
-) -> TechnicalReportDetail:
-    detail = await service.get_report_detail(report_id)
-    if detail is None:
+) -> TechnicalReportEnvelope:
+    envelope = await service.get_report(report_id)
+    if envelope is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
-    return detail
+    return envelope
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

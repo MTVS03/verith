@@ -1,21 +1,19 @@
 """technical report 영속화 (repository).
 
-순수 DB 접근만 담당한다. AI output → ORM 매핑은 service 가 한다.
+순수 DB 접근만 담당한다. AI output → ORM 매핑·검증은 service 가 한다.
 자식 테이블은 ON DELETE CASCADE 이므로 root 삭제만으로 함께 삭제된다.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.common.stock import Stock
 from db.models.technical.report_chart import TechnicalReportChart
-from db.models.technical.report_followup import TechnicalReportFollowup
 from db.models.technical.report_interpretation import TechnicalReportInterpretation
 from db.models.technical.report_risk_note import TechnicalReportRiskNote
 from db.models.technical.report_signal import TechnicalReportSignal
@@ -23,26 +21,13 @@ from db.models.technical.report_verification import TechnicalReportVerification
 from db.models.technical.technical_report import TechnicalReport
 
 
-@dataclass
-class TechnicalReportDetailRows:
-    """상세 조회 결과 묶음(root + 자식들)."""
+async def ensure_stock(session: AsyncSession, *, stock_code: str, stock_name: str) -> None:
+    """stocks 에 종목이 없을 때만 insert(마스터 보호 — 기존 이름 덮어쓰지 않음).
 
-    report: TechnicalReport
-    signals: list[TechnicalReportSignal]
-    charts: list[TechnicalReportChart]
-    risk_notes: list[TechnicalReportRiskNote]
-    interpretation: TechnicalReportInterpretation | None
-    verification: TechnicalReportVerification | None
-    followups: list[TechnicalReportFollowup]
-
-
-async def upsert_stock(session: AsyncSession, *, stock_code: str, stock_name: str) -> None:
-    """stocks upsert. 있으면 stock_name·updated_at 갱신(마스터는 삭제하지 않음)."""
+    ON CONFLICT DO NOTHING 이므로 이미 있으면 stock_name 을 갱신하지 않는다.
+    """
     stmt = pg_insert(Stock).values(stock_code=stock_code, stock_name=stock_name)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Stock.stock_code],
-        set_={"stock_name": stmt.excluded.stock_name, "updated_at": func.now()},
-    )
+    stmt = stmt.on_conflict_do_nothing(index_elements=[Stock.stock_code])
     await session.execute(stmt)
 
 
@@ -71,42 +56,9 @@ async def add_report(
     await session.flush()
 
 
-async def get_detail(session: AsyncSession, report_id: UUID) -> TechnicalReportDetailRows | None:
-    """root + 전 자식 조회. 없으면 None."""
-    report = await session.get(TechnicalReport, report_id)
-    if report is None:
-        return None
-
-    async def _children(model, order_col):
-        rows = await session.execute(
-            select(model).where(model.report_id == report_id).order_by(order_col)
-        )
-        return list(rows.scalars().all())
-
-    signals = await _children(TechnicalReportSignal, TechnicalReportSignal.display_order)
-    charts = await _children(TechnicalReportChart, TechnicalReportChart.display_order)
-    risk_notes = await _children(TechnicalReportRiskNote, TechnicalReportRiskNote.display_order)
-    followups = await _children(TechnicalReportFollowup, TechnicalReportFollowup.created_at)
-
-    interp = await session.execute(
-        select(TechnicalReportInterpretation).where(
-            TechnicalReportInterpretation.report_id == report_id
-        )
-    )
-    verif = await session.execute(
-        select(TechnicalReportVerification).where(
-            TechnicalReportVerification.report_id == report_id
-        )
-    )
-    return TechnicalReportDetailRows(
-        report=report,
-        signals=signals,
-        charts=charts,
-        risk_notes=risk_notes,
-        interpretation=interp.scalar_one_or_none(),
-        verification=verif.scalar_one_or_none(),
-        followups=followups,
-    )
+async def get_report(session: AsyncSession, report_id: UUID) -> TechnicalReport | None:
+    """root 조회(없으면 None). API 는 report.output_payload 를 report 로 반환한다."""
+    return await session.get(TechnicalReport, report_id)
 
 
 async def delete_root(session: AsyncSession, report_id: UUID) -> int:

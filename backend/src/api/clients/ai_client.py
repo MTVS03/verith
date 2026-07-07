@@ -33,6 +33,13 @@ class AIValidationError(AIClientError):
     """
 
 
+class AIContractError(AIClientError):
+    """AI 의 200 응답이 계약을 위반(구조/범위/정합성). upstream 오류 → 502 로 매핑.
+
+    예: 필수 필드 누락, 수치 범위 초과, indicator 중복, 요청↔응답 ticker/request_id 불일치.
+    """
+
+
 class AIClient:
     """technical AI 서버 호출기. 요청마다 짧게 AsyncClient 를 연다."""
 
