@@ -60,13 +60,18 @@ GET  /api/technical/reports/{report_id}
 
 | 식별자 | 생성 주체 | 저장 여부 | 설명 |
 | --- | --- | --- | --- |
-| `request_id` | Backend 또는 Top Supervisor | DB 미저장 | 런타임 요청 추적 ID. contracts JSON 안에 포함, 저장·조회 대상 아님 |
+| `request_id` | Backend 또는 Top Supervisor | **DB 저장** | 요청 추적 ID. backend 통합 물리 스키마의 `technical_reports.request_id`(UNIQUE NOT NULL)에 저장된다(아래 4.1) |
 | `trace_id` | AI Technical Supervisor | DB 저장 | AI 실행 추적 ID. `technical_reports.trace_id`에 저장 |
 | `report_id` | Backend | DB 저장 | API 조회용 ID. **별도 컬럼이 아니라 `technical_reports.id`(UUID)를 의미** |
 
 ### 4.1 request_id
 
-MVP 단독 구조에서는 백엔드가 생성한다. 전체 멀티에이전트 구조에서는 Top Supervisor가 생성한 값을 백엔드가 전달받아 AI에 넘긴다. 런타임 추적용이며 DB에는 저장하지 않는다(`contracts.md` 런타임 필드 규약).
+MVP 단독 구조에서는 백엔드가 생성한다. 전체 멀티에이전트 구조에서는 Top Supervisor가 생성한 값을 백엔드가 전달받아 AI에 넘긴다.
+
+> **갱신(물리 스키마 정본 반영):** 통합 backend 물리 스키마에서 `technical_reports.request_id`는
+> **UNIQUE NOT NULL 컬럼으로 저장**된다(멱등·재요청 추적). backend 는 AI 응답의 `request_id`가
+> 자신이 보낸 값과 일치하는지 검증한 뒤 저장한다. 따라서 이전의 "DB 미저장" 규정은 폐기한다.
+> (contracts.md 의 출력 JSON 에는 여전히 런타임 필드로 포함되며, 저장 응답에도 포함될 수 있다.)
 
 ### 4.2 trace_id
 
