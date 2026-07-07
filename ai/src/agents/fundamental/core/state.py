@@ -6,6 +6,12 @@ from .contract import Evidence, FundamentalRequest, FundamentalResponse
 
 
 class FundamentalAgentState(TypedDict, total=False):
+    """LangGraph 노드가 공유하는 상태 계약.
+
+    숫자·점수·라벨은 calculate/verify/report 경로에서만 신뢰하고,
+    planner/critic은 정성적 계획과 검토 결과만 이 상태에 더한다.
+    """
+
     request: FundamentalRequest
     use_cache: bool
     corp_code: str
@@ -29,7 +35,9 @@ class FundamentalAgentState(TypedDict, total=False):
     evidence: list[Evidence]
     consistency_notes: list[dict[str, Any]]
     evidence_graph: dict[str, Any]
+    analysis_plan: dict[str, Any]
     analyst_plan: dict[str, Any]
+    selected_paths: list[dict[str, Any]]
     retrieval_context: dict[str, Any]
     trend: dict[str, Any]
     score: int
@@ -43,10 +51,19 @@ class FundamentalAgentState(TypedDict, total=False):
     llm_model: str
     llm_latency_ms: int
     llm_usage: dict[str, int | None]
+    llm_usage_records: list[dict[str, Any]]
     llm_guard_violations: list[str]
     verification_summary: dict[str, Any]
     cost_summary: dict[str, Any]
     confidence: float
+    agent_decisions: list[dict[str, Any]]
+    failures: list[dict[str, Any]]
+    run_context: dict[str, Any]
+    llm_call_count: int
+    planner_usage: dict[str, int | None]
+    critic_usage: dict[str, int | None]
+    critic_result: dict[str, Any]
+    critic_revision_used: bool
     meta: dict[str, Any]
     response: FundamentalResponse
     node_trace: list[dict[str, Any]]
