@@ -8,6 +8,8 @@
 
 > **LLM은 이 에이전트에서 3곳에만 쓰인다:** 노드 1(질문 정규화)·2(분석 포커스 정리)·10(국면 해석). 나머지 7개 노드는 결정론 코드다(`pipeline.md`). 이 문서는 그 3곳 + 재생성 변형을 다룬다.
 
+> **프롬프트 텍스트 자원은 `prompts/*.md`에 둔다.** Prompt 1→`normalize_question.md`, Prompt 2→`focus_analysis.md`, Prompt 10→`interpret_report.md`, Prompt 10-R→`regenerate_report.md`(재생성은 별도 파일로 분리). 이 파일들을 실제로 불러 LLM에 넘기고 응답을 병합하는 **노드 어댑터는 `nodes/*.py`**(노드 10 = `nodes/interpret_report.py`)이며, 노드 10 출력 문장의 **검증 ③은 `observability/trajectory_eval.py`**(+`keyword_rules.py`)가 수행한다. **검증 실패 시 재생성 1회→template fallback으로 이어지는 루프 orchestration은 `supervisor/technical_supervisor.py`가 소유**한다(노드는 생성·검증·병합·fallback 문장 제공까지).
+
 ---
 
 ## 1. 공통 프롬프트 원칙
@@ -127,9 +129,13 @@ Prompt 10은 이미 확정된 값을 **입력으로 받아 문장만 반환**한
   ],
   "risk_items": [
     { "flag": "volume_not_confirmed", "note": "거래량 확인이 약해 현재 신호의 강도는 제한적입니다." }
-  ]
+  ],
+  "analysis_focus": ["trend", "momentum"],
+  "focus_summary": "추세와 모멘텀을 중심으로 확인합니다."
 }
 ```
+
+> **`analysis_focus`·`focus_summary`(노드 2 산출)는 선택적 설명 강조 힌트다.** supervisor가 노드 2 결과를 payload에 넣어 준다. LLM은 이 힌트로 **어떤 관점을 더 풀어 설명할지**만 참고하고, **확정 라벨·수치·신호는 바꾸지 않는다**(prompts.md §3의 "설명 강조 관점"을 노드 10에서 실제 활용하는 연결 지점). 힌트가 없어도(축약·데이터 부족) Prompt 10은 정상 동작한다.
 
 > `daily_regime`·`weekly_trend`·`monthly_trend`·`alignment_flag`를 입력에 명시하는 이유: LLM은 라벨을 만들지 않지만, 코드가 확정한 멀티프레임 맥락을 문장으로 풀려면 이 값들이 입력에 있어야 한다. 특히 검증 ③은 `alignment_flag=counter_trend`인데 해석이 역행 맥락을 누락하면 실패시키므로, LLM이 `regime_context`만 보고 추론하게 두지 않고 `alignment_flag`를 직접 준다.
 
@@ -182,9 +188,9 @@ signal · value · metrics · weight · risk flag
 
 ## 5. Prompt 10-R — 라벨 왜곡 재생성
 
-**노드:** 10(재생성 루프) · **역할:** 검증 ③ 실패 시 확정 라벨을 강제 주입해 문장만 다시 생성한다.
+**노드:** 10(재생성 루프) · **파일:** `prompts/regenerate_report.md`(Prompt 10과 별도 자원) · **역할:** 검증 ③ 실패 시 확정 라벨을 강제 주입해 문장만 다시 생성한다.
 
-> **책임 경계:** **10-R은 재생성만 한다. 통과/실패 판정은 LLM이 하지 않는다 — 검증 ③ 코드가 한다.** LLM에게 "이번엔 맞게 썼는지 스스로 판단해봐"라고 시키지 않는다. 프롬프트(문장 생성)와 검증(코드 판정)의 책임을 섞지 않는다.
+> **책임 경계:** **10-R은 재생성 프롬프트(문장 생성)만 정의한다. 통과/실패 판정은 LLM이 하지 않는다 — 검증 ③ 코드(`observability/trajectory_eval.py`)가 한다.** 그리고 "1차 실패 → 10-R로 재생성 → 재검증 → 최종 fallback"으로 이어지는 **루프 실행 자체는 `supervisor/technical_supervisor.py`가 소유**한다(`nodes/interpret_report.py`는 1회 생성·검증·병합·fallback 문장 제공까지). LLM에게 "이번엔 맞게 썼는지 스스로 판단해봐"라고 시키지 않는다. 프롬프트(문장 생성)와 검증(코드 판정)의 책임을 섞지 않는다.
 
 **흐름:**
 ```

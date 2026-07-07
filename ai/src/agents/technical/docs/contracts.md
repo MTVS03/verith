@@ -33,7 +33,7 @@ Top Supervisor가 쿼리를 도메인별로 변형해 넘긴다. 에이전트는
 | `ticker` | string | ✅ | 종목 코드 (6자리) |
 | `query` | string | ✅ | 변형된 도메인 질의 (기술적 분석 관점) |
 | `request_id` | string | ✅ | 요청 추적용 ID (trace 연결). **런타임 필드** — 출력 JSON에 그대로 되돌려주지만 DB에 저장하지 않는다(영구 추적은 `trace_id`·`report_id` 기준). 따라서 저장된 리포트 조회 응답에는 없을 수 있다. |
-| `as_of` | ISO8601 | ✅ | 분석 기준 시점 |
+| `as_of` | ISO8601 | ✅ | 분석 기준 시점. **리포트 표시 기준일이자 KIS 조회 종료일(`end_date`)로도 사용된다** — supervisor가 `data_collect`에 넘겨 KIS D/W/M 조회의 종료일로 스레딩한다(생략 불가한 입력이라 항상 존재). **미래 `as_of`는 거부**(ValueError). 자세한 흐름은 `kis_mapping.md §8.2`. |
 
 *에이전트는 다른 에이전트의 존재를 모른다. 위 4개만 받으면 독립 동작한다.*
 
@@ -125,7 +125,7 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 }
 ```
 
-위 정상 출력 예시의 `charts[].chart_data: {}`는 축약 표기이며, 실제 구조는 `chart_annotation_spec.md`의 `candle_unit`·`candles`·`overlays`·`subcharts`·`annotations`를 따른다.
+위 정상 출력 예시의 `charts[].chart_data: {}`는 축약 표기이며, 실제 구조는 `chart_annotation_spec.md`의 `candle_unit`·`candles`·`overlays`·`subcharts`·`annotations`를 따른다. 위 예시의 `charts`는 D/W/M 3종(`3m`·`1y`·`5y`)이며, 장중 분봉(`1d`)은 조건부로만 추가된다(아래 "1D intraday" 참조).
 
 #### 필드 그룹 설명
 
@@ -150,7 +150,7 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 | --- | --- | --- |
 | `indicator` | **코드** | 지표 종류 (moving_average·rsi·volume·support_resistance·pattern) |
 | `signal` | **코드** | 긍정/중립/부정 판정 (`enums.md` signal). LLM이 바꿀 수 없다 |
-| `value` | **코드** | 대표 수치 (결정론 계산 결과) |
+| `value` | **코드** | 대표 수치 (결정론 계산 결과). **계산 가능하면 숫자, 데이터 부족 등으로 계산 불가하면 `null`** (`float \| None`). `null`은 0을 의미하지 않는다 — 계산 불가를 정직히 표현한다(예: 봉 부족으로 거래량비 산출 불가). |
 | `metrics[]` | **코드** | 화면 표시용 계산 수치 칩 배열 (예: `"5MA 82,900"`). 결정론 산출물 |
 | `detail` | **LLM** | 위 확정값(signal·value·metrics)을 자연어로 푼 설명 문장 |
 | `detail_source` | — | `detail`의 최종 출처: `llm` / `llm_regenerated` / `template_fallback` |
@@ -162,6 +162,31 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 2. **판정 불변.** LLM은 `signal`·`value`·`metrics`를 바꿀 수 없다. `detail`은 이미 확정된 값을 서술만 한다. "긍정"인데 "약세" 뉘앙스로 쓰는 것도 왜곡이다.
 3. **검증 ③ 대상.** 각 `detail`은 해당 지표의 코드 확정 `signal`과 일치하는지 trajectory eval로 검사한다(`interpretation.text`와 동일한 검증 축). 불일치 시 재생성 1회 → 실패 시 해당 지표의 `detail`을 코드 템플릿 문장으로 폴백하고 `detail_source="template_fallback"`으로 표기한다.
 4. **매수/매도 금지.** `detail` 문장도 사용자 노출 문구이므로 "사라/팔라"가 아니라 관찰·서술 톤을 쓴다(`enums.md` 사용 규약 3).
+
+#### 1D intraday (Beta) — `charts[].period="1d"` 조건부 + `intraday_context`(optional)
+
+장중 분봉(1d)은 **보조 화면**이다(정본: `chart_annotation_spec.md §3.1`). **기존 D/W/M 계약은 그대로 유지되며**, 아래는 그 위에 얹히는 **선택적** 확장이다.
+
+- **`ChartPeriod`에 `1d` 추가.** 기존 D/W/M 차트는 계속 `3m`·`1y`·`5y` 3종이며 **항상 존재**한다. `1d`는 **intraday 데이터가 있을 때만** `charts[]`에 조건부로 추가된다.
+- **`charts`는 더 이상 항상 `len == 3`이 아니다.** 소비 측(프론트·backend)은 총개수가 아니라 **period 집합**으로 처리한다: `{3m, 1y, 5y}`는 반드시 존재하고, `1d`는 있을 수도 없을 수도 있다.
+- **`charts[].chart_data`는 판별 유니온** `ChartData | IntradayChartData`이며 **판별자는 `candle_unit`**이다: D/W/M → `ChartData`(`candle_unit` ∈ {`D`,`W`,`M`}), 1d intraday → `IntradayChartData`(`candle_unit` = `1min`).
+- **시간 축 분리.** 기존 `OHLCV.date`는 **날짜 전용(`YYYY-MM-DD`)** 을 그대로 유지한다(D/W/M candles·차트 계약 불변). intraday 봉은 별도 `IntradayCandle.timestamp`(`YYYY-MM-DDTHH:MM:SS`)를 쓴다.
+- **`IntradayChartData` 필수 필드:** `candle_unit="1min"` · `candles[]`(IntradayCandle) · `previous_close` · `day_high` · `day_low` · `short_ma[]`. `vwap`·`rsi`는 선택(빈 배열로 예약). volume은 `candles[].volume`으로 표현한다.
+
+**`intraday_context` (optional, top-level):** `TechnicalAgentOutput.intraday_context: IntradayContext | None`(기본 `null`). 없어도 기존 D/W/M 출력은 그대로 통과한다.
+
+| 필드 | 의미 |
+| --- | --- |
+| 관측값 | `status` · `latest_price` · `intraday_return_pct` · `day_high`/`day_low` · `day_range_position` · `cumulative_volume` · `cumulative_trading_value` · `volume_spike` · `short_ma` · `vwap` 등. `latest_price`·`cumulative_volume`·`cumulative_trading_value`는 **KIS output1 정본값(fetcher metadata) 우선**, 없으면 candle fallback(마지막 close·분봉 volume 합; `cumulative_trading_value`는 candle 합산 불가라 metadata만) — `kis_mapping.md §12.5` |
+| `intraday_regime_hint` | 장중 흐름 요약 힌트(`upward_intraday`/`downward_intraday`/`sideways_intraday`/`volatile_intraday`/`unavailable`). **판단이 아니라 힌트** |
+| `regime_alignment` | D/W/M `final_regime`과 힌트의 정합(`aligned`/`counter`/`neutral`/`unavailable`) |
+| `confidence_adjustment` | **context 내부 설명값.** 계약상 `[-cap, +cap]`(`cap = INTRADAY_CONFIDENCE_ADJUSTMENT_CAP = 0.05`, `config.md §12`) — **`IntradayContext` 스키마가 `Field(ge=-cap, le=cap)`로 직접 강제**한다. v1 구현: aligned=+cap, counter=−cap, 그 외 0.0(volatile은 양수 금지). **현재 top-level `signal.confidence`에 직접 반영하지 않는다** |
+| `signal_score_adjustment` | 계약상 `[-cap, +cap]`(같은 `cap`, 스키마가 강제) — **v1 구현은 항상 0.0**(미조정). 범위를 `0.0`으로 고정(`Literal[0.0]`)하지 않고 ±cap을 열어 둔 것은 Phase 2에서 계약 변경 없이 사용하기 위함이다(B안) |
+| `risk_notes` | 기존 `RiskFlag`(enums) 확장이 아니라 **`intraday_context` 내부 중립 표현 문자열 리스트**. **최대 `INTRADAY_RISK_NOTE_MAX_COUNT`(=3)개 — 스키마가 `Field(max_length=3)`로 강제**한다. 기존 `risk.items[]`와 별개 |
+
+**불변식:** intraday는 **`final_regime`을 덮어쓰지 않는다**(읽기 전용). 현재 단계에서 **top-level `confidence`·`signal_score`·`risk` 구조는 intraday로 변경하지 않는다**(보정값은 `intraday_context` 내부 설명용). `confidence_adjustment`·`signal_score_adjustment`(±cap)·`risk_notes`(≤3) 경계는 **문서 관례가 아니라 Pydantic 스키마가 강제**하며, 그 정본 상수는 `config.py §14`/`config.md §12`다. `intraday_context`는 아직 전용 저장 테이블에 매핑하지 않는다(런타임/Beta — 저장 여부는 후속 결정).
+
+**구현 상태 (Beta) — 리포트 생성 시 함께 포함(best-effort):** KIS 분봉 매핑은 공식 샘플로 확정됐고(`kis_mapping.md §12`), **`kis_client.fetch_minute_ohlcv`는 구현 완료**다. 1D intraday는 **프론트 1d 탭 클릭 시 따로 조회하는 구조가 아니라, 리포트 생성 요청 1회에 D/W/M(3m/1y/5y)과 함께 조립**된다. 활성 조건: `config.INTRADAY_FETCH_ENABLED=True`(`.env`/환경변수 override 가능) **또는** 명시 `intraday_fetcher` 주입. 이때 supervisor가 `run()` 안에서 D/W/M 뒤에 분봉을 조회해 `charts`에 `1d`와 `intraday_context`를 얹는다. **기본(flag False·미주입)** 이면 기존 D/W/M과 동일(1d 없음). **D/W/M은 필수 데이터, 1D intraday는 best-effort** — fetch 실패·빈 응답은 D/W/M output 실패로 전파되지 않고 intraday만 생략된다(`intraday_context=None`, 1d 미포함). **날짜 정합성:** KIS 주식당일분봉조회는 당일 데이터만 제공하므로, `as_of`가 당일이 아니면(반환 분봉 날짜 ≠ `as_of.date()`) 과거 리포트에 오늘 분봉이 붙지 않도록 **1d를 생략**한다. `intraday_candles` 직접 주입 경로는 테스트/fixture/manual 용도로 유지된다. intraday annotation(캔들 위 마커 등)은 **Phase 3 / Future Work**로 현재 구현된 것처럼 기술하지 않는다.
 
 ### 3. JSON ↔ ERD 매핑 (backend 저장 기준)
 
@@ -222,6 +247,10 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 | `chart_data` | chart_data (json) |
 
 `chart_data`의 세부 구조(`candles`·`overlays`·`subcharts`·`annotations`)와 annotation 계산·표시 규칙은 `chart_annotation_spec.md`를 따른다.
+
+`chart_data`는 자유 dict가 아니라 **`schemas/chart.py`의 `ChartData` Pydantic 계약으로 검증**한다(`ChartPayload.chart_data: ChartData`). 모든 하위 모델은 `extra="forbid"`이며(단, `ChartAnnotation.meta`는 계산 근거용 자유 `dict`), candles는 내부 표준 `OHLCV`를 재사용한다. `support_resistance`의 `from` key는 파이썬 예약어라 `Field(alias="from")` + `serialize_by_alias=True`로 처리해 **입력·출력 모두 `"from"`을 유지**한다. `annotation.kind`는 `chart_annotation_spec.md §7`의 **전체 10종을 계약상 허용**한다(chart_builder는 MVP 8종만 생성).
+
+**계약 강화:** chart_data 수치는 **inf/nan 불허**(fail-fast), date/from/to는 **ISO `YYYY-MM-DD`만**, `annotation.source`는 **필수·`"code"`만**, candle은 `high >= low`, RSI는 `oversold < overbought`, `ChartPayload.period ↔ chart_data.candle_unit`은 정합(3m·1y=D, 5y=W)해야 한다. `pydantic>=2.11`(`serialize_by_alias`).
 
 #### → `REPORT_RISK_NOTES` (1:N)
 
@@ -373,3 +402,4 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 6. **신호 판정은 코드, 설명 문장은 LLM.** `technical_signals[]`에서 `signal`·`value`·`metrics`·`weight`는 코드가 확정하고, `detail`만 LLM이 그 확정값을 서술한다. LLM은 판정을 바꿀 수 없으며 `detail`은 검증 ③ 대상이다. 화면에서도 이 경계를 색으로 구분 표시한다(코드=청록, LLM=보라).
 7. **에이전트는 DB를 모른다.** 3장 매핑은 backend가 수행하는 참고용. 에이전트는 JSON 구조만 책임진다.
 8. **변경 시 소스 문서 순서:** JSON 계약(필드·구조)은 `contracts.md`를 먼저 고친다. DB 컬럼명·저장 구조 변경은 `schema.md`를 먼저 고친다(schema가 DB 이름의 최종 기준). enum 값 변경은 `enums.md`를 기준으로 삼는다. 세 경우 모두 소스 문서를 고친 뒤 나머지 문서 → 코드·backend 순으로 반영한다.
+9. **1D intraday는 조건부·보조(Beta).** `charts`는 `{3m, 1y, 5y}`가 항상 존재하고 `1d`는 조건부다 — 소비 측은 `len == 3`이 아니라 **period 집합**으로 처리한다. `chart_data`는 `candle_unit` 판별 유니온(D/W/M=`ChartData`, 1d=`IntradayChartData`)이며 `OHLCV.date`(날짜 전용)는 불변, intraday는 `IntradayCandle.timestamp`를 쓴다. `intraday_context`는 optional이고, intraday는 `final_regime`·top-level `confidence`/`signal_score`/`risk`를 바꾸지 않는다(보정값은 context 내부 설명용, cap ±0.05·signal_score_adjustment는 0.0). KIS 분봉 fetcher(`fetch_minute_ohlcv`)는 구현 완료이고, **`INTRADAY_FETCH_ENABLED=True`(또는 명시 `intraday_fetcher` 주입)면 리포트 생성 1회에 D/W/M과 함께 1d를 조립**한다(기본 False면 미포함). 프론트가 1d를 따로 호출하지 않는다. intraday annotation은 Phase 3다.
