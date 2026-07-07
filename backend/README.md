@@ -4,6 +4,7 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 
 - DB 구조·관계·제약 정본: [`docs/schema.md`](docs/schema.md)
 - Alembic 변경·검증 절차: [`docs/migrations.md`](docs/migrations.md)
+- Stock Resolver 응답 의미·경계: [`docs/stock_resolver.md`](docs/stock_resolver.md)
 
 ## 개발 환경
 
@@ -24,7 +25,12 @@ DSN 스킴은 `postgresql+asyncpg://`를 사용한다. 컨테이너 내부에서
 
 ## Seed stocks
 
-Technical Agent / Stock Resolver 에서 쓸 **기본 종목 마스터(지원 10종 + market)** 를 `stocks` 에 seed 한다.
+`stocks` 에 **개발 bootstrap 종목(10종 + market)** 을 seed 한다.
+
+> ⚠️ **이 10종은 개발 bootstrap 데이터이지 전체 종목 정본이 아니다.** Stock Resolver 는 종목 수와
+> 무관한 공통 구조지만, 현재 실제 식별 가능한 범위는 seed 된 10종뿐이다. 전체 KRX 종목 지원은 후속
+> 마스터 동기화 작업(별도 브랜치)이 완료돼야 한다 — [`docs/stock_resolver.md`](docs/stock_resolver.md) §5.
+> `stocks`(공통 마스터)와 Technical 10종 지원 정책(`BATTERY_TICKERS`)은 **별개**다.
 
 ```bash
 cd backend
