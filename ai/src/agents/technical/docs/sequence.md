@@ -25,15 +25,15 @@
 3. **LLM → Technical Supervisor:** normalized_question·analysis_focus 반환.
 4. **Technical Supervisor → 캐시:** 과거 봉 조회.
 5. **캐시 → Technical Supervisor:** 캐시 히트.
-6. **Technical Supervisor → 캐시/KIS:** 일봉·주봉·월봉 캐시를 확인하고, 없거나 갱신이 필요한 타임프레임만 KIS D/W/M으로 각각 호출한다(장중엔 오늘 일봉 우선 갱신).
+6. **Technical Supervisor → 캐시/KIS:** 일봉·주봉·월봉 캐시를 확인하고, 없거나 갱신이 필요한 타임프레임만 KIS D/W/M으로 각각 호출한다(장중엔 오늘 일봉 우선 갱신). **`as_of`를 조회 종료일(`end_date`, `FID_INPUT_DATE_2`)로 넘겨 D/W/M을 같은 기준일로 조회한다**(생략 시 오늘 기준, `kis_mapping.md §8.2`).
 7. **KIS API → Technical Supervisor:** 타임프레임별 OHLCV 응답.
 
 ### 코드 계산 (내부) — LLM 미개입
 
 봉 데이터를 받은 뒤, 다음이 전부 코드 내부에서 일어난다. **LLM이 개입하지 않는다.**
 - 일봉·주봉·월봉은 KIS D/W/M 원본 (각각 조회, 리샘플 없음)
-- 노드 4: 지표 (일봉 5개 + 주/월 추세)
-- 노드 5: 국면분류 (일봉 국면 + 상위 보정)
+- 노드 4: 일봉 기반 지표 (IndicatorBundle 스칼라 — confidence·risk가 소비)
+- 노드 5: 국면분류 (일봉 국면 + 주/월봉 추세 계산 + 상위 보정·alignment)
 - 노드 6: 종합 / 7: 신뢰도 / 8: 리스크 / 9: 차트
 
 ### 해석과 검증 분기
