@@ -345,12 +345,30 @@ def verify_signals(
         failures.append("시세 정합: 원본이 있는데 price_daily 가 신호에 없음")
     else:
         # 8a 직렬화 정합: 주장 배열 ↔ 원본 tail(PRICE_TABLE_DAYS).
+        # 시세 4필드는 quotes 와, 순매매량(주) 2필드는 매매동향 df 와 대조한다
+        # (두 출처 분리 근거는 signals.COL_FORE_QTY 주석 — 값이 다른 두 API).
         recent_q = quotes.tail(config.PRICE_TABLE_DAYS)
         expected_dates = [idx.date().isoformat() for idx in recent_q.index]
         claimed_dates = [row.get("date") for row in claimed_price]
-        _FIELD_TO_COL = {"close": sig.COL_CLOSE, "change": sig.COL_CHANGE,
-                         "change_rate": sig.COL_CHANGE_RATE, "volume": sig.COL_VOLUME,
-                         "frgn_qty": sig.COL_FORE_QTY}
+        _QUOTE_FIELDS = {"close": sig.COL_CLOSE, "change": sig.COL_CHANGE,
+                         "change_rate": sig.COL_CHANGE_RATE, "volume": sig.COL_VOLUME}
+        _QTY_FIELDS = {"frgn_qty": sig.COL_FORE_QTY, "inst_qty": sig.COL_INST_QTY}
+        has_qty = all(col in df.columns for col in _QTY_FIELDS.values())
+
+        def _qty_ok(row: dict, idx) -> bool:
+            """수량 필드 정합: df 에 출처가 있으면 값 일치, 없으면 주장도 없어야
+            한다(비대칭 사다리의 필드 단위 축소판 — 출처 없는 숫자 차단)."""
+            for field, col in _QTY_FIELDS.items():
+                v = row.get(field)
+                if not has_qty or idx not in df.index:
+                    if v is not None:
+                        return False              # 원본 없는데 주장
+                elif v is None or not math.isclose(
+                    float(v), float(df.loc[idx, col]), rel_tol=1e-9, abs_tol=1e-6,
+                ):
+                    return False                  # 원본 있는데 누락/불일치
+            return True
+
         if claimed_dates != expected_dates:
             failures.append("시세 직렬화 정합: 날짜열이 원본과 불일치")
         elif any(
@@ -359,11 +377,19 @@ def verify_signals(
                 rel_tol=1e-9, abs_tol=1e-6,
             )
             for i, row in enumerate(claimed_price)
-            for field, col in _FIELD_TO_COL.items()
+            for field, col in _QUOTE_FIELDS.items()
         ):
             failures.append("시세 직렬화 정합: 값이 원본과 불일치")
+        elif any(
+            not _qty_ok(row, idx)
+            for row, idx in zip(claimed_price, recent_q.index)
+        ):
+            failures.append("시세 직렬화 정합: 순매매량(주)이 매매동향 원본과 불일치")
         else:
-            checks.append(f"시세 직렬화 정합: {len(recent_q)}일 날짜·5필드가 원본과 일치")
+            checks.append(
+                f"시세 직렬화 정합: {len(recent_q)}일 날짜·시세 4필드"
+                f"{'·순매매량 2필드' if has_qty else ''}가 원본과 일치"
+            )
 
         # 8b 항등식: 전일비=종가(t)−종가(t−1) (±0.5원 — 원 단위 정수),
         # 등락률=전일비÷전일종가×100 (±0.011%p — 소수 2자리 반올림 흡수).

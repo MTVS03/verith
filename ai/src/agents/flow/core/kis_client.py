@@ -38,6 +38,7 @@ from .signals import (
     COL_FORE_QTY,
     COL_INDI,
     COL_INST,
+    COL_INST_QTY,
     COL_OWNERSHIP,
     COL_VALUE,
     COL_VOLUME,
@@ -57,7 +58,9 @@ _CLOSE_FIELD = "stck_clpr"            # 종가(원)
 _CHANGE_FIELD = "prdy_vrss"           # 전일비(원, 부호 포함)
 _RATE_FIELD = "prdy_ctrt"             # 등락률(%)
 _VOL_FIELD = "acml_vol"               # 누적 거래량(주)
-_FORE_QTY_FIELD = "frgn_ntby_qty"     # 외국인 순매매량(주) — 네이버와 같은 단위
+# 주의: 이 API에도 frgn_ntby_qty 가 있지만 매매동향의 같은 필드와 값이 다르다
+# (실측 2026-07-07 — signals.COL_FORE_QTY 주석 참조). 순매매량은 매매동향으로
+# 일원화하므로 여기서는 파싱하지 않는다.
 _TIMEOUT = 15.0
 
 # KIS 유량 제어: 짧은 창에 조회가 겹치면 HTTP 500 + EGW00201 로 선차단된다
@@ -71,6 +74,8 @@ _FIELD_MAP: dict[str, str] = {
     "frgn_ntby_tr_pbmn": COL_FORE,   # 외국인 순매수 거래대금 (백만원)
     "orgn_ntby_tr_pbmn": COL_INST,   # 기관계 순매수 거래대금 (백만원)
     "acml_tr_pbmn": COL_VALUE,       # 누적(총) 거래대금 (원! ← ÷1e6 필요)
+    "frgn_ntby_qty": COL_FORE_QTY,   # 외국인 순매매량 (주 — 스케일 없음)
+    "orgn_ntby_qty": COL_INST_QTY,   # 기관계 순매매량 (주 — 스케일 없음)
 }
 # 기관계 세부 7주체 (전부 백만원 — 세부 합 ≈ 기관계 항등식 실물 확인됨).
 # 한글명은 KIS 공식 필드 사전(공식 GitHub) 그대로. signals.INST_DETAIL 과 일치.
@@ -291,8 +296,10 @@ def _to_signals_frame(rows: list[dict]) -> pd.DataFrame:
     #     tail(5)·reversed 순회 전제와 정확히 맞춘다.
     df = df.sort_index()
 
-    # (4) 컬럼 순서를 signals 스키마와 정확히 일치시켜 반환 (+ 기관 세부 7주체).
-    return df[[COL_INDI, COL_FORE, COL_INST, COL_VALUE, *INST_DETAIL]]
+    # (4) 컬럼 순서를 signals 스키마와 정확히 일치시켜 반환
+    #     (+ 기관 세부 7주체 + 순매매량[주] 2컬럼 — 날짜별 시세 표용).
+    return df[[COL_INDI, COL_FORE, COL_INST, COL_VALUE, *INST_DETAIL,
+               COL_FORE_QTY, COL_INST_QTY]]
 
 
 def fetch_daily_quotes(
@@ -340,7 +347,7 @@ def fetch_daily_quotes(
 
     field_to_col = {
         _CLOSE_FIELD: COL_CLOSE, _CHANGE_FIELD: COL_CHANGE, _RATE_FIELD: COL_CHANGE_RATE,
-        _VOL_FIELD: COL_VOLUME, _FORE_QTY_FIELD: COL_FORE_QTY, _EHRT_FIELD: COL_OWNERSHIP,
+        _VOL_FIELD: COL_VOLUME, _EHRT_FIELD: COL_OWNERSHIP,
     }
     quotes = pd.DataFrame(
         {col: [row[field] for row in rows] for field, col in field_to_col.items()},
