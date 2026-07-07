@@ -1,0 +1,510 @@
+﻿node,type,degree
+SK이노베이션,Company,184
+LG화학,Company,107
+삼성SDI,Company,81
+에코프로,Company,67
+포스코퓨처엠,Company,45
+LG에너지솔루션,Company,42
+에코프로비엠,Company,31
+엔켐,Company,22
+SK아이이테크놀로지,Company,16
+엘앤에프,Company,12
+이차전지,Industry,10
+양극재,Industry,8
+전기차 구매 보조금,Policy,8
+SK온,Company,7
+에코프로머티리얼즈,Company,7
+IRA,Policy,6
+에코프로이노베이션,Company,6
+전지재료사업,Industry,6
+SK Energy International,Company,5
+SK에너지,Company,5
+SK지오센트릭,Company,5
+에코프로씨엔지,Company,5
+에코프로이엠,Company,5
+환경규제,Policy,5
+에코프로에이피,Company,4
+SK인천석유화학,Company,3
+대한유화,Company,3
+분리막,Industry,3
+석유화학,Industry,3
+에너지솔루션,Industry,3
+에어레인,Company,3
+에코프로에이치엔,Company,3
+팜한농,Company,3
+B&M,Company,2
+Brunp,Company,2
+Easpring,Company,2
+LiBS,Industry,2
+PT ECOPRO ESG INVESTMENT,Company,2
+Reshine,Company,2
+Ronbay,Company,2
+SK Energy Americas,Company,2
+XTC,Company,2
+독점규제 및 공정거래에 관한 법률,Policy,2
+반도체,Industry,2
+삼성전자,Company,2
+세제혜택,Policy,2
+에스케이지오센트릭,Company,2
+온실가스 배출권의 할당 및 거래에 관한 법률,Policy,2
+이차전지 소재,Industry,2
+자동차,Industry,2
+전동공구,Industry,2
+정유,Industry,2
+중국정부의 보조금 확대 정책,Policy,2
+친환경 정책,Policy,2
+포스코엠씨머티리얼즈,Company,2
+한국가스공사,Company,2
+화학소재,Industry,2
+환경사업,Industry,2
+14차 5개년 실행계획,Policy,1
+AES,Company,1
+AI/빅데이터,Industry,1
+Adnoc,Company,1
+Amogy,Company,1
+Aveo Pharmaceuticals,Company,1
+BMW,Company,1
+BU12 Australia Pty,Company,1
+BU13 Australia Pty,Company,1
+"Baterias De Castilla, S.L",Company,1
+Bioworks,Company,1
+Blackstone Energy Partners III L.P,Company,1
+CNC,Company,1
+Capchem Poland SP. Z.o.o,Company,1
+Castrol,Company,1
+China Gas-SK E&S LNG Trading,Company,1
+"DFD Yangfu New Materials Co.,Ld",Company,1
+DS ASIA HOLDINGS,Company,1
+E&S 사업,Industry,1
+E-mobility,Industry,1
+EIC Properties,Company,1
+ENCHEM AMERICA,Company,1
+ENCHEM CANADA,Company,1
+ENCHEM CHINA,Company,1
+ENCHEM FRANCE,Company,1
+ENCHEM HUNGARY,Company,1
+ENCHEM SHANDONG,Company,1
+ENCHEM SUZHOU,Company,1
+ENEOS,Company,1
+ESS 단지 조성사업,Policy,1
+ESS 설치 의무화,Policy,1
+ESS(에너지저장시스템),Industry,1
+EV,Industry,1
+EV-LOOP,Company,1
+EV로의 전환을 가속화하는 정책,Policy,1
+EcoCam Canada,Company,1
+EcoPro America,Company,1
+EcoPro BM America,Company,1
+EcoPro BM Hungary,Company,1
+Elevra Lithium,Company,1
+Enchem Poland Sp. z o.o,Company,1
+Energy Solution Holdings,Company,1
+Enevate,Company,1
+Freeport LNG,Company,1
+Fulcrum BioEnergy,Company,1
+GEM DRC,Company,1
+GRC,Company,1
+GREEN REVOLUTION COOLING,Company,1
+GS,Company,1
+GS칼텍스,Company,1
+Ganfeng Lithium,Company,1
+Gemini Partners,Company,1
+Great Power,Company,1
+Green Technology Metals,Company,1
+HD,Company,1
+HUAJIN NEW ENERGY MATERIALS(QUZHOU),Company,1
+HUZHOU KUNLUN ENCHEM BATTERY MATERIAL,Company,1
+IT,Industry,1
+IT / Non-IT 기기,Industry,1
+IT 기기,Industry,1
+IT기기,Industry,1
+IT소재,Industry,1
+Impact Recycling,Company,1
+Inner Mongolia Sinuo New Material Technology,Company,1
+Intellectual Discovery,Company,1
+Intellectual Keystone Technology,Company,1
+Jiujiang Defu Technology,Company,1
+K.K. Korea Kamchatka Co,Company,1
+KDB모빌리티 오픈 이노베이션,Company,1
+Kryptos Biotechnoligies,Company,1
+L-H Battery Incorporated,Company,1
+LEYOU NEW ENERGY MATERIALS(WUXI),Company,1
+LG,Company,1
+LG CHEM COLOMBIA S.A.S,Company,1
+LG CHEM TK Kimya SANAYI VE TIC. STI,Company,1
+LG Chem (China) Investment,Company,1
+LG Chem (Chongqing) Engineering Plastics,Company,1
+LG Chem (Guangzhou) Information & Electronics Materials,Company,1
+LG Chem (Taiwan),Company,1
+LG Chem (Tianjin) Engineering Plastics,Company,1
+LG Chem America,Company,1
+LG Chem America Advanced Materials,Company,1
+LG Chem Asia,Company,1
+LG Chem BRASIL INTERMEDIACAO DE NEGOCIOS DO SETOR QUIMICO LTDA,Company,1
+LG Chem Europe,Company,1
+LG Chem Hai Phong Engineering Plastics,Company,1
+LG Chem Hai Phong Vietnam,Company,1
+LG Chem Hungary Battery Separator,Company,1
+LG Chem Japan,Company,1
+LG Chem Life Sciences (Thailand),Company,1
+LG Chem Life Sciences India Pvt,Company,1
+LG Chem Life Sciences Poland,Company,1
+LG Chem Life Sciences USA,Company,1
+LG Chem Malaysia,Company,1
+LG Chem Mexico S.A. de C.V,Company,1
+LG Chem Ohio Petrochemical,Company,1
+LG Chem Poland Sp. z o.o,Company,1
+LG Chem VietNam,Company,1
+LG Chem(HUIZHOU) Petrochemical,Company,1
+LG Chemical (Guangzhou) Engineering Plastics,Company,1
+LG Chemical India Pvt,Company,1
+LG Energy Solution (Nanjing),Company,1
+LG Energy Solution (Taiwan),Company,1
+LG Energy Solution Arizona,Company,1
+LG Energy Solution Arizona ESS,Company,1
+LG Energy Solution Australia Pty,Company,1
+LG Energy Solution Battery (Nanjing),Company,1
+LG Energy Solution China,Company,1
+LG Energy Solution Europe,Company,1
+LG Energy Solution India Private,Company,1
+LG Energy Solution Japan,Company,1
+LG Energy Solution Michigan,Company,1
+LG Energy Solution Technology (Nanjing),Company,1
+LG Energy Solution Vertech,Company,1
+LG Energy Solution Wroclaw sp. z o.o,Company,1
+LG Jiansheng Life Sciences (Beijing),Company,1
+LG NanoH2O,Company,1
+LG PETRONAS Chemicals Malaysia,Company,1
+LGC Petrochemical India Private,Company,1
+LNG,Industry,1
+LNG Upstream부터 LNG Downstream 까지 Value Chain,Industry,1
+Li-Cycle,Company,1
+Li-Cycle Holdings,Company,1
+M-Mobility,Industry,1
+MITSUI AND,Company,1
+Mobil,Company,1
+Mura Technology,Company,1
+NEW RENEWABLE ENERGY NO.1 JSC,Company,1
+NEW& ONE (NEW AND ONE),Company,1
+NextEra Energy,Company,1
+Nextstar Energy,Company,1
+Ningbo LG Yongxing Chemical,Company,1
+Novaled,Company,1
+OCI,Company,1
+OLED,Industry,1
+P&G,Company,1
+POSCO FUTURE MATERIALS CANADA,Company,1
+PRISM Energy International Americas,Company,1
+PRISM Energy International Australia,Company,1
+PT BAHODOPI NICKEL SMELTING INDONESIA,Company,1
+PT Enchem Elyte Indonesia,Company,1
+PT LBM Energi Baru Indonesia,Company,1
+PT LG CHEM INDONESIA,Company,1
+PT Meiming NEW ENERGY MATERIALS,Company,1
+PT Patra SK,Company,1
+PT Pertamina,Company,1
+PT Prism Nusantara International,Company,1
+PT. Green Eco Nickel,Company,1
+PT. QMB NEW ENERGY MATERIALS,Company,1
+PT.HLI Green Power,Company,1
+PT.Halim Samudra Interutama,Company,1
+PT.Indonesia Pos Chemtech Chosun Ref,Company,1
+PT.KRAKATAU POSCO FUTUREM,Company,1
+PT.Krakatau Pos-chem Dong-suh Chemical,Company,1
+PT.Krakatau Sarana Infrastrutur,Company,1
+PetroChina,Company,1
+Polyplus,Company,1
+Posco Future Materials Canada,Company,1
+Prism Energy International,Company,1
+Prism Energy International China,Company,1
+Qingdao ZhongShuo New Energy Technology,Company,1
+Queensland Pacific Metals,Company,1
+Repsol Petroleo,Company,1
+Reventas,Company,1
+Rhythm pharmaceuticals,Company,1
+S-Oil,Company,1
+SDI-GM Synergy Cells Holdings,Company,1
+SHINGHWA AMPEREX,Company,1
+SK,Company,1
+SK Americas,Company,1
+SK China,Company,1
+"SK E&S Dominicana, S.R.L",Company,1
+SK E&S Hong Kong,Company,1
+SK ENMOVE GABRIEL INDIA PRIVATE,Company,1
+SK Energy Europe,Company,1
+SK Enmove Russia,Company,1
+SK Hi-tech Battery Materials (Jiang su),Company,1
+SK Hi-tech Battery Materials Poland Sp. Zo.o,Company,1
+SK Innovation America,Company,1
+SK Innovation Insurance (Bermuda),Company,1
+SK Investment Management,Company,1
+SK Japan,Company,1
+SK Latin America Investment S.A,Company,1
+SK MENA Investment B.V,Company,1
+SK South East Asia Investment,Company,1
+SK Technology Innovation,Company,1
+SK innovation outpost,Company,1
+SK온 트레이딩인터내셔널,Company,1
+SOLWIND ENERGY JOINT STOCK,Company,1
+Samaung SDI China,Company,1
+Samsung SDI (Hong Kong),Company,1
+Samsung SDI America,Company,1
+Samsung SDI Americia,Company,1
+Samsung SDI Battery Systems,Company,1
+Samsung SDI Energy Malaysia,Company,1
+Samsung SDI Europe,Company,1
+Samsung SDI Hungary,Company,1
+Samsung SDI India Private,Company,1
+Samsung SDI Japan,Company,1
+Samsung SDI Southeast Asia,Company,1
+Samsung SDI Vietnam,Company,1
+Samsung SDI Wuxi,Company,1
+Samsung SDI-ARN(Xi'An) Power Battery,Company,1
+Samsung SDI（Tianjin）Battery,Company,1
+Saudi Aramco,Company,1
+Shell,Company,1
+Sinopec,Company,1
+StarPlus Energy,Company,1
+Stellantis,Company,1
+Tesla,Company,1
+Tianjin LG BOTIAN Chemical,Company,1
+Tianjin LG Bohai Chemical,Company,1
+Tianqi Lithium,Company,1
+Tricon Energy,Company,1
+ULTIUM CAM GP,Company,1
+ULTIUM CAM PARTNERSHIP,Company,1
+ULTIUM CELLS,Company,1
+UNIPEC AMERICA,Company,1
+Ultium Cells,Company,1
+Uniseal,Company,1
+Volkswagen Group,Company,1
+Volta Energy Soutions,Company,1
+WCP,Company,1
+Wuhan Power Battery Recycling Technology,Company,1
+Yemen LNG,Company,1
+ZHEJIANG HUAYOU-POSCO ESM,Company,1
+ZHEJIANG POSCO-HUAYOU ESM,Company,1
+Zhangjiagang Pohang Refractories,Company,1
+iMarketAsia Co,Company,1
+각국의 지원 정책,Policy,1
+각국의 환경규제 정책,Policy,1
+고려아연,Company,1
+곤충병원성 곰팡이 제제,Industry,1
+국립수산과학원 과제,Industry,1
+규제,Policy,1
+"규제개선(승인기간 단축, 허가조건 완화)",Policy,1
+그린에너지,Industry,1
+기유,Industry,1
+기유 및 윤활유 사업,Industry,1
+기초소재,Industry,1
+기초유화,Industry,1
+나래에너지서비스,Company,1
+남양주열병합,Company,1
+내화물,Industry,1
+넥스콘,Company,1
+넥스포,Company,1
+농약,Industry,1
+농약/비료,Industry,1
+농업,Industry,1
+당진행복솔라,Company,1
+대기환경보전법,Policy,1
+대영,Company,1
+대한송유관공사,Company,1
+데카머티리얼,Company,1
+도시가스,Industry,1
+도시가스사업법,Policy,1
+도시가스요금 원료비 연동제 시행지침,Policy,1
+독일 메르세데스-벤츠 그룹,Company,1
+독점규제및 공정거래에 관한 법률,Policy,1
+듀오콤,Company,1
+디비월드,Company,1
+디스플레이,Industry,1
+디스플레이 소재,Industry,1
+라임화성,Industry,1
+로지피아,Company,1
+리튬,Industry,1
+리튬 전환,Industry,1
+무석광미래 신재료유한공사,Company,1
+물환경관리 법률,Policy,1
+민테크,Company,1
+바이오·제약,Industry,1
+바이오신약,Industry,1
+반도체 소재,Industry,1
+반도체 전자재료 소재,Industry,1
+보령블루하이,Company,1
+보조금 정책,Policy,1
+"보조서비스(주파수 조정, 에너지시프트) 시장 운영",Policy,1
+부사호행복나눔솔라,Company,1
+비공개,Company,1
+비료,Industry,1
+산업용 가스,Industry,1
+산업통상자원부의 가격정책,Policy,1
+삼성E&A,Company,1
+삼성글로벌리서치,Company,1
+삼성디스플레이,Company,1
+삼성벤처투자,Company,1
+삼성중공업,Company,1
+삼아알미늄,Company,1
+상신EDP,Company,1
+상호출자제한기업집단,Industry,1
+새로닉스,Company,1
+생명과학,Industry,1
+석유,Industry,1
+석유 트레이딩,Industry,1
+석유개발,Industry,1
+성일하이텍,Company,1
+세원정공,Company,1
+소재,Industry,1
+소형전지,Industry,1
+솔브레인,Company,1
+수소,Industry,1
+수소 인센티브 및 규제,Policy,1
+수소경제 육성 및 수소안전관리법,Policy,1
+수질 및 대기환경 관련,Industry,1
+스마트팩토리,Industry,1
+시알이노테크,Company,1
+신소재,Industry,1
+신안그린에너지,Company,1
+신안증도태양광,Company,1
+신에너지 및 재생에너지 개발·이용·보급 촉진법,Policy,1
+신재생에너지 의무공급제도,Policy,1
+쏠리스,Company,1
+씨앤피신소재테크놀로지,Company,1
+씨텍,Company,1
+씨피프티원,Company,1
+아름누리,Company,1
+아리울 행복솔라,Company,1
+아이마켓코리아,Company,1
+아이지이,Company,1
+아이파킹,Company,1
+약 100여개 이상의 사업자,Company,1
+"에너지 저장장치(Energy Storage System, ESS) 보조금 지원",Policy,1
+에너지/화학,Industry,1
+에너지/화학 사업,Industry,1
+에너지소재,Industry,1
+에너지저장장치(ESS),Industry,1
+에너지절감 정책,Policy,1
+에스디플렉스,Company,1
+에스원,Company,1
+에스케이어스온,Company,1
+에스케이엔무브,Company,1
+에스케이엔텀,Company,1
+에스케이플러그하이버스,Company,1
+에스케이피아이씨글로벌,Company,1
+에스티엠,Company,1
+에쓰오일토탈윤활유(STLC),Company,1
+에코로지스틱스,Company,1
+에코프로글로벌,Company,1
+엔솔브,Company,1
+엔켐모빌리티,Company,1
+엘앤에프 케모솔루션,Company,1
+엘앤에프플러스,Company,1
+엘에스 엘앤에프 배터리솔루션,Company,1
+엘지에니바이오리파이닝,Company,1
+엘지에이치와이비씨엠,Company,1
+여주에너지서비스,Company,1
+오정강,Company,1
+원동풍력,Company,1
+원예 작물,Industry,1
+원프레딕트,Company,1
+유럽 보조금 및 세제 혜택,Policy,1
+유럽연합 CO₂감축 규제,Policy,1
+유류판매,Industry,1
+유미코아,Company,1
+윤활유,Industry,1
+음극재,Industry,1
+의약품,Industry,1
+이너보틀,Company,1
+이디엘,Company,1
+이알시스템,Company,1
+이엔에스시티가스,Company,1
+이엔에스시티가스부산,Company,1
+이차 전지 소재,Industry,1
+인진,Company,1
+인텔렉추얼 디스커버리,Company,1
+인텔렉추얼디스커버리,Company,1
+작물보호제,Industry,1
+재생에너지,Industry,1
+재생에너지 공급 정책,Policy,1
+"재생에너지, 수소 및 에너지솔루션 사업",Industry,1
+재영텍,Company,1
+전구체,Industry,1
+전기사업법,Policy,1
+전기자동차,Industry,1
+전기차 보급,Policy,1
+전기차 산업 육성 정책,Policy,1
+전기차 충전,Industry,1
+전기차 충전 인프라 운영,Industry,1
+전남2해상풍력,Company,1
+전남3해상풍력,Company,1
+전남해상풍력,Company,1
+전력,Industry,1
+전력 및 집단에너지,Industry,1
+전력 및 집단에너지 사업,Industry,1
+전력사업 민자유치계획,Policy,1
+전자재료,Industry,1
+전지재료,Industry,1
+전지재료 계열사,Company,1
+전해질,Industry,1
+정부의 지원정책,Policy,1
+정부정책,Policy,1
+제11차 전력수급계획,Policy,1
+제6차 집단에너지공급기본계획,Policy,1
+제이알에너지솔루션,Company,1
+제이에이치 화학공업,Company,1
+제이오,Company,1
+조류 영양제,Industry,1
+종자,Industry,1
+중국 전기차 성장률,Policy,1
+중앙첨단소재,Company,1
+지역난방 보급계획,Policy,1
+지주회사,Industry,1
+집단에너지,Industry,1
+첨단소재,Industry,1
+청산풍력발전,Company,1
+친환경 농업 정책,Policy,1
+친환경 정책 기조,Policy,1
+친환경 차량 지원 정책,Policy,1
+친환경자동차법 시행령 개정안,Policy,1
+켐코,Company,1
+코리아기가플랫폼,Company,1
+큐바이오텍,Company,1
+탄소배출권 사업,Industry,1
+탱크터미널,Industry,1
+테크윈,Company,1
+티더블유바이오매스에너지,Company,1
+티디엘,Company,1
+티엘케미칼,Company,1
+파리기후변화협정,Policy,1
+파워로직스,Company,1
+파주에너지서비스,Company,1
+포드 모터 컴퍼니,Company,1
+포스그린,Company,1
+포스코,Company,1
+포항ISV그린테크1호VC,Company,1
+폭스바겐,Company,1
+퓨처그라프,Company,1
+피앤오케미칼,Company,1
+피엠그로우,Company,1
+필에너지,Company,1
+하나의 크고 아름다운 법,Policy,1
+한국 정부의 ESS 단지 조성사업,Policy,1
+한국경제신문,Company,1
+한국석유공사,Company,1
+한국전구체,Company,1
+한국전력거래소,Company,1
+한국지역난방공사,Company,1
+해솔라에너지,Company,1
+해쌀태양광,Company,1
+행복누리,Company,1
+행복키움,Company,1
+현대쉘베이스오일,Company,1
+현대자동차,Company,1
+현대자동차그룹,Company,1
+현대제철,Company,1
+호텔신라,Company,1
+환경,Industry,1
+환경 규제,Industry,1
+환경 기술,Industry,1
+환경 기술 및 환경산업 지원법,Policy,1
+흡수성 수지,Industry,1
