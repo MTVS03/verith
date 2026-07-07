@@ -284,7 +284,14 @@ service-account*.json
 ai/src/agents/fundamental/api_test/out/
 ai/src/agents/fundamental/.cache/
 ai/src/agents/fundamental/data/.cache/
+ai/src/agents/fundamental/data/.runs/
 ai/src/agents/fundamental/tests/snapshots/generated/
+
+### Fundamental agent — 개인 작업 문서 (세션 기록, 커밋 금지 · 공식 문서는 README/에) ###
+ai/src/agents/fundamental/REVIEW_*.md
+ai/src/agents/fundamental/AUDIT_*.md
+ai/src/agents/fundamental/DOCTOR_HANDOFF_*.md
+ai/src/agents/fundamental/AGENT_FINALIZATION_*.md
 
 ### Local prompt/reference workspace ###
 codex-prompt/
@@ -295,6 +302,7 @@ tatus
 
 ### Docker (따로 관리 — 저장소에 올리지 않음) ###
 docker-compose.yml
+docker-compose.yaml
 docker-compose.override.yml
 
 .vscode
