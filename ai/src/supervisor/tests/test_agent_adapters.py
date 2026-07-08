@@ -103,23 +103,29 @@ def test_technical_adapter_rejects_out_of_scope_ticker():
         )
 
 
-def test_fundamental_adapter_maps_ticker_corp_name(monkeypatch):
+def test_fundamental_adapter_maps_public_input_with_rewritten_query(monkeypatch):
     captured: dict = {}
 
-    class _Req:
+    class _Input:
         def __init__(self, **kw):
             captured.update(kw)
 
-    async def _analyze(req, *, use_cache=True):
+    async def _analyze(public_input, *, use_cache=True):
         captured["use_cache"] = use_cache
         return "fund-out"
 
-    _inject(monkeypatch, "src.agents.fundamental.core.contract", FundamentalRequest=_Req)
-    _inject(monkeypatch, "src.agents.fundamental.graph", analyze_fundamental=_analyze)
-    out = FundamentalAdapter().run(_task("fundamental"), ExecutionDeps(request_id="rid"))
+    _inject(monkeypatch, "src.agents.fundamental.core.contract", FundamentalAgentInput=_Input)
+    _inject(monkeypatch, "src.agents.fundamental.graph", analyze_fundamental_public=_analyze)
+    out = FundamentalAdapter().run(
+        _task("fundamental", rewritten="재무 공개 계약 질의"),
+        ExecutionDeps(request_id="rid", trace_id="tid", fundamental_use_cache=False),
+    )
     assert out == "fund-out"
-    assert captured["ticker"] == "005930" and captured["corp_name"] == "삼성전자"
+    assert captured["ticker"] == "005930" and captured["query"] == "재무 공개 계약 질의"
     assert captured["request_id"] == "rid"
+    assert captured["trace_id"] == "tid"
+    assert captured["use_cache"] is False
+    assert "corp_name" not in captured
 
 
 def test_industry_adapter_uses_injected_app():
