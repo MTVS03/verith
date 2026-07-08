@@ -18,6 +18,10 @@ class NewsQueryService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def get_existing_urls(self, urls: list[str]) -> list[str]:
+        """입력 url 중 이미 저장된 것만 정렬해 돌려준다(ai 가 신규 기사 선별에 사용)."""
+        return sorted(await news_repo.get_existing_urls(self._session, urls))
+
     async def get_articles_by_event(
         self, event_id: uuid.UUID, limit: int
     ) -> list[ArticleRef]:

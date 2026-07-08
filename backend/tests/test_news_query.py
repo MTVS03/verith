@@ -85,3 +85,19 @@ async def test_stats_null_for_unknown_event(seeded_client):
     resp = await seeded_client.get("/news/events/stats", params={"event_id": OTHER_EVENT})
     assert resp.status_code == 200
     assert resp.json() is None                             # 기사 없으면 null
+
+
+# ── /news/exists (중복 재처리 방지: 이미 저장된 url 선별) ─────────────────────
+async def test_exists_returns_only_saved(seeded_client):
+    resp = await seeded_client.post("/news/exists", json={"urls": [
+        "https://q.test/1", "https://q.test/9", "https://q.test/3",
+    ]})
+    assert resp.status_code == 200
+    # 저장된 것(/1,/3)만, 미저장(/9) 제외
+    assert sorted(resp.json()["existing"]) == ["https://q.test/1", "https://q.test/3"]
+
+
+async def test_exists_empty_input(seeded_client):
+    resp = await seeded_client.post("/news/exists", json={"urls": []})
+    assert resp.status_code == 200
+    assert resp.json()["existing"] == []

@@ -19,6 +19,7 @@ from src.api.config import settings
 from src.api.services.news_cleanup_service import NewsCleanupService
 from src.api.services.news_graph_query_service import NewsGraphQueryService
 from src.api.services.news_query_service import NewsQueryService
+from src.api.services.news_report_service import NewsReportService
 from src.api.services.news_service import NewsService
 from src.api.services.stock_resolver_service import StockResolverService
 from src.api.services.technical_report_service import TechnicalReportService
@@ -49,6 +50,12 @@ async def get_news_query_service(
     session: AsyncSession = Depends(get_session),
 ) -> AsyncGenerator[NewsQueryService, None]:
     yield NewsQueryService(session=session)
+
+
+async def get_news_report_service(
+    session: AsyncSession = Depends(get_session),
+) -> AsyncGenerator[NewsReportService, None]:
+    yield NewsReportService(session=session)
 
 
 async def get_news_graph_query_service(

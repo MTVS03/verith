@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
-from ..data.corp_code import UnknownStockCodeError, resolve, resolve_name
+from ..data.corp_code import UnknownStockCodeError, resolution_metadata, resolve, resolve_name
 from ..data.latest_report import discover_latest_report, latest_annual_selection
 from ..data.regular_disclosure import fetch_regular_report_insights, fetch_share_count
 from ..normalize.standardize import standardize_year_rows
@@ -32,7 +33,8 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
     use_cache = state.get("use_cache", True)
     try:
         corp_code = resolve(request.ticker)
-        corp_name = request.corp_name or resolve_name(request.ticker)
+        corp_code_resolution = resolution_metadata(request.ticker)
+        corp_name = request.corp_name or (corp_code_resolution.corp_name if corp_code_resolution else None) or resolve_name(request.ticker)
     except UnknownStockCodeError:
         return {
             "corp_code": "",
@@ -54,7 +56,7 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
             "data_status_reason": "지원하지 않는 종목코드입니다.",
         }
 
-    risk_flags: list[str] = []
+    risk_flags: list[str] = list(corp_code_resolution.risk_flags if corp_code_resolution else ())
     source_records: list[DartSourceRecord] = []
     yearly_metrics = {}
     dart_calls = 0
@@ -105,6 +107,7 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
         return {
             "corp_code": corp_code,
             "corp_name": corp_name,
+            "corp_code_resolution": asdict(corp_code_resolution) if corp_code_resolution else {},
             "years": years,
             "fs_div": fs_div,
             "reprt_code": reprt_code,
@@ -170,6 +173,7 @@ def collect_node(state: FundamentalAgentState) -> dict[str, Any]:
     return {
         "corp_code": corp_code,
         "corp_name": corp_name,
+        "corp_code_resolution": asdict(corp_code_resolution) if corp_code_resolution else {},
         "years": years,
         "fs_div": fs_div,
         "reprt_code": reprt_code,

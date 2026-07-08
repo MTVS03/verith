@@ -100,6 +100,18 @@ class SaveResponse(BaseModel):
     message: str | None = None
 
 
+class ExistingUrlsRequest(BaseModel):
+    """POST /news/exists 요청. 수집한 후보 url 목록을 넣어 이미 저장된 것을 가려낸다."""
+
+    urls: list[str] = Field(default_factory=list)
+
+
+class ExistingUrlsResponse(BaseModel):
+    """POST /news/exists 응답. `existing` = 요청 url 중 이미 news 에 있는 것(ai 는 나머지를 신규로 처리)."""
+
+    existing: list[str] = Field(default_factory=list)
+
+
 class CleanupResponse(BaseModel):
     """7일 롤링 삭제 응답(ai `CleanupResponse` 미러)."""
 
