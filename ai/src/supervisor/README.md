@@ -84,7 +84,7 @@ endpoint(외부 HTTP 입구)는 `../api/supervisor.py`.
 | agent | 공개 입력 | 매핑 | 흡수 차이 |
 |---|---|---|---|
 | technical | ticker + query + stock_name(+llm) | stock_code + rewritten_query + context.stock_name | 없음. 형식상 유효한 ticker 기본 지원(구 BATTERY gate 제거) |
-| fundamental | FundamentalRequest(ticker, intent…) | ticker(+corp_name=stock_name) | free query 슬롯 없음 → query 미전달, intent 등 agent 기본값. **corp_code 미조립**(후속) |
+| fundamental | FundamentalAgentInput(request_id, trace_id, ticker, query) | stock_code + rewritten_query | query 전달 → agent 내부 결정론 해석기가 intent/years/fs_div/report_mode 결정. corp_name/corp_code 미조립(agent 가 정본 소비) |
 | flow | stock_name/ticker + query | context + rewritten_query | base_date 등은 flow 내부 |
 | news | question | rewritten_query | 종목 context 는 보조(불필요) |
 | industry | question (Neo4j graph) | rewritten_query | graph/app 은 deps 주입, 미주입 시 adapter 가 build+close |
