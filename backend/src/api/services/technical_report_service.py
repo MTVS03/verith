@@ -31,6 +31,14 @@ from src.api.repositories import agent_report_repository as agent_repo
 from src.api.repositories import technical_report_repository as tr_repo
 from src.api.schemas.agent_report import AgentReportListItem
 from src.api.schemas.ai_technical_output import TechnicalAgentOutputMirror
+from src.api.schemas.report_archive import (
+    ArchiveCard,
+    ArchiveCardMeta,
+    ArchiveCardStatus,
+    ArchiveCardStock,
+    ArchiveItem,
+    ArchiveListResponse,
+)
 from src.api.schemas.technical_report import (
     ChartItem,
     ChartItemFull,
@@ -557,6 +565,71 @@ def build_list_item(
     )
 
 
+# 보관함 카드 — agent_type 별 라벨/상세경로(확장 지점). 없으면 generic.
+_ARCHIVE_TYPE_LABEL = {
+    "technical": "기술 리포트", "fundamental": "재무 리포트", "news": "뉴스 리포트",
+    "flow": "수급 리포트", "industry": "산업 리포트",
+}
+_ARCHIVE_DETAIL_BASE = {
+    "technical": "/api/technical/reports", "fundamental": "/api/fundamental/reports",
+    "news": "/api/news/reports",
+}
+
+
+def _clip(text: str | None, n: int = 160) -> str | None:
+    if not text:
+        return None
+    t = text.strip()
+    return t if len(t) <= n else t[: n - 1].rstrip() + "…"
+
+
+def _archive_tone(data_status: object, signal_score: object) -> str:
+    if data_status in ("data_limited", "regime_unavailable"):
+        return "amber"
+    if isinstance(signal_score, (int, float)):
+        if signal_score > 0.1:
+            return "green"
+        if signal_score < -0.1:
+            return "red"
+    return "neutral"
+
+
+def build_archive_item(*, row: AgentReport, stock: Stock | None) -> ArchiveItem:
+    """agent_reports 행 → 공통 보관함 카드(projection only, raw 미노출). agent 공통 필드 + summary(JSONB) 사용.
+
+    technical reference: title=종목명+유형, summary=answer_text, badge=confidence%, meta_primary=final_regime,
+    tone=data_status+signal_score. one_line_summary/directional_bias 등 상세 전용 값은 detail endpoint 몫."""
+    summary = row.summary if isinstance(row.summary, dict) else {}
+    stock_name = (stock.stock_name if stock else row.stock_name)
+    type_label = _ARCHIVE_TYPE_LABEL.get(row.agent_type, "리포트")
+    conf = summary.get("confidence")
+    base = _ARCHIVE_DETAIL_BASE.get(row.agent_type)
+    return ArchiveItem(
+        report_id=row.agent_report_id,
+        agent_type=row.agent_type,
+        stock=ArchiveCardStock(
+            stock_code=row.stock_code,
+            stock_name=stock_name,
+            market=(stock.market if stock else None),
+        ),
+        card=ArchiveCard(
+            title=f"{stock_name or row.stock_code or ''} {type_label}".strip(),
+            summary=_clip(row.answer_text),
+            badge_label="Conf" if isinstance(conf, (int, float)) else None,
+            badge_value=(f"{round(conf * 100)}%" if isinstance(conf, (int, float)) else None),
+            badge_tone=_archive_tone(row.data_status, summary.get("signal_score")),
+            meta_primary=summary.get("final_regime") or summary.get("directional_bias"),
+            meta_secondary=(row.created_at.date().isoformat() if row.created_at else None),
+        ),
+        status=ArchiveCardStatus(data_status=row.data_status),
+        meta=ArchiveCardMeta(
+            created_at=row.created_at,
+            as_of=row.as_of,
+            detail_url=(f"{base}/{row.agent_report_id}" if base else None),
+        ),
+    )
+
+
 class TechnicalReportService:
     def __init__(self, session: AsyncSession, ai_client: AIClient) -> None:
         self._session = session
@@ -869,6 +942,31 @@ class TechnicalReportService:
             offset=offset,
         )
         return [AgentReportListItem.model_validate(r) for r in rows]
+
+    async def list_report_archive(
+        self,
+        *,
+        agent_type: str | None = None,
+        client_session_id: str | None = None,
+        stock_code: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> ArchiveListResponse:
+        """공통 보관함 목록(agent_reports 공통 인덱스, created_at DESC). 카드 projection + canonical stock 조인.
+
+        agent_type 필터로 상단 탭 구성. technical 은 reference 매핑, 다른 agent 도 같은 카드 shape 로 확장."""
+        rows = await agent_repo.list_reports(
+            self._session, agent_type=agent_type, client_session_id=client_session_id,
+            stock_code=stock_code, limit=limit, offset=offset,
+        )
+        total = await agent_repo.count_reports(
+            self._session, agent_type=agent_type, client_session_id=client_session_id,
+            stock_code=stock_code,
+        )
+        codes = list({r.stock_code for r in rows if r.stock_code})
+        stocks = await tr_repo.get_stocks(self._session, codes)
+        items = [build_archive_item(row=r, stock=stocks.get(r.stock_code)) for r in rows]
+        return ArchiveListResponse(items=items, total=total, limit=limit, offset=offset)
 
     # ── 삭제 ──────────────────────────────────────────────────────────────────
     async def delete_report(self, report_id: UUID) -> bool:

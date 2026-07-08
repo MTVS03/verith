@@ -11,6 +11,7 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 - **Technical Report Frontend API 계약(정본, 프론트 구현 기준)**: [`docs/technical_frontend_api_contract.md`](docs/technical_frontend_api_contract.md)
 - Technical Report backend handoff(구현 노트): [`docs/technical_backend_handoff.md`](docs/technical_backend_handoff.md)
 - Technical Follow-up answer 생성 경계(caller-provided 정책·미래 AI 경로): [`docs/technical_followup_answer_boundary.md`](docs/technical_followup_answer_boundary.md)
+- 리포트 보관함 공통 목록 API(agent_type 필터 카드 리스트): [`docs/report_archive_api_contract.md`](docs/report_archive_api_contract.md)
 
 ## 개발 환경
 

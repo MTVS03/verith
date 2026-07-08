@@ -25,6 +25,9 @@
 
 > cross-agent `GET /api/reports` 는 **다른 인덱스**(agent 공통)로 별도 유지 — technical 화면은 위 6개를 쓴다.
 
+> **리포트 보관함(여러 agent 공통 카드 리스트)** 은 이 technical 계약이 아니라 공통 archive API
+> `GET /api/reports/archive` 를 쓴다 — [`report_archive_api_contract.md`](report_archive_api_contract.md).
+
 ## 2. 공통 원칙 (프론트가 믿어도 되는 것)
 - **raw payload 를 파싱하지 않는다.** 응답의 구조화 블록만 소비한다.
 - **stock 은 canonical** (`stocks` 기준 stock_code/stock_name/market). 저장 당시 문자열보다 우선.
