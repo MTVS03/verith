@@ -384,7 +384,7 @@ except TimeoutError as exc:
 아래 경우는 즉시 실패시킨다.
 
 - 필수 환경변수 누락
-- allowlist 밖 종목
+- 지원 정책 밖 종목(`is_supported_ticker`=false, 사실상 형식 오류 — allowlist 아님)
 - 필수 KIS 응답 필드 누락
 - 숫자 변환 불가
 - 지원하지 않는 period 값

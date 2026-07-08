@@ -8,7 +8,7 @@
 **이미 export된 셸 환경변수가 `.env`보다 우선**한다(셸에 남은 자격이 실 호출을 유발할 수 있음).
 secret-safe: API key·secret·token·Redis URL·raw prompt·raw response·interpretation 전문·raw candles를
 **절대 출력하지 않는다**(존재 여부·개수·길이·enum·usage·duration만).
-안전: allowlist 밖 ticker·미래 as_of·`--clear-cache-for-ticker` without `--yes`는 **네트워크 호출 전** 중단.
+안전: 형식 오류(6자리 아님) ticker·미래 as_of·`--clear-cache-for-ticker` without `--yes`는 **네트워크 호출 전** 중단(allowlist 아님).
 
 실행:
   cd ai

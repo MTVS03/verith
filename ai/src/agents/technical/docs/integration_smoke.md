@@ -77,7 +77,7 @@ uv run python src/agents/technical/scripts/smoke_technical_integration.py \
 `--clear-cache-for-ticker`(+`--yes`, 없으면 네트워크 호출 전 실패)·`--require-{redis,openai,kis}`(기본 true,
 `--no-require-*`로 해제)·`--timeout-seconds`(기본 55).
 
-**입력 검증(fail-fast)**: allowlist(BATTERY_TICKERS) 밖 ticker·미래 as_of는 **어떤 네트워크/비용 호출
+**입력 검증(fail-fast)**: 형식 오류(6자리 아님) ticker·미래 as_of는 **어떤 네트워크/비용 호출
 전에** 명확한 메시지로 중단한다.
 
 ## ⚠️ 네트워크/비용 주의
@@ -118,7 +118,7 @@ response·interpretation 전문·raw candles. 대신 `present`/`missing`·개수
 - `[openai] config error` → `OPENAI_API_KEY`/`OPENAI_MODEL` 누락. `[openai] call failed=…Error` → 모델
   ID·네트워크·rate limit 확인(`smoke_openai_llm.py`로 격리 확인).
 - `[redis] connected=false` → `REDIS_URL`·Redis 서버 상태.
-- `[kis] fetch failed=…` → allowlist(BATTERY_TICKERS) 내 ticker인지, KIS 자격·시장 시간 확인.
+- `[kis] fetch failed=…` → ticker 형식(6자리)·KIS 자격·시장 시간·해당 종목 상장/거래 여부 확인.
 - `[agent] run failed=DeadlineExceeded` → `--timeout-seconds` 상향 또는 LLM/KIS 지연 확인.
 
 ## 기본 pytest에는 포함되지 않는다

@@ -280,6 +280,8 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
 정상이 아닐 때도 계약은 유지되며, 상태 필드로 표현한다. 아래 예외 예시는 핵심 필드만 보여주는 축약 예시다. 실제 출력 JSON에는 정상 출력과 동일하게 `request_id`·`ticker`·`as_of`·`source`·`trace_id`·`data_status` 등 최상위 필드가 항상 포함된다.
 
+> **계층 교차 semantics 정본표**(형식오류 422 · resolver not_found · 미상장 · candle 0 · 히스토리 부족 · KIS/OpenAI 실패 502 등이 planning/execution/HTTP 어디서 어떤 상태로 표현되는지)는 **supervisor README "상태·오류 semantics"** 를 정본으로 참조한다. 여기 §5 는 그중 **technical 실행 계층의 `data_status` 출력**만 다룬다.
+
 **regime 판단 불가 (봉 부족):** (아래 예시는 차트 생성에 필요한 최소 데이터도 부족해 `charts`가 빈 배열인 경우다.)
 
 ```json

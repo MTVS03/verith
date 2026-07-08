@@ -99,12 +99,35 @@ endpoint(외부 HTTP 입구)는 `../api/supervisor.py`.
   error 는 secret-safe: type + 개행제거·300자 상한, traceback/raw 미노출) / 성공 → output.
 - **resolve tool-error(planning) ≠ agent execution failure(execution)** — 다른 층.
 
+## 상태·오류 semantics (정본표)
+> **원칙: 종목 지원/데이터 유무는 "정책 gate"가 아니라 "상태"로 표현한다.** 인프라 장애(KIS 전멸·OpenAI)
+> 만 HTTP 5xx, 데이터 일부/부족은 `data_status`(200)로 degrade, resolver 미식별은 200 not_found.
+
+| 케이스 | 처리 계층 | 결과 표현 |
+|---|---|---|
+| ticker 형식 오류(6자리 아님) | 입력 계약 validator | **HTTP 422 VALIDATION_ERROR** (supervisor 이전) |
+| 지원 정책 밖(`is_supported_ticker`=false; 사실상 형식) | `supervisor.run` 진입 | `OutOfScopeTickerError`→**422 OUT_OF_SCOPE_TICKER**. 계약이 형식을 먼저 잡아 실무상 거의 미도달. **allowlist 아님** |
+| resolver not_found (미식별·**미상장**·오타) | planning(resolver) | resolution `not_found`(200) → 종목의존 agent `can_run=false`·`stock_not_found`(skipped). 장애 아님 |
+| resolver 도구 장애(timeout/연결/5xx) | planning(resolver 경계) | resolution `error` → `resolver_unavailable`(skipped). not_found와 구분 |
+| KIS 응답 O, W/M 일부 미확보 (D 정상) | technical execution | `data_status=data_limited`(A) — D 기준 signal/regime/charts 정상 |
+| KIS 응답 O이나 **candle 0 / 히스토리 부족**(국면 판정 불가) | technical execution | `data_status=regime_unavailable` — signal/risk null, interpretation=template_fallback(억지 분석 안 함) |
+| D 미확보 + stale 캐시 없음(부분이라도 확보) | technical execution | `data_status=data_limited`(B) — 안전 착지 |
+| stale 캐시로 대체(일부 tf) | technical execution | `data_status=stale_cache` · source=`KIS (stale)` |
+| KIS 연결 실패/timeout **+ 아무 데이터도 못 받음** | technical | 단독 endpoint=`KisApiError`→**502 AI_UNAVAILABLE** / **supervisor executor 경유=`failed`(execution_failed, 격리)** |
+| OpenAI(LLM) 실패 | technical | 단독 endpoint=`LlmCallError`→**502** / executor 경유=`failed`. 단 normalize/interpret 내부 LLM 실패는 template_fallback 흡수(200) |
+| deadline 초과 | technical endpoint | **504 AI_TIMEOUT** |
+
+**직교성:** supervisor result status(`success`/`skipped`/`failed`)와 technical `data_status`
+(`normal`/`data_limited`/`regime_unavailable`/`stale_cache`)는 **다른 축**이다. resolved 종목이 degrade
+데이터로 분석돼도 supervisor 결과는 `success`(output.data_status로 세분), KIS/LLM 예외는 `failed`(격리).
+세부: [contracts.md §5](../agents/technical/docs/contracts.md)(technical 상태별 출력) · stock_resolver.md(not_found) · api_spec.md(오류코드).
+
 ## 실행/후속 (이번 단계 범위)
 - **순차 실행**으로 계약·구조를 먼저 안정화. 병렬화·상위 전체 deadline·per-call timeout orchestration은
   **후속**(구조는 병렬 확장 가능하게 유지). technical 내부 `deadline` 전달 경계만 `ExecutionDeps`에 마련.
 - 실 KIS/OpenAI/backend 결합은 **수동 smoke** 로만: `scripts/smoke_supervisor.py`
-  (`uv run python -m src.supervisor.scripts.smoke_supervisor "LG에너지솔루션 차트 어때?"`).
-  **범위 내 종목(BATTERY_TICKERS)만** 사용. pytest 미포함.
+  (`uv run python -m src.supervisor.scripts.smoke_supervisor "삼성전자 차트 어때?"`). 실효 universe 는
+  backend `stocks` 에 seed 된 종목(battery 10 + representative: 삼성전자·삼성전자우·카카오). pytest 미포함.
 
 ## 테스트 (실 네트워크 0)
 fake resolver + fake adapter/llm + sys.modules 주입 + FastAPI dependency_overrides. planning/execution/
