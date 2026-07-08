@@ -53,3 +53,18 @@ ALIAS_SEED: list[dict[str, str]] = [
     {"stock_code": "086520", "alias": "에코", "alias_type": "ambiguous_group"},
     {"stock_code": "247540", "alias": "에코", "alias_type": "ambiguous_group"},
 ]
+
+
+# 대표 확장 종목 별칭(변형만). `constants/stocks.REPRESENTATIVE_STOCKS` 와 짝이며, battery `ALIAS_SEED`
+# 와 **분리**된 목록이다(공식명은 여기 넣지 않는다 — 정본은 stocks.stock_name).
+# `scripts/seed_representative_stocks.py` 가 이 목록을 읽어 seed 한다.
+REPRESENTATIVE_ALIAS_SEED: list[dict[str, str]] = [
+    # 005930 삼성전자
+    {"stock_code": "005930", "alias": "삼전", "alias_type": "abbreviation"},
+    {"stock_code": "005930", "alias": "Samsung Electronics", "alias_type": "english"},
+    # 005935 삼성전자우
+    {"stock_code": "005935", "alias": "삼성전자우선주", "alias_type": "korean_variant"},
+    # 035720 카카오
+    {"stock_code": "035720", "alias": "Kakao", "alias_type": "english"},
+    {"stock_code": "035720", "alias": "다음카카오", "alias_type": "former_name"},
+]

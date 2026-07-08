@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import pytest_asyncio
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from db.models.common.stock import Stock
 from db.models.common.stock_alias import StockAlias
 from scripts.seed_stock_aliases import seed as seed_aliases
 from scripts.seed_stocks import seed as seed_stocks
 from src.api.services.stock_resolver_service import StockResolverService
 
-# 부트스트랩 밖 + 결합형/우선주 검증용 종목(테스트 DB에만 in-tx 추가).
+# 결합형/우선주/흔한단어 검증용 종목. 일부(삼성전자·삼성전자우·카카오)는 representative canonical seed 로
+# 승격돼 dev DB 에 이미 있을 수 있으므로, in-tx 추가는 **멱등(on_conflict_do_nothing)** 으로 한다.
 _EXTRA = [
     ("035720", "카카오", "KOSPI"),
     ("035420", "NAVER", "KOSPI"),
@@ -33,8 +36,11 @@ _EXTRA = [
 async def resolver(db_session):
     await seed_stocks(db_session)
     await seed_aliases(db_session)
-    for code, name, market in _EXTRA:
-        db_session.add(Stock(stock_code=code, stock_name=name, market=market))
+    await db_session.execute(
+        pg_insert(Stock)
+        .values([{"stock_code": c, "stock_name": n, "market": m} for c, n, m in _EXTRA])
+        .on_conflict_do_nothing(index_elements=[Stock.stock_code])
+    )
     await db_session.flush()
     return StockResolverService(db_session)
 
