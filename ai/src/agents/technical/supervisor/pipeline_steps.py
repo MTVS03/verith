@@ -363,13 +363,14 @@ def _interpret(
     client: interp.LlmClient, *,
     regime: RegimeResult, signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult], risks: Sequence[RiskItem], focus: FocusResult,
-    trace: TraceLogger, deadline: Deadline | None = None,
+    trace: TraceLogger, deadline: Deadline | None = None, data_status: str | None = None,
 ) -> _Interpretation:
     # LLM prompt/response 원문은 trace에 남기지 않는다 — 재생성/폴백은 retry/fallback 이벤트로만 관측(§12).
     with trace.node("interpret_report") as span:
         payload = interp.build_payload(
             regime=regime, signal=signal, signals=signals, risks=risks,
             analysis_focus=focus.analysis_focus, focus_summary=focus.focus_summary,
+            data_status=data_status,
         )
         # 1차(interpret) + REGEN_MAX_COUNT회 재생성(config.md §9).
         prompt_seq = [interp.INTERPRET_PROMPT] + [interp.REGENERATE_PROMPT] * REGEN_MAX_COUNT
@@ -391,7 +392,8 @@ def _interpret(
             last = attempt
             if attempt.passed:
                 source = GenerationSource.LLM if i == 0 else GenerationSource.LLM_REGENERATED
-                result = _success(attempt, source, signals, regen_count=i)
+                result = _success(attempt, source, signals,
+                                  regime=regime, signal=signal, risks=risks, regen_count=i)
                 break
         else:
             # 재생성까지 소진 → 마지막 출력 기준 granular(부분) fallback (H2/REGEN-04).
@@ -436,10 +438,12 @@ def _interpret_summary(result: _Interpretation) -> dict[str, object]:
 
 def _success(
     attempt: _Attempt, source: GenerationSource,
-    signals: Sequence[IndicatorSignalResult], *, regen_count: int,
+    signals: Sequence[IndicatorSignalResult], *,
+    regime: RegimeResult, signal: SignalSummary, risks: Sequence[RiskItem], regen_count: int,
 ) -> _Interpretation:
     assert attempt.parsed is not None and attempt.result is not None
-    interpretation = interp.interpretation_from_llm(attempt.parsed, source=source)
+    interpretation = interp.interpretation_from_llm(
+        attempt.parsed, source=source, regime=regime, signal=signal, signals=signals, risks=risks)
     details = interp.details_from_llm(
         attempt.parsed, signals=signals, source=source,
         failed_indicators=attempt.result.failed_indicators)
@@ -466,9 +470,11 @@ def _granular_fallback(
     ev = last.result
     kept_source = GenerationSource.LLM if regen_count == 0 else GenerationSource.LLM_REGENERATED
     if ev.interpretation_failed:
-        interpretation = interp.fallback_interpretation(regime=regime, signal=signal, risks=risks)
+        interpretation = interp.fallback_interpretation(
+            regime=regime, signal=signal, risks=risks, signals=signals)
     else:
-        interpretation = interp.interpretation_from_llm(last.parsed, source=kept_source)
+        interpretation = interp.interpretation_from_llm(
+            last.parsed, source=kept_source, regime=regime, signal=signal, signals=signals, risks=risks)
     # 실패한 indicator의 detail만 template_fallback, 나머지는 LLM 유지(REGEN-04).
     details = interp.details_from_llm(
         last.parsed, signals=signals, source=kept_source,
@@ -485,7 +491,8 @@ def _full_fallback(
     regime: RegimeResult, signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult], risks: Sequence[RiskItem], *, regen_count: int,
 ) -> _Interpretation:
-    interpretation = interp.fallback_interpretation(regime=regime, signal=signal, risks=risks)
+    interpretation = interp.fallback_interpretation(
+        regime=regime, signal=signal, risks=risks, signals=signals)
     details = [interp.fallback_detail(s.indicator, s.signal, s.metrics) for s in signals]
     verification = VerificationResult(
         calc_passed=True, regime_passed=True, label_matched=False,

@@ -261,4 +261,31 @@ def evaluate(
         )
     )
     failures.extend(evaluate_details(llm_output.get("details"), signals=signals))
+    failures.extend(_evaluate_sections(llm_output))
     return EvalResult(passed=not failures, failures=tuple(failures))
+
+
+# 구조화 섹션(additive) 문자열에도 금지어(투자 조언·미래 단정)가 새지 않도록 스캔한다. 라벨 요구 검사는
+# interpretation_text 에만 적용하고, 섹션은 forbidden-term 안전성만 본다(과도한 결합 회피).
+_SECTION_STR_KEYS = (
+    "one_line_summary", "trend_interpretation", "signal_interpretation", "risk_interpretation",
+    "timeframe_alignment", "what_to_watch_next", "invalidation_or_caution",
+)
+_SECTION_LIST_KEYS = ("key_drivers", "warning_points")
+
+
+def _evaluate_sections(llm_output: dict) -> list[TargetFailure]:
+    failures: list[TargetFailure] = []
+    for key in _SECTION_STR_KEYS:
+        val = llm_output.get(key)
+        if isinstance(val, str):
+            for term in contains_forbidden_terms(val):
+                failures.append(TargetFailure(f"interpretation.{key}", "forbidden_term", term))
+    for key in _SECTION_LIST_KEYS:
+        val = llm_output.get(key)
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, str):
+                    for term in contains_forbidden_terms(item):
+                        failures.append(TargetFailure(f"interpretation.{key}", "forbidden_term", term))
+    return failures

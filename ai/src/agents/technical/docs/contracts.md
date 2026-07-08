@@ -114,7 +114,17 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 
   "interpretation": {
     "text": "현재 차트는 상승 추세 안에서 단기 과열 신호가 관찰되며, 거래량 확인이 충분하지 않아 신호 강도는 제한적으로 해석됩니다.",
-    "source": "llm"
+    "source": "llm",
+    "one_line_summary": "과열 국면 · 종합신호 약한 긍정(보통 신뢰도)",
+    "directional_bias": "bullish",
+    "trend_interpretation": "현재 국면은 과열로 분류됩니다(일봉 과열).",
+    "signal_interpretation": "종합 신호는 약한 긍정이며 신뢰도는 보통 수준입니다.",
+    "risk_interpretation": "위험 요인으로 거래량 미확인이(가) 확인됩니다.",
+    "timeframe_alignment": "상위 추세(주봉 상승·월봉 상승)와 단기 흐름이 대체로 정합합니다.",
+    "key_drivers": ["이동평균 긍정", "거래량 미확인"],
+    "warning_points": ["거래량 미확인"],
+    "what_to_watch_next": "현재 국면 유지 여부와 거래량 동반",
+    "invalidation_or_caution": "상위 추세가 반대로 전환되거나 데이터가 부족해지면 현재 해석은 유효하지 않을 수 있습니다."
   },
 
   "verification": {
@@ -227,6 +237,13 @@ JSON 데이터만 반환한다. 의미 단위로 중첩 구조를 유지한다(b
 | `interpretation.source` | interpretation_source |
 
 *긴 text라 본체에서 분리 — 목록 조회 시 딸려오지 않게 해 리스트를 가볍게 유지한다.*
+
+**구조화 섹션(additive, 프론트 카드용).** `one_line_summary`·`directional_bias`·`trend/signal/risk_interpretation`·
+`timeframe_alignment`·`key_drivers[]`·`warning_points[]`·`what_to_watch_next`·`invalidation_or_caution`는
+`text`와 함께 항상 존재한다(LLM 실패 시 template fallback이 같은 구조를 deterministic하게 채움). 계산값 재산출이
+아니라 확정 regime/signal/risk의 **설명·파생**이며, `directional_bias`는 LLM이 아니라 **consensus에서 코드가
+파생**한다(bullish/neutral/bearish). **backend 저장 매핑(어떤 섹션을 어느 컬럼/JSON으로 flatten할지)은 다음
+브랜치(backend read model)에서 확정**한다 — 이번 브랜치는 output 계약만 정리한다.
 
 #### → `REPORT_SIGNALS` (1:N, 지표 수만큼)
 

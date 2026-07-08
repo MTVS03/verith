@@ -21,6 +21,7 @@ from src.agents.technical.schemas.enums import (
     AlignmentFlag,
     ConfidenceLevel,
     Consensus,
+    DirectionalBias,
     GenerationSource,
     IndicatorType,
     Regime,
@@ -209,9 +210,16 @@ def test_details_missing_indicator_falls_back():
 
 def test_interpretation_from_llm_source():
     out = node.parse_llm_output(VALID_OUTPUT)
-    result = node.interpretation_from_llm(out, source=GenerationSource.LLM_REGENERATED)
+    result = node.interpretation_from_llm(
+        out, source=GenerationSource.LLM_REGENERATED,
+        regime=_regime(), signal=_signal(), signals=_signals(), risks=(),
+    )
     assert result.source == GenerationSource.LLM_REGENERATED
     assert result.text.startswith("현재는 과열")
+    # directional_bias 는 LLM 이 아니라 consensus(weak_positive)에서 코드가 파생.
+    assert result.directional_bias == DirectionalBias.BULLISH
+    # 섹션은 LLM 누락 시 결정론 기본값으로 채워진다.
+    assert result.one_line_summary and result.timeframe_alignment and result.invalidation_or_caution
 
 
 # ── template fallback (새 판단 없이 확정값만) ───────────────────────────────
@@ -259,3 +267,81 @@ def test_llm_attempt_to_change_signal_is_ignored_by_merge():
     # DetailResult에는 signal 필드가 없다 — 확정 signal은 병합 대상이 아니다.
     assert not hasattr(details[0], "signal")
     assert details[0].detail == "이동평균선 긍정."
+
+
+# ── 구조화 해석 upgrade (이번 브랜치) ────────────────────────────────────────
+def test_build_payload_includes_data_status_hint():
+    payload = node.build_payload(regime=_regime(), signal=_signal(), signals=_signals(),
+                                 risks=[], data_status="data_limited")
+    assert payload["data_status"] == "data_limited"
+    # 미지정이면 키 없음(하위호환).
+    assert "data_status" not in node.build_payload(
+        regime=_regime(), signal=_signal(), signals=_signals(), risks=[])
+
+
+def test_directional_bias_derived_from_consensus():
+    assert node.bias_from_consensus(Consensus.STRONG_POSITIVE) == DirectionalBias.BULLISH
+    assert node.bias_from_consensus(Consensus.WEAK_POSITIVE) == DirectionalBias.BULLISH
+    assert node.bias_from_consensus(Consensus.NEUTRAL) == DirectionalBias.NEUTRAL
+    assert node.bias_from_consensus(Consensus.STRONG_NEGATIVE) == DirectionalBias.BEARISH
+
+
+def test_fallback_interpretation_fills_all_sections():
+    risks = [RiskItem(flag=RiskFlag.OVERHEATED_MOMENTUM, note="단기 과열.")]
+    r = node.fallback_interpretation(
+        regime=_regime(alignment=AlignmentFlag.COUNTER_TREND), signal=_signal(),
+        risks=risks, signals=_signals())
+    assert r.source == GenerationSource.TEMPLATE_FALLBACK
+    assert r.directional_bias == DirectionalBias.BULLISH            # consensus 파생
+    assert r.one_line_summary and r.trend_interpretation and r.signal_interpretation
+    assert r.risk_interpretation and r.timeframe_alignment and r.what_to_watch_next
+    assert r.invalidation_or_caution
+    assert "역행" in r.timeframe_alignment                          # counter_trend 반영
+    assert len(r.warning_points) == 1 and "과열" in r.warning_points[0]   # risk 라벨
+    assert r.key_drivers                                            # 지표 기반 근거
+
+
+def test_unavailable_interpretation_neutral_and_no_overstatement():
+    r = node.unavailable_interpretation()
+    assert r.directional_bias == DirectionalBias.NEUTRAL
+    assert r.warning_points == ["데이터 부족"]
+    # 과장/추천/미래 단정 금지어가 없어야 한다.
+    for field in (r.text, r.one_line_summary, r.invalidation_or_caution, r.trend_interpretation):
+        assert not contains_forbidden_terms(field or "")
+
+
+def test_interpretation_from_llm_keeps_llm_sections():
+    out = {
+        "interpretation_text": "현재는 과열 국면입니다. 참고 정보입니다.",
+        "one_line_summary": "과열·약한 긍정",
+        "timeframe_alignment": "주봉·월봉과 정합합니다.",
+        "key_drivers": ["이동평균 긍정", "거래량 미확인"],
+    }
+    r = node.interpretation_from_llm(out, source=GenerationSource.LLM,
+                                     regime=_regime(), signal=_signal(), signals=_signals(), risks=())
+    assert r.one_line_summary == "과열·약한 긍정"                    # LLM 값 우선
+    assert r.key_drivers == ["이동평균 긍정", "거래량 미확인"]
+    assert r.trend_interpretation                                   # 누락 섹션은 결정론 기본값
+
+
+def test_parse_accepts_and_type_checks_sections():
+    good = json.dumps({"interpretation_text": "t", "one_line_summary": "s",
+                       "key_drivers": ["a", "b"]}, ensure_ascii=False)
+    assert node.parse_llm_output(good)["key_drivers"] == ["a", "b"]
+    with pytest.raises(node.LlmOutputParseError):
+        node.parse_llm_output(json.dumps({"key_drivers": "not-a-list"}))
+    with pytest.raises(node.LlmOutputParseError):
+        node.parse_llm_output(json.dumps({"one_line_summary": ["should-be-str"]}))
+
+
+def test_verification_scans_section_forbidden_terms():
+    out = {
+        "interpretation_text": "현재는 과열 국면이며 약한 긍정으로 해석됩니다. 참고 정보입니다.",
+        "one_line_summary": "지금 매수하세요",           # 금지어 — 섹션에서도 잡혀야
+        "details": [],
+    }
+    ev = evaluate(out, final_regime=Regime.OVERHEATED, consensus=Consensus.WEAK_POSITIVE,
+                  alignment_flag=AlignmentFlag.NEUTRAL, signals=[])
+    assert not ev.passed
+    assert any(f.reason == "forbidden_term" and "interpretation.one_line_summary" in f.target
+               for f in ev.failures)

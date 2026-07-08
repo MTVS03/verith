@@ -136,10 +136,15 @@ def _n_interpret_report(state: TechnicalGraphState) -> dict:
     regime = steps._to_regime_result(state["regime_result"])
     signal_summary = steps._to_signal_summary(state["signal_result"], state["confidence"])
     steps.check_deadline(state.get("deadline"), "interpret_report")
+    # data_status hedge 힌트(build_output 과 동일 산출) — limited/stale 이면 LLM 이 단정하지 않도록.
+    data_status = (
+        DataStatus.STALE_CACHE if state["used_stale"] else steps._data_status(state["regime_result"])
+    )
     result = steps._interpret(
         state["llm_client"], regime=regime, signal=signal_summary,
         signals=state["signal_result"].technical_signals, risks=state["risk_items"],
         focus=state["focus"], trace=state["trace"], deadline=state.get("deadline"),
+        data_status=data_status.value,
     )
     return {"regime": regime, "signal_summary": signal_summary, "interpretation": result}
 
