@@ -8,10 +8,11 @@ resolve → planning → execution → technical adapter → technical output �
     # backend(:8000, /api/stocks/resolve)·OpenAI·KIS 접속이 준비돼 있어야 한다.
     uv run python -m src.supervisor.scripts.smoke_supervisor "LG에너지솔루션 차트 어때?"
 
-**종목 범위 주의:** technical 은 현재 `BATTERY_TICKERS`(2차전지 10종) MVP 범위만 실행 가능하다.
-resolve 는 전체 stocks 기준이라 삼성전자(005930) 도 resolved 되지만, technical 은 범위 밖이라
-`OutOfScopeTickerError` 로 실패(격리)한다 — 버그가 아니라 현재 정책이다. smoke 는 **범위 내 종목**
-(예: 373220 LG에너지솔루션 · 051910 LG화학 · 006400 삼성SDI · 247540 에코프로비엠)만 쓴다.
+**종목 범위:** technical 은 전체 종목 확장 구조로, 형식상 유효한(6자리) ticker 를 기본 지원한다
+(`config.is_supported_ticker`, allowlist 아님). 종목명 정본은 backend canonical stock context 가 담당한다.
+실효 universe 는 backend `stocks`(resolver) 데이터에 종속 — 현재 dev stocks 에 seed 된 종목만 resolved 되므로
+smoke 는 seed 된 종목을 쓴다. **실증 완료 기준선은 BATTERY_TICKERS 대표주**(예: 373220 LG에너지솔루션 ·
+051910 LG화학)이고, 확장 종목(예: 005930)은 backend stocks 에 seed 된 뒤 검증한다.
 
 출력은 **secret-safe** — request_id/trace_id/as_of 와 technical 요약(status·source·final_regime 등)만
 찍고, raw prompt/response·API key 는 절대 출력하지 않는다.

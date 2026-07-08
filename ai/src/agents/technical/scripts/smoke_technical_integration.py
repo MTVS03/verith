@@ -45,7 +45,6 @@ if _ENV_FILE.exists():
     load_dotenv(_ENV_FILE, override=False)
 
 from src.agents.technical.config import (  # noqa: E402
-    BATTERY_TICKERS,
     CACHE_KEY_BY_PERIOD,
     KIS_PERIOD_DAILY,
     KIS_PERIOD_MONTHLY,
@@ -53,6 +52,8 @@ from src.agents.technical.config import (  # noqa: E402
     OPENAI_API_KEY_ENV,
     OPENAI_MODEL_ENV,
     TECHNICAL_AGENT_TIMEOUT_SECONDS,
+    dev_stock_name,
+    is_supported_ticker,
 )
 from src.agents.technical.agent import run_technical_agent  # noqa: E402
 from src.agents.technical.observability.trace_logger import InMemoryTraceSink  # noqa: E402
@@ -236,7 +237,8 @@ def agent_e2e(args, as_of_dt: datetime) -> bool:
     sink = InMemoryTraceSink()
     request_id = f"smoke-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:8]}"
     payload = TechnicalAgentInput(
-        request_id=request_id, ticker=args.ticker, query=args.query, as_of=as_of_dt)
+        request_id=request_id, ticker=args.ticker, query=args.query, as_of=as_of_dt,
+        stock_name=args.stock_name or dev_stock_name(args.ticker))  # canonical 종목명 주입
     try:
         out = run_technical_agent(
             payload, llm_client=llm, cache=default_cache(), trace_sink=sink, deadline=deadline)
@@ -307,7 +309,9 @@ def endpoint_smoke(args, as_of_dt: datetime) -> bool:
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> int:
     p = argparse.ArgumentParser(description="Technical Agent real integration smoke (수동 전용)")
-    p.add_argument("--ticker", default="373220", help="allowlist 내 종목(기본 373220)")
+    p.add_argument("--ticker", default="373220", help="종목코드(6자리). 전체 종목 확장 — allowlist 아님(기본 373220)")
+    p.add_argument("--stock-name", dest="stock_name", default=None,
+                   help="backend canonical 종목명(주입). 생략 시 dev 표시명 fallback")
     p.add_argument("--as-of", default=None, help="ISO8601 분석 기준 시각(기본: 현재 UTC). 미래 금지")
     p.add_argument("--query", default=None, help="기본: '{ticker} 최근 기술적 흐름...' 자동 생성")
     p.add_argument("--via-agent", action="store_true", default=True, help="run_technical_agent e2e(기본 on)")
@@ -347,9 +351,10 @@ def main() -> int:
     if not env_preflight(args):
         print("[smoke] 필수 env 누락으로 중단합니다.")
         return 1
-    # 2) 입력 검증 — 잘못된 ticker/미래 as_of는 OpenAI/KIS 호출 전에 거절(비용·traceback 방지).
-    if args.ticker not in BATTERY_TICKERS:
-        print(f"[smoke] ticker {args.ticker!r} 은 allowlist(BATTERY_TICKERS) 밖입니다 — 중단(네트워크 미호출).")
+    # 2) 입력 검증 — 형식 오류 ticker/미래 as_of는 OpenAI/KIS 호출 전에 거절(비용·traceback 방지).
+    #    전체 종목 확장: allowlist membership 이 아니라 형식(6자리)만 방어한다(config.is_supported_ticker).
+    if not is_supported_ticker(args.ticker):
+        print(f"[smoke] ticker {args.ticker!r} 형식 오류(6자리 아님) — 중단(네트워크 미호출).")
         return 1
     _now = datetime.now(as_of_dt.tzinfo) if as_of_dt.tzinfo else datetime.now()
     if as_of_dt > _now:

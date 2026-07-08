@@ -342,9 +342,10 @@ technical 은 **형식상 유효한(6자리) ticker 를 기본 지원**한다(`c
 
 ```python
 def is_supported_ticker(ticker: str) -> bool:
-    # 기본 정책: 형식상 유효한 ticker 전체 지원. BATTERY_TICKERS membership 아님.
+    # 기본 정책: 형식상 유효한(6자리 숫자) ticker 전체 지원. BATTERY_TICKERS membership 아님.
+    # kis_client 등 계약 밖 경계에서도 형식 방어가 되도록 여기서 6자리를 검증한다(방어를 단일 함수에 모음).
     # 향후 시장/유형 정책이 필요하면 gate 를 흩뿌리지 말고 이 함수에서만 확장한다.
-    return bool(ticker)
+    return bool(_TICKER_RE.fullmatch(ticker))
 ```
 
 **지원 정책의 단일 경계**는 `technical_supervisor.run` 시작부(OpenAI/cache/KIS 이전)이며, 정책 밖(빈 ticker

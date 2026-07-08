@@ -18,11 +18,16 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# 종목코드 형식(6자리 숫자). 입력 계약(TechnicalAgentInput) validator 와 동일 규칙을 지원 정책 함수에도
+# 둔다 — kis_client 등 **계약 밖 경계**에서도 형식 방어가 되도록(경계 방어를 단일 정책 함수에 모은다).
+_TICKER_RE = re.compile(r"\d{6}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. dev/smoke/test 표시명 fallback (production gate·정본 아님)
@@ -46,14 +51,15 @@ BATTERY_TICKERS: dict[str, str] = {
 
 
 def is_supported_ticker(ticker: str) -> bool:
-    """종목 지원 정책의 **단일 경계**. 기본 정책: **형식상 유효한 ticker 는 모두 지원**한다.
+    """종목 지원 정책의 **단일 경계**. 기본 정책: **형식상 유효한(6자리 숫자) ticker 는 모두 지원**한다.
 
-    6자리 형식 검증은 입력 계약(`TechnicalAgentInput` validator)이 담당한다. 종목 지원 여부는
-    **allowlist membership 이 아니라 실제 데이터/결과 상태(data_status)** 로 표현한다 — BATTERY_TICKERS
-    소속 여부에 더 이상 의존하지 않는다. 향후 시장/유형 정책이 필요하면 gate 를 흩뿌리지 말고 이 함수에서만
-    확장한다.
+    입력 계약(`TechnicalAgentInput`)에도 6자리 validator 가 있지만, 이 함수는 `kis_client` 등 **계약 밖
+    경계**(직접 fetch·스크립트)에서도 불리므로 여기서 형식을 다시 검증해 방어를 단일 정책 함수에 모은다
+    (형식 규칙을 코드 여기저기 흩뿌리는 것과 다르다). 종목 지원 여부는 **allowlist membership 이 아니라
+    실제 데이터/결과 상태(data_status)** 로 표현한다 — BATTERY_TICKERS 소속에 더 이상 의존하지 않는다.
+    향후 시장/유형 정책이 필요하면 gate 를 흩뿌리지 말고 이 함수에서만 확장한다.
     """
-    return bool(ticker)  # 비어있지 않은(계약상 6자리) ticker 는 지원
+    return bool(_TICKER_RE.fullmatch(ticker))
 
 
 def dev_stock_name(ticker: str) -> str | None:
