@@ -13,19 +13,20 @@ from __future__ import annotations
 import json
 import logging
 
-import services.backend.query_client as query_client
-import services.llm as llm
-from config import (
+import src.agents.news.services.backend.query_client as query_client
+import src.agents.news.services.llm as llm
+from src.agents.news.config import (
+    QUERY_ANSWER_MAX_ARTICLES_PER_EVENT,
+    QUERY_ANSWER_MAX_EVENTS,
     QUERY_ANSWER_MAX_TOKENS,
     QUERY_ANSWER_SYSTEM_PROMPT,
     QUERY_ANSWER_TEMPERATURE,
     QUERY_INTENT_GUIDANCE,
-    REPORT_MAX_ARTICLES_PER_EVENT,
 )
-from schemas.query import Answer, QueryUnderstanding
-from schemas.report import ArticleRef
-from schemas.response import SubjectQueryResponse
-from services.backend.client import BackendError
+from src.agents.news.schemas.query import Answer, QueryUnderstanding
+from src.agents.news.schemas.report import ArticleRef
+from src.agents.news.schemas.response import SubjectQueryResponse
+from src.agents.news.services.backend.client import BackendError
 
 logger = logging.getLogger(__name__)
 
@@ -80,14 +81,18 @@ def _collect_evidence(response: SubjectQueryResponse) -> tuple[list[dict], set[i
     valid_news_ids: set[int] = set()
     valid_event_ids: set[str] = set()
 
-    for ewa in response.events:
+    # 리포트 노출과 같은 importance순으로 상위 이벤트만 근거로 삼는다. 전체를 넣으면 prompt 가
+    # 서버 컨텍스트(8192)를 잠식해 답변 JSON 이 잘려 파싱 실패한다(§7, config QUERY_ANSWER_MAX_EVENTS).
+    ranked = sorted(response.events, key=lambda e: (e.event.importance or 0.0), reverse=True)
+    for ewa in ranked[:QUERY_ANSWER_MAX_EVENTS]:
         event = ewa.event
         event_id = event.canonical_id
-        articles: list[ArticleRef] = list(ewa.articles)
+        # LLM 근거는 이벤트당 소수만 사용한다(표시는 전부지만, 토큰 보호를 위해 근거는 상한). §7.
+        articles: list[ArticleRef] = list(ewa.articles)[:QUERY_ANSWER_MAX_ARTICLES_PER_EVENT]
         # 대표 소수가 비었지만 총 건수는 있는 경우에만 on-demand 근거 조회(깊은 근거).
         if not articles and ewa.article_count > 0 and event_id:
             try:
-                articles = query_client.get_articles_by_event(event_id, REPORT_MAX_ARTICLES_PER_EVENT)
+                articles = query_client.get_articles_by_event(event_id, QUERY_ANSWER_MAX_ARTICLES_PER_EVENT)
             except BackendError as exc:
                 logger.warning("get_articles_by_event 실패(event_id=%s): %s", event_id, exc)
                 articles = []

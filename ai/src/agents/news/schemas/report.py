@@ -67,10 +67,14 @@ class SentimentGauge(BaseModel):
 
 
 class ArticleRef(BaseModel):
-    """근거 기사 한 건. news_id·summary·url을 한 객체로 묶어 순서 어긋남/근거 추적 붕괴를 원천 차단."""
+    """근거 기사 한 건. news_id·summary·url + 표시용 제목·언론사·발행일을 한 객체로 묶어 근거 추적 붕괴를 원천 차단."""
     news_id: int            # 근거 추적 키(= Article.id). evidence news_id 사슬(TASK 09 §0.2)의 원천
     summary: str
     url: str
+    # 리포트가 근거 기사를 사람이 읽을 수 있게 표시하는 원자료(backend News 행). backend가 안 주면 기본값으로 파싱됨.
+    title: str = ""
+    publisher: str | None = None
+    published_at: datetime | None = None
 
 
 class ReportEvent(BaseModel):

@@ -18,13 +18,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
 
-from config import (
+from src.agents.news.config import (
     REPORT_MAX_ARTICLES_PER_EVENT,
     REPORT_TOP_N,
 )
-from schemas.query import Answer, QueryUnderstanding
-from schemas.report import ReportEvent, ReportModel, SentimentGauge
-from schemas.response import SubjectQueryResponse
+from src.agents.news.schemas.query import Answer, QueryUnderstanding
+from src.agents.news.schemas.report import ReportEvent, ReportModel, SentimentGauge
+from src.agents.news.schemas.response import SubjectQueryResponse
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,8 @@ def build_report_model(understanding: QueryUnderstanding,
             importance=event.importance or 0.0,
             gauge=ewa.gauge,
             article_count=ewa.article_count,                       # 총 건수(실시간 집계)
-            articles=list(ewa.articles)[:REPORT_MAX_ARTICLES_PER_EVENT],  # 화면 노출 대표 소수
+            # 화면 노출 대표 소수. 완전 동일 기사(같은 url 또는 같은 본문)는 하나만 남긴다(팀 결정: 중복 기사 제거).
+            articles=_dedup_articles(ewa.articles)[:REPORT_MAX_ARTICLES_PER_EVENT],
         ))
 
     subject = response.subject or (" · ".join(understanding.companies) if understanding.companies
@@ -69,6 +70,28 @@ def build_report_model(understanding: QueryUnderstanding,
         data_limited=data_limited,
         note=note,
     )
+
+
+def _dedup_articles(articles: list) -> list:
+    """완전 동일 기사(같은 url 또는 공백 정규화 후 같은 summary)를 하나만 남긴다(팀 결정: 중복 기사 제거).
+
+    같은 사건의 서로 다른 기사(수치·표현이 조금 다른)는 중복이 아니므로 남긴다 — 억지 병합 금지(절대규칙 5).
+    최초 등장 순서를 보존한다(정렬은 backend importance/published_at 규칙을 이미 반영).
+    """
+    seen_urls: set[str] = set()
+    seen_summaries: set[str] = set()
+    out: list = []
+    for a in articles:
+        url_key = (a.url or "").strip()
+        sum_key = " ".join((a.summary or "").split())  # 공백·개행 정규화 후 완전 일치만 중복으로 본다
+        if (url_key and url_key in seen_urls) or (sum_key and sum_key in seen_summaries):
+            continue
+        if url_key:
+            seen_urls.add(url_key)
+        if sum_key:
+            seen_summaries.add(sum_key)
+        out.append(a)
+    return out
 
 
 def _limit_note(response: SubjectQueryResponse, top_events: list[ReportEvent],

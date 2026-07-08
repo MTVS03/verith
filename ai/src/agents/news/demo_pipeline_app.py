@@ -186,6 +186,13 @@ def gauge_bar(g: dict) -> str:
     )
 
 
+def dominant_label(g: dict) -> str:
+    """기사 표본이 적어(1건) 비율 바가 무의미할 때 쓸 대표 감성 문구. 감성 없는 기사면 '감성 미분석'."""
+    pairs = [("긍정", g.get("positive", 0)), ("중립", g.get("neutral", 0)), ("부정", g.get("negative", 0))]
+    label, cnt = max(pairs, key=lambda x: x[1])
+    return label if cnt > 0 else "감성 미분석"
+
+
 def build_report(subject: str | None = None, question: str | None = None) -> dict:
     """질의 서비스 직접 조합 → report_json. subject(종목 프리셋) 또는 question(자유질문)."""
     if subject:
@@ -222,10 +229,24 @@ def render_report(rj: dict) -> None:
         st.markdown(f"**📌 주요 이벤트 ({len(events)})**")
     for e in events:
         eg = e.get("gauge") or {}
-        with st.expander(f"{e.get('canonical_title','(제목 없음)')}  ·  중요도 {e.get('importance',0):.2f}  ·  관련기사 {e.get('article_count',0)}건"):
-            st.markdown(gauge_bar(eg), unsafe_allow_html=True)
+        ac = e.get("article_count", 0)
+        with st.expander(f"{e.get('canonical_title','(제목 없음)')}  ·  중요도 {e.get('importance',0):.2f}  ·  관련기사 {ac}건"):
+            # 기사 1건짜리 이벤트는 비율 바가 곧 100%라 과장돼 보인다 → 표본 수 + 대표 감성 텍스트로 표시.
+            if ac <= 1:
+                st.markdown(f"기사 {ac}건 · **{dominant_label(eg)}** &nbsp;<span style='color:#888;font-size:12px'>(표본 1건 — 비율 생략)</span>", unsafe_allow_html=True)
+            else:
+                st.markdown(gauge_bar(eg), unsafe_allow_html=True)
             for a in (e.get("articles") or []):
-                st.markdown(f"- [{a.get('summary','')[:80]}]({a.get('url','')})")
+                # 기사 제목 + (언론사·발행일) 헤더 + 요약 전문. 제목/언론사/발행일은 backend가 내려줄 때만 표시(없으면 생략).
+                title = a.get("title") or a.get("summary", "")[:40]
+                url = a.get("url", "")
+                meta = []
+                if a.get("publisher"):
+                    meta.append("📰 " + str(a["publisher"]))
+                if a.get("published_at"):
+                    meta.append("🗓️ " + str(a["published_at"])[:10])  # YYYY-MM-DD
+                st.markdown(f"**[{title}]({url})**" + ("　—　" + " · ".join(meta) if meta else ""))
+                st.caption(a.get("summary", ""))
 
 
 # ---------------------------------------------------------------------------
