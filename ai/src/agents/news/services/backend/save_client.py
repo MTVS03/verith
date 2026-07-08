@@ -18,15 +18,15 @@ import logging
 
 from pydantic import ValidationError
 
-from config import (
+from src.agents.news.config import (
     BACKEND_CLEANUP_PATH,
     BACKEND_SAVE_BATCH_SIZE,
     BACKEND_SAVE_PATH,
 )
-from schemas.article import Article
-from schemas.graph import GraphBatch
-from schemas.response import CleanupResponse, SaveResponse
-from services.backend.client import BackendClient, BackendError
+from src.agents.news.schemas.article import Article
+from src.agents.news.schemas.graph import GraphBatch
+from src.agents.news.schemas.response import CleanupResponse, SaveResponse
+from src.agents.news.services.backend.client import BackendClient, BackendError
 
 logger = logging.getLogger(__name__)
 

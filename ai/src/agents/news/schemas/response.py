@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from schemas.report import ArticleRef, SentimentGauge
-from schemas.event import Event
+from src.agents.news.schemas.report import ArticleRef, SentimentGauge
+from src.agents.news.schemas.event import Event
 
 
 class EventWithArticles(BaseModel):

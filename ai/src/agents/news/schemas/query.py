@@ -12,7 +12,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from schemas.response import SubjectQueryResponse
+from src.agents.news.schemas.response import SubjectQueryResponse
 
 
 class QueryIntent(str, Enum):

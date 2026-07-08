@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import logging
 
-import services.backend.query_client as query_client
-from schemas.query import QueryUnderstanding
-from schemas.response import SubjectQueryResponse
-from services.backend.client import BackendError
+import src.agents.news.services.backend.query_client as query_client
+from src.agents.news.schemas.query import QueryUnderstanding
+from src.agents.news.schemas.response import SubjectQueryResponse
+from src.agents.news.services.backend.client import BackendError
 
 logger = logging.getLogger(__name__)
 

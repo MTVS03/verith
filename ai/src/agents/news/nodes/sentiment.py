@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-import services.finbert as finbert
+import src.agents.news.services.finbert as finbert
 
 logger = logging.getLogger(__name__)
 

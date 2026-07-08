@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import logging
 
-import services.backend.save_client as save_client
-from schemas.graph import GraphBatch
-from schemas.response import SaveResponse
+import src.agents.news.services.backend.save_client as save_client
+from src.agents.news.schemas.graph import GraphBatch
+from src.agents.news.schemas.response import SaveResponse
 
 logger = logging.getLogger(__name__)
 

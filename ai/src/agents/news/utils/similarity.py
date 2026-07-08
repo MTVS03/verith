@@ -10,8 +10,8 @@ from __future__ import annotations
 import math
 from datetime import datetime
 
-from config import MERGE_TIME_DECAY_DAYS
-from utils.entity import normalize_entity_name
+from src.agents.news.config import MERGE_TIME_DECAY_DAYS
+from src.agents.news.utils.entity import normalize_entity_name
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
