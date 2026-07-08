@@ -13,6 +13,7 @@
 [`schema.md`](schema.md), 마이그레이션 절차는 [`migrations.md`](migrations.md),
 공통 종목 식별 경계는 [`stock_resolver.md`](stock_resolver.md), 공통 종목 마스터(KIS)는
 [`stock_master_sync.md`](stock_master_sync.md)를 따른다.
+Supervisor와의 전체 연결은 [`supervisor_backend_integration.md`](supervisor_backend_integration.md)를 본다.
 
 ---
 
@@ -27,6 +28,11 @@ repository 기준으로 확인된 사실:
   - `flow_reports`
   - `flow_report_interpretations`
   - `flow_report_verifications`
+
+추가로 현재 구조상 Flow는 5개 agent 고정 fan-out 구조에서
+**stock context 의존도가 높은 agent** 로 이해하는 것이 맞다.
+즉 Supervisor가 종목을 resolve 하면 강하게 실행되고,
+resolve가 없으면 unavailable/degraded 카드가 될 가능성이 높다.
 
 관련 근거:
 
@@ -105,11 +111,20 @@ Flow 도 종목을 다루지만, backend 에서 Flow 전용 종목 계층을 다
 backend 저장 계층은 그 결과를 받아 저장만 하면 된다.
 종목 식별/라우팅을 Flow backend 가 다시 담당하지 않는다.
 
+Supervisor와의 연결 관점에서 Flow backend는 아래 전제를 갖는다.
+
+- Supervisor가 `stock_code`, `stock_name`, `market` context를 전달할 수 있음
+- Flow backend는 그 context를 저장 인덱스(`agent_reports`)에 반영할 수 있음
+- 하지만 Flow backend 자체가 질문 문자열에서 종목을 다시 추정하면 안 됨
+
 ---
 
 ## 5. 권장 구현 범위
 
 이번 브랜치에서 backend 담당자가 구현하면 좋은 범위는 아래다.
+
+현재 문서 기준으로는 아직 Flow backend 저장/조회 경계 구현이 주 작업이다.
+즉 News처럼 “이미 대부분 끝난 상태”는 아니고, 이 문서 내용이 아직 유효하다.
 
 ### 5.1 저장 API
 
@@ -257,6 +272,14 @@ Flow backend 브랜치 테스트는 아래 기준을 따른다.
 
 - 이 브랜치는 Flow 계산이 맞는지 테스트하는 곳이 아니다
 - backend 가 이미 계산된 payload 를 안전하게 저장/조회하는지만 본다
+
+Supervisor 연계 관점에서 추가로 보면:
+
+- 종목 context가 있는 저장 케이스
+- 종목 context가 없는 저장 케이스
+- `agent_reports` 인덱스가 stock-dependent 구조와 맞게 저장되는지
+
+정도는 후속 테스트 포인트가 될 수 있다.
 
 ---
 
