@@ -17,7 +17,8 @@ from src.agents.technical.services.openai_llm_client import default_openai_clien
 from src.agents.technical.supervisor.technical_supervisor import OhlcvFetcher
 from src.api.errors import ai_unavailable
 from src.supervisor.execution.adapters import AgentAdapter, default_adapters
-from src.supervisor.planning.fallback_lookup import FallbackLookupProtocol, StaticFallbackLookup
+from src.supervisor.planning.fallback_lookup import FallbackLookupProtocol
+from src.supervisor.planning.fallback_source import default_fallback_lookup
 from src.supervisor.planning.resolve_client import ResolverProtocol, StockResolverClient
 
 # endpoint가 deadline을 만든 뒤 client를 생성해야 하므로(요청 timeout을 client에 주입) client를 바로
@@ -68,10 +69,10 @@ def get_resolver() -> ResolverProtocol:
 def get_fallback() -> FallbackLookupProtocol:
     """canonical resolver not_found 일 때만 planner 가 쓰는 보조 lookup(ephemeral, 정본 write 없음).
 
-    기본은 `StaticFallbackLookup()`(큐레이션 entries 기본 비어 있음 → 현재는 사실상 no-op, 오늘 동작
-    무변경). 운영에서 KIS/DART/alias 기반 얇은 client 로 교체하려면 이 의존성을 override 해 같은
-    `FallbackLookupProtocol` 을 주입한다. 테스트도 여기에 fake 를 주입한다."""
-    return StaticFallbackLookup()
+    운영 기본은 `default_fallback_lookup()` — curated source 기반 결정론 CompositeFallbackLookup(네트워크
+    없음, 정본 write 없음). KIS/DART 기반 source 를 추가하려면 CompositeFallbackLookup 에 source 를 더 주입해
+    이 의존성을 override 한다. 테스트도 여기에 fake 를 주입한다(import 시 네트워크 호출 없음)."""
+    return default_fallback_lookup()
 
 
 def get_adapters() -> dict[str, AgentAdapter]:

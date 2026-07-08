@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 
 from src.agents.technical.services.openai_llm_client import default_openai_client
 from src.supervisor.execution.adapters import ExecutionDeps, default_adapters
-from src.supervisor.planning.fallback_lookup import StaticFallbackLookup
+from src.supervisor.planning.fallback_source import default_fallback_lookup
 from src.supervisor.planning.resolve_client import StockResolverClient
 from src.supervisor.runtime import run_analysis
 from src.supervisor.schemas import SupervisorInput
@@ -58,9 +58,9 @@ def main() -> None:
 
     # 실 의존성 주입 — endpoint 가 하는 wiring 을 스크립트에서 재현.
     resolver = StockResolverClient()
-    # canonical not_found 일 때만 쓰는 보조 lookup(ephemeral, 정본 write 없음). 기본 entries 는 비어 있어
-    # 오늘 동작 무변경 — 운영에서 KIS/DART/alias 기반 client 로 교체 주입한다.
-    fallback = StaticFallbackLookup()
+    # canonical not_found 일 때만 쓰는 보조 lookup(ephemeral, 정본 write 없음). 운영형 curated source 기반
+    # (결정론, 네트워크 없음). KIS/DART source 는 후속에 Composite 에 추가 주입.
+    fallback = default_fallback_lookup()
     try:
         llm_client = default_openai_client()
     except RuntimeError:
