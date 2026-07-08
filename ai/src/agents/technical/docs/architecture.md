@@ -235,13 +235,25 @@ DB 모름               영구 저장 소유
 
 ---
 
-## 7. 관련 문서
+## 7. 관련 문서 (정본 관계)
 
-| 문서 | 담당 |
+같은 주제가 여러 문서에 나올 수 있으므로, **어느 문서가 최종 기준(정본)인지**를 아래로 못 박는다. 충돌 시
+아래 "담당(정본)" 열을 따른다.
+
+| 문서 | 담당(정본) |
 | --- | --- |
 | `glossary.md` | 용어 정의, 헷갈리는 축 구분 |
 | `regime_rules.md` | 국면 판정 규칙 (1·2·3단계), 검증 ② 기준 |
 | `enums.md` | 열거값 (코드값 ↔ 한글 라벨), 세 계층 단일 기준 |
-| `contracts.md` | 입출력 JSON 계약, JSON↔ERD 매핑 |
-| `config.md` | 설정값 (구조는 코드, 수치는 config) |
+| `contracts.md` | **입출력 계약 정본** (TechnicalAgentInput/Output, stock_name 주입, JSON↔ERD 매핑) |
+| `config.md` | **정책/상수 정본** (종목 지원 정책=`is_supported_ticker`, `BATTERY_TICKERS`=dev fallback, 수치) |
+| `kis_mapping.md` | **KIS 연동 정본** (호출 방식·필드 매핑·구간 분할) |
+| `schema.md` | **저장/구조 정본** (논리 스키마·nullable 근거; 물리 정본은 backend `db/models/*`) |
+| `api_spec.md` | **엔드포인트/에러 계약 정본** (HTTP·에러코드·식별자 소유) |
+| `integration_smoke.md` | **real smoke 운영 정본** (계층별 기준선·성공 기준·실패 계층 해석) |
 | **`architecture.md`** | **(이 문서) 슈퍼바이저·A~E층·저장구조 통합** |
+
+> **종목 지원·종목명 소유권(자주 헷갈림):** 지원 여부는 allowlist 가 아니라 `config.is_supported_ticker`
+> (형식검증) + resolver universe + `data_status` 의 합이다(정본 `config.md §11`). 종목명 정본은 technical
+> 내부 상수가 아니라 **backend canonical stock context**(supervisor 가 `TechnicalAgentInput.stock_name` 주입,
+> 정본 `contracts.md`). `BATTERY_TICKERS` 는 dev/smoke 표시명 fallback 일 뿐 production allowlist 가 아니다.

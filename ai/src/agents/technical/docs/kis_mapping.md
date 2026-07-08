@@ -45,17 +45,20 @@
 
 ## 3. KIS 호출 방식
 
-KIS 기간별시세 API는 **종목코드 1개 × 타임프레임 1개** 단위로 호출한다. "한 번에 10종목"이 아니라, 10종목을 D/W/M으로 각각 조회하면 최소 30회 호출한다.
+KIS 기간별시세 API는 **종목코드 1개 × 타임프레임 1개** 단위로 호출한다. runtime 에서 technical 은 요청당
+**supervisor 가 주입한 stock_code 1종목**만 처리하므로, 한 요청은 그 종목의 D/W/M = **3회 호출**이다("한 번에
+여러 종목"이 아니다). 여러 종목을 미리 채우는 건 dev warmup 같은 배치 시나리오이며, 그때만 N종목 × 3회다.
 
 ```
-for ticker in BATTERY_TICKERS:
-    for period in [D, W, M]:              # 일봉·주봉·월봉 각각
-        → KIS 기간별시세 API 호출 (FID_PERIOD_DIV_CODE=period)
-        → output2를 내부 표준 OHLCV로 변환
-        → Redis 캐시 저장 (daily / weekly / monthly)
+# runtime: 요청당 1종목(supervisor 주입 stock_code) — BATTERY_TICKERS 순회 아님
+for period in [D, W, M]:                   # 일봉·주봉·월봉 각각
+    → KIS 기간별시세 API 호출 (FID_PERIOD_DIV_CODE=period)
+    → output2를 내부 표준 OHLCV로 변환
+    → Redis 캐시 저장 (daily / weekly / monthly)
+# 배치(dev warmup 등)일 때만 위를 N종목 반복 → N×3 호출
 ```
 
-**일봉·주봉·월봉을 모두 KIS 원본으로 각각 호출한다.** 같은 `inquire-daily-itemchartprice` API에 `FID_PERIOD_DIV_CODE`만 `D`/`W`/`M`으로 바꿔 부른다. 리샘플로 파생하지 않는다 — 타임프레임별로 KIS 실제 시세를 정본으로 쓴다. 종목당 3개 타임프레임 호출이므로 10종목이면 최소 30호출(구간 분할 시 더 늘 수 있음, §8).
+**일봉·주봉·월봉을 모두 KIS 원본으로 각각 호출한다.** 같은 `inquire-daily-itemchartprice` API에 `FID_PERIOD_DIV_CODE`만 `D`/`W`/`M`으로 바꿔 부른다. 리샘플로 파생하지 않는다 — 타임프레임별로 KIS 실제 시세를 정본으로 쓴다. 종목당 3개 타임프레임 호출이므로 N종목이면 최소 N×3호출(구간 분할 시 더 늘 수 있음, §8).
 
 ---
 
