@@ -1,6 +1,9 @@
-# Technical Report API — 프론트 응답 계약 (정본)
+# Technical Report API — backend handoff (구현 노트)
 
 `docs/technical_backend_handoff.md`
+
+> **프론트 구현 기준 정본은 [`technical_frontend_api_contract.md`](technical_frontend_api_contract.md)** 다(endpoint 맵·
+> 블록·nullable·상태값·예시 JSON 통합). 이 문서는 그 배경/구현 노트로 함께 본다.
 
 프론트가 믿고 쓰는 **technical report 응답 정본**. `POST /api/technical/reports`(저장 직후)와
 `GET /api/technical/reports/{id}`(단건 조회)는 **완전히 동일한 read model** 을 반환한다(테스트로 잠금:
