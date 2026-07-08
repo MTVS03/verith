@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.common.stock import Stock
 from db.models.technical.report_chart import TechnicalReportChart
+from db.models.technical.report_followup import TechnicalReportFollowup
 from db.models.technical.report_interpretation import TechnicalReportInterpretation
 from db.models.technical.report_risk_note import TechnicalReportRiskNote
 from db.models.technical.report_signal import TechnicalReportSignal
@@ -64,6 +65,28 @@ async def get_report(session: AsyncSession, report_id: UUID) -> TechnicalReport 
 async def get_stock(session: AsyncSession, stock_code: str) -> Stock | None:
     """canonical 종목(stocks) 조회 — read model stock 블록의 정본 source(없으면 None)."""
     return await session.get(Stock, stock_code)
+
+
+async def list_followups(
+    session: AsyncSession, report_id: UUID
+) -> list[TechnicalReportFollowup]:
+    """parent report 기준 follow-up 목록 — created_at 오름차순(대화 순서). 인덱스(report_id,created_at) 활용."""
+    result = await session.scalars(
+        select(TechnicalReportFollowup)
+        .where(TechnicalReportFollowup.report_id == report_id)
+        .order_by(TechnicalReportFollowup.created_at.asc())
+    )
+    return list(result)
+
+
+async def count_followups(session: AsyncSession, report_id: UUID) -> int:
+    """report 에 연결된 follow-up 수(report detail 의 followup_count 신호용)."""
+    n = await session.scalar(
+        select(func.count())
+        .select_from(TechnicalReportFollowup)
+        .where(TechnicalReportFollowup.report_id == report_id)
+    )
+    return int(n or 0)
 
 
 async def get_interpretation(

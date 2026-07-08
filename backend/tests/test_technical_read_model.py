@@ -166,3 +166,76 @@ def test_trace_summary_backward_compat_empty_payload():
     assert ts.data_quality.chart_count == 0 and ts.data_quality.available_periods == []
     assert ts.stability.verification_consistent is None          # verification 없음
     assert ts.flags.used_fallback is False and ts.flags.verification_warning is False
+
+
+# ── follow-up read flow projection ───────────────────────────────────────────
+from datetime import UTC, datetime  # noqa: E402
+
+from db.models.technical.report_followup import TechnicalReportFollowup  # noqa: E402
+from db.models.technical.technical_report import TechnicalReport  # noqa: E402
+from src.api.services.technical_report_service import build_followups_read_model  # noqa: E402
+
+
+def _report(**over) -> TechnicalReport:
+    base = dict(
+        id=_RID, request_id="req-1", ticker="373220", stock_code="373220",
+        stock_name="LGES(저장당시)", final_regime="uptrend_intact", daily_regime="uptrend_intact",
+        alignment_flag="aligned", data_status="normal", output_payload=_raw(),
+    )
+    base.update(over)
+    return TechnicalReport(**base)
+
+
+def _fu(**over) -> TechnicalReportFollowup:
+    base = dict(
+        id=uuid4(), report_id=_RID, question="추가 질문?", answer="추가 답변.",
+        model_name="gpt-x", trace_id="tr-fu", request_id="req-fu",
+        created_at=datetime(2026, 7, 9, 1, tzinfo=UTC), context_snapshot=None,
+    )
+    base.update(over)
+    return TechnicalReportFollowup(**base)
+
+
+def test_followups_read_model_binds_parent_summary():
+    from db.models.common.stock import Stock
+    stock = Stock(stock_code="373220", stock_name="LG에너지솔루션", market="KOSPI")
+    rm = build_followups_read_model(report=_report(), stock=stock, followups=[_fu()])
+    assert rm.report_id == _RID
+    assert rm.stock.stock_name == "LG에너지솔루션"                 # canonical 우선
+    assert rm.report_summary.one_line_summary == "과열·약한 긍정"  # parent report 요약 연결
+    assert rm.report_summary.final_regime == "uptrend_intact"
+    assert rm.followup_count == 1
+    fu = rm.followups[0]
+    assert fu.question == "추가 질문?" and fu.answer_length == len("추가 답변.")
+    assert fu.model_name == "gpt-x" and fu.trace_id == "tr-fu"
+    assert fu.context.has_context_snapshot is False               # snapshot None
+
+
+def test_followups_empty_is_stable():
+    rm = build_followups_read_model(report=_report(), stock=None, followups=[])
+    assert rm.followups == [] and rm.followup_count == 0
+    assert rm.stock.stock_code == "373220"                        # stock None → report fallback
+
+
+def test_followup_context_summarized_from_snapshot():
+    snap = {"final_regime": "downtrend", "directional_bias": "bearish",
+            "data_status": "data_limited", "signal_score": -0.4, "as_of": "2026-07-08T00:00:00+00:00"}
+    rm = build_followups_read_model(report=_report(), stock=None, followups=[_fu(context_snapshot=snap)])
+    ctx = rm.followups[0].context
+    assert ctx.has_context_snapshot is True
+    assert ctx.base_report_regime == "downtrend" and ctx.base_report_bias == "bearish"
+    assert ctx.base_report_data_status == "data_limited" and ctx.base_report_signal_score == -0.4
+    assert ctx.base_report_as_of == "2026-07-08T00:00:00+00:00"
+
+
+def test_followup_context_tolerates_unknown_snapshot_shape():
+    # writer 미정의 → 알려진 키 없으면 has_context_snapshot=True 지만 base_* 는 None(예외 없음).
+    rm = build_followups_read_model(report=_report(), stock=None,
+                                    followups=[_fu(context_snapshot={"weird": {"nested": 1}})])
+    ctx = rm.followups[0].context
+    assert ctx.has_context_snapshot is True and ctx.base_report_regime is None
+
+
+def test_read_model_has_followup_count_default_zero():
+    rm = build_read_model(report_id=_RID, raw=_raw(), stock=None)
+    assert rm.followup_count == 0

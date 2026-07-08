@@ -73,6 +73,34 @@
   has_daily/weekly/monthly_chart). **raw trace/프롬프트/내부 로그는 노출하지 않는다.** `verification`(상세) ↔
   `trace_summary.verification_summary`(요약) 이중 구조. 모든 값은 저장값 projection(재해석 없음).
 
+## Follow-up 대화 흐름 (parent report 기준)
+`GET /api/technical/reports/{id}/followups` — 이 리포트에 이어진 후속 질문/답변 thread. report(분석 결과)와
+followups(이어진 대화)를 **역할 분리**해 함께 준다. report detail 에는 신호용 `followup_count` 만 있고, 실제
+thread 는 이 endpoint 로 받는다(스레드가 길어져도 detail payload 가 무겁지 않게).
+
+```jsonc
+{
+  "report_id": "uuid",
+  "stock": { "stock_code": "373220", "stock_name": "LG에너지솔루션", "market": "KOSPI" },  // canonical
+  "report_summary": { "one_line_summary": "...", "directional_bias": "bullish",
+                      "final_regime": "...", "as_of": "ISO8601" },   // parent 연결감
+  "followup_count": 2,
+  "followups": [   // created_at 오름차순(대화 순서), 0개면 []
+    { "followup_id": "uuid", "request_id": "...", "question": "...", "answer": "...",
+      "model_name": "...", "trace_id": "...", "created_at": "ISO8601", "answer_length": 42,
+      "context": {   // raw context_snapshot 미노출 — 요약 projection(알려진 키만, 없으면 null)
+        "has_context_snapshot": true, "base_report_regime": "...", "base_report_bias": "...",
+        "base_report_data_status": "...", "base_report_signal_score": 0.3, "base_report_as_of": "ISO8601" } }
+  ]
+}
+```
+- **context**: `technical_report_followups.context_snapshot`(JSONB)의 raw 를 넘기지 않는다. 요약 키
+  (`base_report_regime`/`bias`/`data_status`/`signal_score`/`as_of`)만 projection — snapshot 이 그 키를 담으면
+  채워지고, 아니면 `has_context_snapshot` 만 true 로 두고 나머지는 `null`(tolerant). **미래 follow-up writer 는 위
+  키로 snapshot 을 채우면 프론트가 base 맥락을 바로 읽는다.**
+- follow-up **생성(write)은 이번 범위 밖** — 이 endpoint 는 read flow 만. write 경로가 붙기 전엔 `followups=[]`.
+- **trace**: `trace_id`·`model_name`·`created_at` 만 제품용으로 노출(raw trace dump 아님).
+
 ## 목록 (별도 경량 인덱스)
 `GET /api/reports?agent_type=technical` 은 full read model 이 아니라 **인덱스 요약**(`AgentReportListItem`:
 report id·stock·question·data_status·summary 등)이다. 상세는 위 read model 로 조회한다(표준 REST: 목록=요약,

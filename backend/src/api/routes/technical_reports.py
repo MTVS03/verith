@@ -15,6 +15,7 @@ from src.api.clients.ai_client import (
 from src.api.deps import get_technical_report_service
 from src.api.schemas.technical_report import (
     TechnicalReportCreateRequest,
+    TechnicalReportFollowupsReadModel,
     TechnicalReportReadModel,
 )
 from src.api.services.technical_report_service import TechnicalReportService
@@ -50,6 +51,18 @@ async def get_technical_report(
     if read_model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
     return read_model
+
+
+@router.get("/{report_id}/followups", response_model=TechnicalReportFollowupsReadModel)
+async def get_technical_report_followups(
+    report_id: UUID,
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> TechnicalReportFollowupsReadModel:
+    """parent report 기준 후속 질문 대화 흐름(read flow). report 없으면 404, follow-up 0이면 빈 배열."""
+    flow = await service.get_report_followups(report_id)
+    if flow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return flow
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

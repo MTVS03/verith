@@ -27,7 +27,7 @@ _REQ = {"ticker": TICKER, "query": "373220 기술적 흐름 분석", "client_ses
 
 _READ_MODEL_KEYS = {
     "report_id", "stock", "meta", "summary", "interpretation",
-    "drivers", "signals", "risks", "charts", "verification", "trace_summary",
+    "drivers", "signals", "risks", "charts", "verification", "trace_summary", "followup_count",
 }
 
 
@@ -140,6 +140,60 @@ async def test_post_and_get_return_identical_read_model(client):
     rid = post_body["report_id"]
     get_body = (await client.get(f"{_POST}/{rid}")).json()
     assert post_body == get_body           # 저장 직후 == 조회: 프론트가 믿을 단일 응답 계약
+
+
+# 4c) follow-up read flow (parent report 기준)
+async def test_followups_empty_for_fresh_report(client):
+    rid = await _create(client)
+    # detail 에 followup_count=0
+    detail = (await client.get(f"{_POST}/{rid}")).json()
+    assert detail["followup_count"] == 0
+    # followups endpoint: report 존재하지만 follow-up 0 → 빈 배열, shape 안정
+    resp = await client.get(f"{_POST}/{rid}/followups")
+    assert resp.status_code == 200
+    flow = resp.json()
+    assert flow["report_id"] == str(rid)
+    assert flow["stock"]["stock_code"] == TICKER and flow["stock"]["stock_name"]
+    assert flow["followup_count"] == 0 and flow["followups"] == []
+    assert "one_line_summary" in flow["report_summary"]
+
+
+async def test_followups_thread_bound_to_parent(client, db_session):
+    from datetime import UTC, datetime
+    from db.models.technical.report_followup import TechnicalReportFollowup
+    rid = await _create(client)
+    # 같은 세션에 follow-up 2건 seed(대화 순서 확인용, 역순 삽입)
+    db_session.add_all([
+        TechnicalReportFollowup(
+            report_id=rid, question="두번째?", answer="두번째 답변",
+            model_name="gpt-x", trace_id="tr-2", request_id="req-2",
+            created_at=datetime(2026, 7, 9, 2, tzinfo=UTC),
+            context_snapshot={"final_regime": "downtrend", "signal_score": -0.4},
+        ),
+        TechnicalReportFollowup(
+            report_id=rid, question="첫번째?", answer="첫 답변",
+            created_at=datetime(2026, 7, 9, 1, tzinfo=UTC), context_snapshot=None,
+        ),
+    ])
+    await db_session.flush()
+
+    flow = (await client.get(f"{_POST}/{rid}/followups")).json()
+    assert flow["followup_count"] == 2
+    qs = [f["question"] for f in flow["followups"]]
+    assert qs == ["첫번째?", "두번째?"]                              # created_at 오름차순
+    second = flow["followups"][1]
+    assert second["answer_length"] == len("두번째 답변") and second["trace_id"] == "tr-2"
+    assert second["context"]["has_context_snapshot"] is True
+    assert second["context"]["base_report_regime"] == "downtrend"
+    assert flow["followups"][0]["context"]["has_context_snapshot"] is False
+    # detail followup_count 도 반영
+    assert (await client.get(f"{_POST}/{rid}")).json()["followup_count"] == 2
+
+
+async def test_followups_404_for_missing_report(client):
+    from uuid import uuid4
+    resp = await client.get(f"{_POST}/{uuid4()}/followups")
+    assert resp.status_code == 404
 
 
 # 5) GET /api/reports 목록

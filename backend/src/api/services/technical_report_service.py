@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models.common.agent_report import AgentReport
 from db.models.common.stock import Stock
 from db.models.technical.report_chart import TechnicalReportChart
+from db.models.technical.report_followup import TechnicalReportFollowup
 from db.models.technical.report_interpretation import TechnicalReportInterpretation
 from db.models.technical.report_risk_note import TechnicalReportRiskNote
 from db.models.technical.report_signal import TechnicalReportSignal
@@ -35,6 +36,9 @@ from src.api.schemas.technical_report import (
     ChartsBlock,
     DataQualityBlock,
     DriversBlock,
+    FollowupContextBlock,
+    FollowupItem,
+    FollowupReportSummary,
     GenerationPathBlock,
     InterpretationBlock,
     MetaBlock,
@@ -46,6 +50,7 @@ from src.api.schemas.technical_report import (
     StockBlock,
     SummaryBlock,
     TechnicalReportCreateRequest,
+    TechnicalReportFollowupsReadModel,
     TechnicalReportReadModel,
     TraceFlagsBlock,
     TraceSummaryBlock,
@@ -72,7 +77,8 @@ def _list(node: object) -> list:
 
 
 def build_read_model(
-    *, report_id: UUID, raw: dict, stock: Stock | None, model_name: str | None = None
+    *, report_id: UUID, raw: dict, stock: Stock | None, model_name: str | None = None,
+    followup_count: int = 0,
 ) -> TechnicalReportReadModel:
     """저장된 raw output_payload + canonical stock → 프론트 친화 read model(projection, 재해석 없음).
 
@@ -248,6 +254,80 @@ def build_read_model(
             summary=None,
         ),
         trace_summary=trace_summary,
+        followup_count=followup_count,
+    )
+
+
+# ── follow-up read flow projection (parent report 기준) ──────────────────────
+_SNAPSHOT_REGIME_KEYS = ("base_report_regime", "final_regime", "regime")
+_SNAPSHOT_BIAS_KEYS = ("base_report_bias", "directional_bias", "bias")
+_SNAPSHOT_STATUS_KEYS = ("base_report_data_status", "data_status")
+_SNAPSHOT_SCORE_KEYS = ("base_report_signal_score", "signal_score")
+_SNAPSHOT_ASOF_KEYS = ("base_report_as_of", "as_of")
+
+
+def _first(snapshot: dict, keys: tuple[str, ...]) -> object:
+    for k in keys:
+        if snapshot.get(k) is not None:
+            return snapshot.get(k)
+    return None
+
+
+def _followup_context(snapshot: object) -> FollowupContextBlock:
+    """raw context_snapshot(writer 미정의) → 요약 context. 알려진 키만 방어적으로 뽑는다."""
+    if not isinstance(snapshot, dict) or not snapshot:
+        return FollowupContextBlock(has_context_snapshot=False)
+    score = _first(snapshot, _SNAPSHOT_SCORE_KEYS)
+    as_of = _first(snapshot, _SNAPSHOT_ASOF_KEYS)
+    regime = _first(snapshot, _SNAPSHOT_REGIME_KEYS)
+    bias = _first(snapshot, _SNAPSHOT_BIAS_KEYS)
+    status = _first(snapshot, _SNAPSHOT_STATUS_KEYS)
+    return FollowupContextBlock(
+        has_context_snapshot=True,
+        base_report_regime=str(regime) if regime is not None else None,
+        base_report_bias=str(bias) if bias is not None else None,
+        base_report_data_status=str(status) if status is not None else None,
+        base_report_signal_score=float(score) if isinstance(score, (int, float)) else None,
+        base_report_as_of=str(as_of) if as_of is not None else None,
+    )
+
+
+def _followup_item(row: TechnicalReportFollowup) -> FollowupItem:
+    return FollowupItem(
+        followup_id=row.id,
+        request_id=row.request_id,
+        question=row.question,
+        answer=row.answer,
+        model_name=row.model_name,
+        trace_id=row.trace_id,
+        created_at=row.created_at,
+        answer_length=len(row.answer or ""),
+        context=_followup_context(row.context_snapshot),
+    )
+
+
+def build_followups_read_model(
+    *, report: TechnicalReport, stock: Stock | None, followups: list[TechnicalReportFollowup]
+) -> TechnicalReportFollowupsReadModel:
+    """parent report + follow-up rows → 대화 흐름 read model. report 요약은 output_payload projection."""
+    raw = report.output_payload if isinstance(report.output_payload, dict) else {}
+    interp = _d(raw.get("interpretation"))
+    regime = _d(raw.get("regime"))
+    return TechnicalReportFollowupsReadModel(
+        report_id=report.id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else report.stock_code),
+            stock_name=(stock.stock_name if stock else report.stock_name),
+            market=(stock.market if stock else None),
+        ),
+        report_summary=FollowupReportSummary(
+            one_line_summary=interp.get("one_line_summary"),
+            directional_bias=interp.get("directional_bias"),
+            final_regime=regime.get("final_regime") or report.final_regime,
+            as_of=_parse_dt(raw.get("as_of")),
+        ),
+        followup_count=len(followups),
+        followups=[_followup_item(f) for f in followups],
     )
 
 
@@ -432,9 +512,11 @@ class TechnicalReportService:
         await self._session.commit()
 
         # 저장 직후 응답 == GET 단건 응답이 되도록 **동일 경로**로 조립한다(canonical stock·model_name 소스 일치).
+        # 신규 리포트라 follow-up 은 아직 0(작성은 별도 경로) — GET 도 fresh report 면 동일하게 0.
         stock = await tr_repo.get_stock(self._session, req.ticker)
         return build_read_model(
-            report_id=report_id, raw=raw, stock=stock, model_name=interpretation.model_name
+            report_id=report_id, raw=raw, stock=stock,
+            model_name=interpretation.model_name, followup_count=0,
         )
 
     async def _resolve_stock_name(self, ticker: str, requested: str | None) -> str:
@@ -452,12 +534,25 @@ class TechnicalReportService:
             return None
         stock = await tr_repo.get_stock(self._session, report.stock_code)
         interp = await tr_repo.get_interpretation(self._session, report_id)
+        followup_count = await tr_repo.count_followups(self._session, report_id)
         return build_read_model(
             report_id=report.id,
             raw=report.output_payload,
             stock=stock,
             model_name=(interp.model_name if interp else None),
+            followup_count=followup_count,
         )
+
+    async def get_report_followups(
+        self, report_id: UUID
+    ) -> TechnicalReportFollowupsReadModel | None:
+        """parent report 기준 follow-up 대화 흐름(report 없으면 None, follow-up 0이면 빈 배열)."""
+        report = await tr_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        followups = await tr_repo.list_followups(self._session, report_id)
+        return build_followups_read_model(report=report, stock=stock, followups=followups)
 
     async def list_reports(
         self,

@@ -84,7 +84,7 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 | `technical_report_risk_notes` | 리스크 노트 |
 | `technical_report_interpretations` | 해석 (1:1) |
 | `technical_report_verifications` | 검증 (1:1) |
-| `technical_report_followups` | 후속 질의 |
+| `technical_report_followups` | 후속 질의(parent report 기준 read flow: `GET .../{id}/followups`) |
 
 > **Technical read model(조회 계약 ≠ 저장 형식).** `technical_reports.output_payload` 에 AI output 원본(raw)을
 > 계속 보존하되, **API 응답(`POST`·`GET /api/technical/reports/{id}`)은 프론트 친화 read model**로 정리해

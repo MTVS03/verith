@@ -203,3 +203,54 @@ class TechnicalReportReadModel(BaseModel):
     charts: ChartsBlock
     verification: VerificationBlock
     trace_summary: TraceSummaryBlock
+    followup_count: int = 0                            # 이 리포트에 이어진 후속 질문 수(스레드는 별도 endpoint)
+
+
+# ── follow-up read flow (parent report 기준 대화 흐름) ──────────────────────
+class FollowupContextBlock(BaseModel):
+    """follow-up 의 base(parent) report context 요약 — raw context_snapshot 미노출, 방어적 projection.
+
+    context_snapshot(JSONB, writer 미정의)에서 알려진 키만 뽑는다. 없으면 None/False 로 안정."""
+
+    has_context_snapshot: bool = False
+    base_report_regime: str | None = None
+    base_report_bias: str | None = None
+    base_report_data_status: str | None = None
+    base_report_signal_score: float | None = None
+    base_report_as_of: str | None = None
+
+
+class FollowupItem(BaseModel):
+    """단일 후속 질문/답변 — 제품용 메타(raw trace 아님)."""
+
+    followup_id: UUID
+    request_id: str | None = None
+    question: str | None = None
+    answer: str | None = None
+    model_name: str | None = None
+    trace_id: str | None = None
+    created_at: datetime | None = None
+    answer_length: int = 0
+    context: FollowupContextBlock
+
+
+class FollowupReportSummary(BaseModel):
+    """follow-up 스레드 헤더용 parent report 요약(연결감)."""
+
+    one_line_summary: str | None = None
+    directional_bias: str | None = None
+    final_regime: str | None = None
+    as_of: datetime | None = None
+
+
+class TechnicalReportFollowupsReadModel(BaseModel):
+    """GET /api/technical/reports/{id}/followups — parent report 기준 대화 흐름.
+
+    report(분석 결과)와 followups(이어진 대화)를 역할 분리해 함께 읽게 한다. followups 는 created_at 오름차순
+    (대화 순서). 0개면 빈 배열."""
+
+    report_id: UUID
+    stock: StockBlock
+    report_summary: FollowupReportSummary
+    followup_count: int = 0
+    followups: list[FollowupItem] = Field(default_factory=list)
