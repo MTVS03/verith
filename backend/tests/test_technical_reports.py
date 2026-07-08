@@ -46,6 +46,7 @@ async def test_create_persists_technical_report(client, db_session):
     report = await db_session.get(TechnicalReport, rid)
     assert report is not None
     assert report.ticker == TICKER
+    assert report.stock_code == TICKER
     assert report.data_status == "normal"
     assert report.final_regime == "uptrend_intact"
     assert report.input_payload["request_id"] == report.request_id  # backend 생성 request_id 저장

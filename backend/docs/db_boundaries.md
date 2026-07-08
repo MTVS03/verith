@@ -32,6 +32,9 @@
 - **sync 는 별도 관리 명령**(`--inspect`/dry-run/`--apply`). **질문 처리 경로(resolver/supervisor/agents)는
   read-only** — 질문 처리 중 stocks 를 자동 insert/update 하지 않는다.
 - **alias 는 수동/운영 큐레이션**. sync 는 `stocks` 만 갱신하고 `stock_aliases` 는 손대지 않는다.
+- 팀원이 같은 공용 DB 상태를 pull 후 재현해야 할 때는 **live sync 대신 repo SQL dump**
+  (`backend/dumps/shared_verith_snapshot.sql`)을 사용한다. 즉 git 이 나르는 것은 Postgres 볼륨이 아니라
+  **재현 가능한 canonical data artifact** 다.
 
 ## 테스트 오염 해소(검증)
 - 전용 `verith_test`(clean)로 pytest → `corp_code_sync` 4건(공유 `verith` 의 3,976 corp_codes commit 전제

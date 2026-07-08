@@ -87,6 +87,7 @@ class TechnicalReportService:
             request_id=request_id,
             client_session_id=req.client_session_id,
             ticker=req.ticker,  # 신뢰값(요청) 사용 — 검증에서 응답과 일치 확인됨
+            stock_code=req.ticker,
             stock_name=stock_name,
             original_query=req.query,
             normalized_query=None,

@@ -73,6 +73,26 @@ uv run python -m scripts.sync_corp_codes --apply      # 실제 반영(commit)
 SELECT stock_code, stock_name, market FROM stocks ORDER BY stock_code;
 ```
 
+## Shared verith SQL dump
+
+팀원이 **외부 KIS/DART sync 를 다시 돌리지 않고도** 공용 `verith` canonical 상태를 pull 후 재현할 수 있게,
+repo 에 **SQL dump snapshot** 을 커밋해 둔다([`dumps/README.md`](dumps/README.md)).
+
+```bash
+docker compose up -d postgres
+
+cd backend
+uv sync
+uv run alembic upgrade head
+docker exec -i verith-postgres psql -U verith -d verith < dumps/shared_verith_snapshot.sql
+```
+
+이 dump 는 다음 canonical 상태를 담는다.
+
+- `stocks` — **2,607**
+- `stock_aliases` — **32**
+- `stock_corp_codes` — **3,976**
+
 ## 테스트
 
 pytest 는 **전용 test DB(`TEST_DATABASE_URL`, 예: `verith_test`)** 를 써야 한다 — 공유 dev/smoke DB
