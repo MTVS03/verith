@@ -6,6 +6,7 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 - Alembic 변경·검증 절차: [`docs/migrations.md`](docs/migrations.md)
 - Stock Resolver 응답 의미·경계: [`docs/stock_resolver.md`](docs/stock_resolver.md)
 - 전체 종목 마스터 동기화(KIS): [`docs/stock_master_sync.md`](docs/stock_master_sync.md)
+- DART 법인코드 동기화(corp_code): [`docs/dart_corp_code_sync.md`](docs/dart_corp_code_sync.md)
 
 ## 개발 환경
 
@@ -54,6 +55,16 @@ uv run python -m scripts.sync_stocks --inspect   # 앵커 검산(DB 미변경)
 uv run python -m scripts.sync_stocks --apply      # 실제 반영(commit)
 ```
 자세한 출처·파싱·포함/제외·정책은 [`docs/stock_master_sync.md`](docs/stock_master_sync.md).
+
+**DART 법인코드 동기화(별도 계층, 수동·네트워크):** 재무(Fundamental) 에이전트가 DART 조회 전에 쓰는
+`stock_code → corp_code` 정본을 DART `corpCode.xml` 로 동기화한다(`stock_corp_codes`, stocks 와 no-FK 별도
+계층). 기본 dry-run, `--apply` 에서만 반영. `DART_API_KEY`(sync 전용, startup 필수 아님)가 필요하다.
+```bash
+uv run python -m scripts.sync_corp_codes            # dry-run
+uv run python -m scripts.sync_corp_codes --inspect   # 파싱 요약·샘플 검산(DB 미변경)
+uv run python -m scripts.sync_corp_codes --apply      # 실제 반영(commit)
+```
+자세한 출처·파싱·이상치·정책은 [`docs/dart_corp_code_sync.md`](docs/dart_corp_code_sync.md).
 
 확인:
 
