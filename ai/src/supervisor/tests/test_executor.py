@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from src.supervisor.agent_adapters import ExecutionDeps
-from src.supervisor.executor import run_tasks
+from src.supervisor.execution.adapters import ExecutionDeps
+from src.supervisor.execution.executor import run_tasks
 from src.supervisor.schemas import AGENT_ORDER, SupervisorInput
-from src.supervisor.supervisor import run_supervisor
+from src.supervisor.planning.planner import run_supervisor
 from src.supervisor.tests._fakes import FakeResolver, not_found, resolved
 
 

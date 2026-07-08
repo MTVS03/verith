@@ -16,8 +16,8 @@ from src.agents.technical.services.cache_service import OhlcvCache, default_cach
 from src.agents.technical.services.openai_llm_client import default_openai_client
 from src.agents.technical.supervisor.technical_supervisor import OhlcvFetcher
 from src.api.errors import ai_unavailable
-from src.supervisor.agent_adapters import AgentAdapter, default_adapters
-from src.supervisor.resolve_client import ResolverProtocol, StockResolverClient
+from src.supervisor.execution.adapters import AgentAdapter, default_adapters
+from src.supervisor.planning.resolve_client import ResolverProtocol, StockResolverClient
 
 # endpoint가 deadline을 만든 뒤 client를 생성해야 하므로(요청 timeout을 client에 주입) client를 바로
 # 반환하지 않고 **팩토리**를 반환한다. 테스트는 이 팩토리를 override해 fake LLM을 주입한다.

@@ -25,6 +25,11 @@ verith/
 └── docs/                # 공통 설계 문서
 ```
 
+> **AI 상위 Supervisor 상태:** 질문 해석 → 조건부 resolve → 5-agent fan-out → technical 실행 계층이 연결돼
+> 있다. **현재는 technical MVP 범위(`BATTERY_TICKERS` 2차전지 10종) 기준으로 supervisor+technical real smoke
+> 실증 완료**(예: 373220 LG에너지솔루션 · 051910 LG화학 — technical success). 전체 종목 확장은 후속.
+> 상세: [`ai/src/supervisor/README.md`](ai/src/supervisor/README.md).
+
 ---
 
 ## 0. 사전 준비 (최초 1회)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from src.supervisor.resolve_client import ResolverToolError, StockResolverClient
+from src.supervisor.planning.resolve_client import ResolverToolError, StockResolverClient
 
 
 def _client(handler) -> StockResolverClient:

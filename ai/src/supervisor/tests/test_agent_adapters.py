@@ -12,7 +12,7 @@ import types
 
 import pytest
 
-from src.supervisor.agent_adapters import (
+from src.supervisor.execution.adapters import (
     AdapterConfigError,
     ExecutionDeps,
     FlowAdapter,

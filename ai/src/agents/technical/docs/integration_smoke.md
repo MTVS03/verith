@@ -11,6 +11,13 @@ endpoint)이 살아있는지 사람이 수동으로 확인한다. 단위 테스�
 - 스크립트: `src/agents/technical/scripts/smoke_technical_integration.py`
 - pytest에 포함되지 않는다(파일명이 `test_` 아님, opt-in 테스트도 만들지 않음).
 
+> **상위 Supervisor 연계 실증(잠금):** **현재는 `BATTERY_TICKERS`(2차전지 10종) 기준으로
+> supervisor+technical real smoke 실증 완료.** 상위 Supervisor 경유 e2e(`resolver → planning →
+> execution → technical success`)는 `src/supervisor/scripts/smoke_supervisor.py` 로 확인하며,
+> **범위 내 종목만** 사용한다(373220 LG에너지솔루션·051910 LG화학 확인: `source=KIS·data_status=normal·
+> final_regime 산출`). 범위 밖 ticker 는 `technical_supervisor.run()` 시작부에서 `OutOfScopeTickerError`
+> 로 거절된다(KIS/OpenAI 이전). 전체 종목 확장은 이 실증 이후 별도 단계. 경계·정책: `src/supervisor/README.md`.
+
 ## 필요한 env (값이 아니라 존재만 확인)
 
 `config.py` 기준 이름만 쓰고 **값은 어디에도 출력하지 않는다**(존재 여부만).

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.supervisor.rewrite import rewrite
+from src.supervisor.planning.rewrite import rewrite
 from src.supervisor.schemas import AGENT_ORDER, StockContext
 
 

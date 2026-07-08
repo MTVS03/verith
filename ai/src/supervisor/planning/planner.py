@@ -9,10 +9,10 @@ deterministic 우선: 판정·템플릿은 규칙 기반이며, resolver 는 주
 
 from __future__ import annotations
 
-from src.supervisor.interpret import QueryClassifier, interpret
-from src.supervisor.policy import context_for, decide
-from src.supervisor.resolve_client import ResolveResult, ResolverProtocol, ResolverToolError
-from src.supervisor.rewrite import rewrite
+from src.supervisor.planning.interpret import QueryClassifier, interpret
+from src.supervisor.planning.policy import context_for, decide
+from src.supervisor.planning.resolve_client import ResolveResult, ResolverProtocol, ResolverToolError
+from src.supervisor.planning.rewrite import rewrite
 from src.supervisor.schemas import (
     AGENT_ORDER,
     Resolution,

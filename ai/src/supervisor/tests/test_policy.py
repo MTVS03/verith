@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.supervisor.policy import STOCK_DEPENDENT, STOCK_OPTIONAL, context_for, decide
+from src.supervisor.planning.policy import STOCK_DEPENDENT, STOCK_OPTIONAL, context_for, decide
 from src.supervisor.schemas import AGENT_ORDER, Resolution, ResolverError, StockContext
 
 

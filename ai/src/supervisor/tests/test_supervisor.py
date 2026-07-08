@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.supervisor.policy import STOCK_DEPENDENT, STOCK_OPTIONAL
+from src.supervisor.planning.policy import STOCK_DEPENDENT, STOCK_OPTIONAL
 from src.supervisor.schemas import AGENT_ORDER, SupervisorInput
-from src.supervisor.supervisor import run_supervisor
+from src.supervisor.planning.planner import run_supervisor
 from src.supervisor.tests._fakes import FakeResolver, ambiguous, not_found, resolved
 
 

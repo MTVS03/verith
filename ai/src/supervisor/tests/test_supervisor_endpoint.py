@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from src.api.dependencies import get_adapters, get_cache, get_llm_client, get_resolver
 from src.api.errors import ai_unavailable
 from src.main import app
-from src.supervisor.agent_adapters import TechnicalAdapter
+from src.supervisor.execution.adapters import TechnicalAdapter
 from src.supervisor.schemas import AGENT_ORDER
 from src.supervisor.tests._fakes import FakeResolver, not_found, resolved
 
