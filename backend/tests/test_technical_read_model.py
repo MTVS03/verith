@@ -101,3 +101,68 @@ def test_mirror_sections_dict_none_when_empty():
                                 key_drivers=["a"])
     d = full.sections_dict()
     assert d is not None and d["one_line_summary"] == "s" and d["key_drivers"] == ["a"]
+
+
+# ── trace summary projection ─────────────────────────────────────────────────
+def test_trace_summary_normal_path():
+    ts = build_read_model(report_id=_RID, raw=_raw(), stock=None).trace_summary
+    assert ts.trace_id == "trace-1"
+    assert ts.generation_path.source == "KIS"
+    assert ts.generation_path.interpretation_source == "llm"
+    assert ts.generation_path.template_fallback_used is False
+    assert ts.generation_path.path_label == "normal"
+    assert ts.data_quality.data_status == "normal" and ts.data_quality.limited is False
+    assert ts.data_quality.available_periods == ["3m", "1y"] and ts.data_quality.chart_count == 2
+    assert ts.verification_summary.outcome == "passed"
+    assert ts.verification_summary.failed_indicators_count == 0
+    assert ts.stability.verification_consistent is True
+    assert ts.flags.used_fallback is False and ts.flags.had_regeneration is False
+    assert ts.flags.verification_warning is False
+    assert ts.flags.has_daily_chart is True and ts.flags.has_weekly_chart is False
+
+
+def test_trace_summary_template_fallback_path():
+    raw = _raw(
+        interpretation={"text": "폴백.", "source": "template_fallback"},
+        verification={"calc_passed": True, "regime_passed": True, "label_matched": False,
+                      "outcome": "template_fallback", "regen_count": 1},
+    )
+    ts = build_read_model(report_id=_RID, raw=raw, stock=None).trace_summary
+    assert ts.generation_path.path_label == "template_fallback"
+    assert ts.generation_path.template_fallback_used is True
+    assert ts.flags.used_fallback is True
+    assert ts.flags.had_regeneration is True                    # regen_count=1
+    assert ts.flags.verification_warning is True                # outcome!=passed & label_matched False
+    assert ts.stability.verification_consistent is False
+
+
+def test_trace_summary_regenerated_path():
+    raw = _raw(
+        interpretation={"text": "재생성.", "source": "llm_regenerated"},
+        verification={"calc_passed": True, "regime_passed": True, "label_matched": True,
+                      "outcome": "passed", "regen_count": 1},
+    )
+    ts = build_read_model(report_id=_RID, raw=raw, stock=None).trace_summary
+    assert ts.generation_path.path_label == "regenerated"
+    assert ts.flags.had_regeneration is True and ts.flags.used_fallback is False
+    assert ts.flags.verification_warning is False
+
+
+def test_trace_summary_limited_data_flag():
+    raw = _raw(data_status="data_limited")
+    ts = build_read_model(report_id=_RID, raw=raw, stock=None).trace_summary
+    assert ts.data_quality.limited is True and ts.flags.limited_data is True
+
+
+def test_trace_summary_intraday_flag():
+    raw = _raw(intraday_context={"as_of": "x"})
+    ts = build_read_model(report_id=_RID, raw=raw, stock=None).trace_summary
+    assert ts.flags.has_intraday_context is True and ts.data_quality.intraday_available is True
+
+
+def test_trace_summary_backward_compat_empty_payload():
+    ts = build_read_model(report_id=_RID, raw={}, stock=None).trace_summary
+    assert ts.generation_path.path_label == "normal"            # 기본 안정
+    assert ts.data_quality.chart_count == 0 and ts.data_quality.available_periods == []
+    assert ts.stability.verification_consistent is None          # verification 없음
+    assert ts.flags.used_fallback is False and ts.flags.verification_warning is False

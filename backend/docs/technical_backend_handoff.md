@@ -39,7 +39,21 @@
                             "has_chart_data": true, "annotation_count": 3 } ] },
   "verification": { "outcome": "passed|template_fallback", "calc_passed": true,
                     "regime_passed": true, "label_matched": true, "regen_count": 0,
-                    "failed_indicators": [], "summary": null }
+                    "failed_indicators": [], "summary": null },
+  "trace_summary": {                                     // "어떻게 생성됐고 얼마나 안정적인지"(제품용 요약)
+    "trace_id": "...",
+    "generation_path": { "source": "KIS", "interpretation_source": "llm|llm_regenerated|template_fallback",
+                         "template_fallback_used": false, "regen_count": 0,
+                         "path_label": "normal|regenerated|template_fallback" },
+    "data_quality":    { "data_status": "normal", "available_periods": ["3m","1y","5y"],
+                         "intraday_available": false, "chart_count": 3, "limited": false },
+    "verification_summary": { "outcome": "passed", "calc_passed": true, "regime_passed": true,
+                             "label_matched": true, "failed_indicators_count": 0 },
+    "stability": { "confidence": 0.42, "confidence_basis": "...", "verification_consistent": true },
+    "flags": { "used_fallback": false, "had_regeneration": false, "limited_data": false,
+               "verification_warning": false, "has_intraday_context": false,
+               "has_daily_chart": true, "has_weekly_chart": true, "has_monthly_chart": false }
+  }
 }
 ```
 
@@ -52,7 +66,12 @@
 - **risks**: 리스크 포인트(현재 확인된 위험) — `invalidation_or_caution`(해석 무효화 조건)과는 **분리**.
 - **charts**: `available_periods` 로 탭 구성, item 의 `has_chart_data`/`annotation_count` 로 렌더 여부 판단.
   intraday(`1d`) 없으면 `available_periods` 에 없음(명시적으로 없음 = 없음).
-- **verification**: 리포트 신뢰도 판단 — `outcome`/`*_passed`/`regen_count`/`failed_indicators`.
+- **verification**: 리포트 신뢰도 판단(상세) — `outcome`/`*_passed`/`regen_count`/`failed_indicators`.
+- **trace_summary**: 결과 해석(summary/interpretation)과 **역할 분리** — "어떻게 생성/검증됐는지"의 제품용 요약.
+  뱃지/서브패널용: `generation_path.path_label`(normal/regenerated/template_fallback)·`data_quality.limited`·
+  `flags.*`(used_fallback·had_regeneration·limited_data·verification_warning·has_intraday_context·
+  has_daily/weekly/monthly_chart). **raw trace/프롬프트/내부 로그는 노출하지 않는다.** `verification`(상세) ↔
+  `trace_summary.verification_summary`(요약) 이중 구조. 모든 값은 저장값 projection(재해석 없음).
 
 ## 목록 (별도 경량 인덱스)
 `GET /api/reports?agent_type=technical` 은 full read model 이 아니라 **인덱스 요약**(`AgentReportListItem`:

@@ -27,7 +27,7 @@ _REQ = {"ticker": TICKER, "query": "373220 기술적 흐름 분석", "client_ses
 
 _READ_MODEL_KEYS = {
     "report_id", "stock", "meta", "summary", "interpretation",
-    "drivers", "signals", "risks", "charts", "verification",
+    "drivers", "signals", "risks", "charts", "verification", "trace_summary",
 }
 
 
@@ -121,6 +121,15 @@ async def test_get_report_read_model(client):
     assert len(body["signals"]["items"]) == len(INDICATORS)
     assert body["charts"]["available_periods"]                  # 기간 목록
     assert isinstance(body["interpretation"]["text"], str)      # text 는 호환 유지
+    # trace_summary: 생성/검증/품질 요약이 뱃지·flag 로 바로 소비 가능.
+    ts = body["trace_summary"]
+    assert ts["generation_path"]["source"] == "KIS"
+    assert ts["generation_path"]["path_label"] in ("normal", "regenerated", "template_fallback")
+    assert ts["verification_summary"]["outcome"] == "passed"
+    assert ts["flags"]["verification_warning"] is False
+    assert set(ts.keys()) == {
+        "trace_id", "generation_path", "data_quality", "verification_summary", "stability", "flags"
+    }
 
 
 # 4b) POST 직후 응답 == GET 단건 응답 (정본 계약 잠금 — 두 진입점 shape·값 완전 동일)

@@ -33,18 +33,24 @@ from src.api.schemas.ai_technical_output import TechnicalAgentOutputMirror
 from src.api.schemas.technical_report import (
     ChartItem,
     ChartsBlock,
+    DataQualityBlock,
     DriversBlock,
+    GenerationPathBlock,
     InterpretationBlock,
     MetaBlock,
     RiskItemBlock,
     RisksBlock,
     SignalItem,
     SignalsBlock,
+    StabilityBlock,
     StockBlock,
     SummaryBlock,
     TechnicalReportCreateRequest,
     TechnicalReportReadModel,
+    TraceFlagsBlock,
+    TraceSummaryBlock,
     VerificationBlock,
+    VerificationSummaryBlock,
 )
 
 
@@ -81,18 +87,90 @@ def build_read_model(
     charts = _list(raw.get("charts"))
     chart_items: list[ChartItem] = []
     periods: list[str] = []
+    candle_units: set[str] = set()
     for i, c in enumerate(charts):
         cd = _d(_d(c).get("chart_data"))
         period = str(_d(c).get("period") or "")
+        unit = cd.get("candle_unit")
         if period:
             periods.append(period)
+        if isinstance(unit, str):
+            candle_units.add(unit)
         chart_items.append(ChartItem(
             period=period,
-            candle_unit=cd.get("candle_unit"),
+            candle_unit=unit,
             display_order=i,
             has_chart_data=bool(cd),
             annotation_count=len(_list(cd.get("annotations"))),
         ))
+
+    # ── trace summary(생성/검증/품질 요약) — 모두 저장값 파생, 재해석 없음 ──
+    interp_source = interp.get("source")
+    template_fallback_used = interp_source == "template_fallback"
+    regen = verification.get("regen_count")
+    had_regeneration = bool(regen) if isinstance(regen, int) else False
+    if had_regeneration and regen:
+        had_regeneration = regen > 0
+    if template_fallback_used:
+        path_label = "template_fallback"
+    elif had_regeneration or interp_source == "llm_regenerated":
+        path_label = "regenerated"
+    else:
+        path_label = "normal"
+
+    data_status = raw.get("data_status")
+    limited = data_status in ("data_limited", "regime_unavailable")
+    has_intraday = raw.get("intraday_context") is not None or "1d" in periods
+
+    calc, rgm, lbl = (
+        verification.get("calc_passed"),
+        verification.get("regime_passed"),
+        verification.get("label_matched"),
+    )
+    outcome = verification.get("outcome")
+    v_consistent = bool(calc) and bool(rgm) and bool(lbl) if verification else None
+    v_warning = bool(outcome and outcome != "passed") or (v_consistent is False)
+    failed_count = len(_list(verification.get("failed_indicators")))
+
+    trace_summary = TraceSummaryBlock(
+        trace_id=raw.get("trace_id"),
+        generation_path=GenerationPathBlock(
+            source=raw.get("source"),
+            interpretation_source=interp_source,
+            template_fallback_used=template_fallback_used,
+            regen_count=regen if isinstance(regen, int) else None,
+            path_label=path_label,
+        ),
+        data_quality=DataQualityBlock(
+            data_status=data_status,
+            available_periods=periods,
+            intraday_available=has_intraday,
+            chart_count=len(chart_items),
+            limited=limited,
+        ),
+        verification_summary=VerificationSummaryBlock(
+            outcome=outcome,
+            calc_passed=calc,
+            regime_passed=rgm,
+            label_matched=lbl,
+            failed_indicators_count=failed_count,
+        ),
+        stability=StabilityBlock(
+            confidence=signal.get("confidence"),
+            confidence_basis=signal.get("confidence_basis"),
+            verification_consistent=v_consistent,
+        ),
+        flags=TraceFlagsBlock(
+            used_fallback=template_fallback_used,
+            had_regeneration=had_regeneration,
+            limited_data=limited,
+            verification_warning=v_warning,
+            has_intraday_context=has_intraday,
+            has_daily_chart="D" in candle_units,
+            has_weekly_chart="W" in candle_units,
+            has_monthly_chart="M" in candle_units,
+        ),
+    )
 
     return TechnicalReportReadModel(
         report_id=report_id,
@@ -167,8 +245,9 @@ def build_read_model(
             label_matched=verification.get("label_matched"),
             regen_count=verification.get("regen_count"),
             failed_indicators=[str(x) for x in _list(verification.get("failed_indicators"))],
-            summary=verification.get("validation_summary"),
+            summary=None,
         ),
+        trace_summary=trace_summary,
     )
 
 

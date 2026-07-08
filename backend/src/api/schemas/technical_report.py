@@ -126,10 +126,71 @@ class VerificationBlock(BaseModel):
     summary: str | None = None
 
 
+# ── trace summary 블록(제품용 — "어떻게 생성됐고 얼마나 안정적인지". raw trace dump 아님) ──
+class GenerationPathBlock(BaseModel):
+    """생성 경로 — 정상/재생성/fallback. 저장값 파생, 재해석 없음."""
+
+    source: str | None = None                       # 시세 출처(KIS / KIS (stale))
+    interpretation_source: str | None = None         # llm / llm_regenerated / template_fallback
+    template_fallback_used: bool = False
+    regen_count: int | None = None
+    path_label: str = "normal"                        # normal | regenerated | template_fallback
+
+
+class DataQualityBlock(BaseModel):
+    data_status: str | None = None
+    available_periods: list[str] = Field(default_factory=list)
+    intraday_available: bool = False
+    chart_count: int = 0
+    limited: bool = False
+
+
+class VerificationSummaryBlock(BaseModel):
+    """제품용 검증 요약(상세는 `verification` 블록 유지)."""
+
+    outcome: str | None = None
+    calc_passed: bool | None = None
+    regime_passed: bool | None = None
+    label_matched: bool | None = None
+    failed_indicators_count: int = 0
+
+
+class StabilityBlock(BaseModel):
+    confidence: float | None = None
+    confidence_basis: str | None = None
+    verification_consistent: bool | None = None       # calc∧regime∧label
+
+
+class TraceFlagsBlock(BaseModel):
+    """뱃지/서브패널용 boolean projection(저장값 기반, 재해석 없음)."""
+
+    used_fallback: bool = False
+    had_regeneration: bool = False
+    limited_data: bool = False
+    verification_warning: bool = False
+    has_intraday_context: bool = False
+    has_daily_chart: bool = False
+    has_weekly_chart: bool = False
+    has_monthly_chart: bool = False
+
+
+class TraceSummaryBlock(BaseModel):
+    """생성/검증/품질 요약 — 결과 해석(summary/interpretation)과 역할 분리."""
+
+    trace_id: str | None = None
+    generation_path: GenerationPathBlock
+    data_quality: DataQualityBlock
+    verification_summary: VerificationSummaryBlock
+    stability: StabilityBlock
+    flags: TraceFlagsBlock
+
+
 class TechnicalReportReadModel(BaseModel):
     """POST/GET 단건 응답 — 프론트가 섹션별로 바로 렌더할 수 있는 read model.
 
-    모든 값은 저장/계산된 값의 projection 이다(backend 재해석 없음). optional 필드가 비어도 shape 는 안정적."""
+    모든 값은 저장/계산된 값의 projection 이다(backend 재해석 없음). optional 필드가 비어도 shape 는 안정적.
+    `trace_summary` 는 "어떻게 생성됐고 얼마나 안정적인지"(생성 경로·데이터 품질·검증 요약·flag)를 제품용으로
+    요약한다 — raw trace/프롬프트/내부 로그는 노출하지 않는다."""
 
     report_id: UUID
     stock: StockBlock
@@ -141,3 +202,4 @@ class TechnicalReportReadModel(BaseModel):
     risks: RisksBlock
     charts: ChartsBlock
     verification: VerificationBlock
+    trace_summary: TraceSummaryBlock
