@@ -111,13 +111,17 @@ def test_malformed_json_request_id_is_null(ctx):
     assert r.json()["error"]["request_id"] is None
 
 
-# ── allowlist 실제 경계: 미지원 ticker → 422, OpenAI/KIS 미호출 ────────────────
-def test_out_of_scope_ticker_real_boundary(ctx):
-    r = ctx.client.post(_URL, json={**_BODY, "ticker": "999999"})  # 6자리지만 allowlist 밖
+# ── 전체 종목 확장: 구 out-of-scope 6자리 ticker도 수용(200), 형식 오류만 422 ─────────────
+def test_expanded_ticker_accepted(ctx):
+    r = ctx.client.post(_URL, json={**_BODY, "ticker": "999999"})  # 구 allowlist 밖, 이제 지원
+    assert r.status_code == 200
+    assert r.json()["request_id"] == "req-001"
+    assert ctx.llm.prompts and ctx.fetcher.calls > 0     # OpenAI·KIS 정상 진입(미차단)
+
+
+def test_invalid_format_ticker_is_422(ctx):
+    r = ctx.client.post(_URL, json={**_BODY, "ticker": "12345"})  # 6자리 아님 → 계약 검증 실패
     assert r.status_code == 422
-    body = r.json()["error"]
-    assert body["code"] == "OUT_OF_SCOPE_TICKER" and body["request_id"] == "req-001"
-    # allowlist는 OpenAI·KIS 이전에 차단 — fake LLM/fetcher가 호출되지 않아야 한다
     assert ctx.llm.prompts == [] and ctx.fetcher.calls == 0
 
 

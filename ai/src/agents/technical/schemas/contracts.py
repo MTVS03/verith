@@ -52,9 +52,12 @@ class TechnicalAgentInput(_StrictModel):
     query: str  # 기술적 분석 관점으로 변형된 도메인 질의
     request_id: str  # 요청 추적용 런타임 필드. 출력에 되돌려준다(에이전트는 저장 안 함 — backend가 technical_reports.request_id 에 저장, api_spec §4).
     as_of: datetime  # 분석 기준 시점(ISO8601). 문자열 입력을 Pydantic이 파싱.
+    # backend canonical 종목명(정본). supervisor 가 stock context 에서 주입한다. 없으면(None) technical 은
+    # dev 표시명 fallback(config.dev_stock_name) 또는 ticker 코드를 쓴다 — 하위호환(기존 경로는 None 로 동작).
+    stock_name: str | None = None
 
-    # 의미 검증(형식 오류 = 사용자 요청 오류 → endpoint 422 VALIDATION_ERROR). allowlist 소속 검사는
-    # 여기가 아니라 supervisor 시작부(전 진입 경로 보호)에서 한다(OutOfScopeTickerError).
+    # 의미 검증(형식 오류 = 사용자 요청 오류 → endpoint 422 VALIDATION_ERROR). 종목 지원 정책 검사는
+    # 여기가 아니라 supervisor 시작부(config.is_supported_ticker, 전 진입 경로 보호)에서 한다.
     @field_validator("ticker")
     @classmethod
     def _ticker_is_6_digits(cls, v: str) -> str:

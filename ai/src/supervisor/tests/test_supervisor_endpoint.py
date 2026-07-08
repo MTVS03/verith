@@ -120,23 +120,6 @@ def test_analyze_technical_llm_missing_is_isolated_failure(api):
         assert by[a]["status"] == "success"          # 부분 성공
 
 
-def test_analyze_resolved_out_of_scope_ticker_fails_only_technical(api):
-    # resolved ≠ technical runnable: 삼성전자(005930)는 resolve 되지만 BATTERY_TICKERS 밖 →
-    # technical 만 failed(OutOfScopeTickerError, 격리), 나머지는 success. 현재 MVP 정책(버그 아님).
-    adapters = _fake_adapters(technical=TechnicalAdapter())
-    _wire(
-        resolver=FakeResolver(result=resolved("005930", "삼성전자")),
-        adapters=adapters,
-        llm_factory=_ok_llm_factory(),   # llm 은 non-None, 범위 검사가 먼저라 미사용
-    )
-    body = api.post(_ANALYZE, json={"query": "삼성전자 차트 어때?"}).json()
-    by = {x["agent_type"]: x for x in body["results"]}
-    assert by["technical"]["status"] == "failed"
-    assert by["technical"]["error"]["type"] == "OutOfScopeTickerError"
-    for a in ("fundamental", "news", "flow", "industry"):
-        assert by[a]["status"] == "success"
-
-
 def test_analyze_empty_query_is_422(api):
     _wire(resolver=FakeResolver(result=not_found()), adapters=_fake_adapters())
     r = api.post(_ANALYZE, json={"query": ""})

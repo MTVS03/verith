@@ -38,8 +38,8 @@ SAMPLE_ITEM = {
     "revl_issu_reas": "",
 }
 
-ALLOWED_TICKER = "373220"   # LG에너지솔루션 (allowlist)
-OUT_OF_SCOPE_TICKER = "005930"  # 삼성전자 (allowlist 밖)
+ALLOWED_TICKER = "373220"   # LG에너지솔루션
+EXPANDED_TICKER = "005930"  # 삼성전자 — 구 allowlist 밖, 이제 지원(전체 종목 확장)
 
 
 # ── 1. output2 1건 정상 변환 ──────────────────────────────────────────────────
@@ -98,14 +98,19 @@ def test_empty_numeric_string_raises():
         parse_kis_ohlcv_item(broken)
 
 
-# ── 8·9. allowlist 통과 / 거부 ────────────────────────────────────────────────
+# ── 8·9. 지원 정책: 형식상 유효한 ticker 전체 허용(구 out-of-scope 포함), 빈 값만 거부 ──────
 def test_allowed_ticker_passes():
     validate_ticker(ALLOWED_TICKER)  # 예외 없어야 정상
 
 
-def test_out_of_scope_ticker_rejected():
+def test_expanded_ticker_now_supported():
+    # 구 allowlist 밖(005930)도 이제 정책상 지원 → validate_ticker 통과(gate 아님).
+    validate_ticker(EXPANDED_TICKER)
+
+
+def test_empty_ticker_rejected():
     with pytest.raises(OutOfScopeTickerError):
-        validate_ticker(OUT_OF_SCOPE_TICKER)
+        validate_ticker("")  # 비어있는 ticker만 지원 정책 밖
 
 
 # ── 10·11. period 통과 / 거부 ─────────────────────────────────────────────────
@@ -150,10 +155,11 @@ def test_multi_timeframe_uses_dwm(monkeypatch):
     assert all(isinstance(bars, list) for bars in result.values())
 
 
-def test_multi_timeframe_rejects_out_of_scope(monkeypatch):
-    monkeypatch.setattr(kc, "fetch_ohlcv", lambda *a, **k: [])
-    with pytest.raises(OutOfScopeTickerError):
-        fetch_multi_timeframe_ohlcv(OUT_OF_SCOPE_TICKER)
+def test_multi_timeframe_accepts_expanded_ticker(monkeypatch):
+    # 구 out-of-scope(005930)도 정책 gate 없이 D/W/M 조회 경로를 통과한다.
+    monkeypatch.setattr(kc, "fetch_ohlcv", lambda *a, **k: [parse_kis_ohlcv_item(SAMPLE_ITEM)])
+    result = fetch_multi_timeframe_ohlcv(EXPANDED_TICKER)
+    assert set(result.keys()) == {"D", "W", "M"}
 
 
 # ── 13. 리샘플 관련 함수·상수가 존재하지 않음 (일봉→주/월 리샘플 금지) ────────
@@ -386,11 +392,11 @@ def test_normalize_date_rejects_bad_format(bad):
         kc._normalize_to_date(bad)
 
 
-# PAGE-11: allowlist/period는 pagination에서도 KIS 호출 전 거부
-def test_pagination_rejects_out_of_scope(monkeypatch):
+# PAGE-11: 구 out-of-scope도 pagination 통과(정책 gate 아님) / period 형식 오류는 여전히 거부
+def test_pagination_accepts_expanded_ticker_but_rejects_bad_period(monkeypatch):
     _patch(monkeypatch, _mock_fixed("20260601"))
-    with pytest.raises(OutOfScopeTickerError):
-        kc.fetch_ohlcv_range("005930", "D", "20260101", "20260704")
+    bars = kc.fetch_ohlcv_range("005930", "D", "20260101", "20260704")  # 구 out-of-scope 통과
+    assert isinstance(bars, list)
     with pytest.raises(InvalidPeriodError):
         kc.fetch_ohlcv_range("373220", "Y", "20260101", "20260704")
 

@@ -23,6 +23,7 @@ Top Supervisor가 쿼리를 도메인별로 변형해 넘긴다. 에이전트는
 {
   "ticker": "373220",
   "query": "LG에너지솔루션 최근 시세·거래량 패턴과 기술적 신호 분석해줘",
+  "stock_name": "LG에너지솔루션",
   "request_id": "req_abc123",
   "as_of": "2026-06-30T14:30:00+09:00"
 }
@@ -30,8 +31,9 @@ Top Supervisor가 쿼리를 도메인별로 변형해 넘긴다. 에이전트는
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `ticker` | string | ✅ | 종목 코드 (6자리) |
+| `ticker` | string | ✅ | 종목 코드 (6자리). 종목 지원 여부는 allowlist 가 아니라 데이터/결과 상태로 표현(`config.md §11`) |
 | `query` | string | ✅ | 변형된 도메인 질의 (기술적 분석 관점) |
+| `stock_name` | string \| null | ❌ | **backend canonical 종목명(정본)**. supervisor 가 stock context 에서 주입한다. 없으면(None) technical 은 dev 표시명(`config.dev_stock_name`) 또는 ticker 코드로 폴백(하위호환). 종목명 정본은 더 이상 내부 `BATTERY_TICKERS` 가 아니라 backend stocks 가 소유한다. |
 | `request_id` | string | ✅ | 요청 추적용 ID (trace 연결). **런타임 필드** — 출력 JSON에 그대로 되돌려준다. 에이전트 자신은 저장하지 않지만 **backend가 `technical_reports.request_id`(UNIQUE NOT NULL)에 저장**하며(api_spec §4), 저장 리포트 조회 응답의 `report` 안에도 포함된다. |
 | `as_of` | ISO8601 | ✅ | 분석 기준 시점. **리포트 표시 기준일이자 KIS 조회 종료일(`end_date`)로도 사용된다** — supervisor가 `data_collect`에 넘겨 KIS D/W/M 조회의 종료일로 스레딩한다(생략 불가한 입력이라 항상 존재). **미래 `as_of`는 거부**(ValueError). 자세한 흐름은 `kis_mapping.md §8.2`. |
 

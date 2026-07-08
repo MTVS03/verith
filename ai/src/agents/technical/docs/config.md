@@ -332,35 +332,38 @@ ANNOTATION_DEDUP_BARS = {
 
 ---
 
-## 11. MVP 종목 범위 (allowlist)
+## 11. 종목 지원 정책 (전체 종목 확장)
 
-MVP 조사 범위는 **2차전지 10종목**으로 제한한다. KIS API는 섹터 단위 조회가 아니라 종목코드 단위 조회이므로, 섹터 제한은 KIS가 아니라 **서비스 레벨의 allowlist**로 수행한다.
+종목 지원 여부는 **allowlist membership 이 아니라 실제 데이터/결과 상태(`data_status`)** 로 표현한다.
+technical 은 **형식상 유효한(6자리) ticker 를 기본 지원**한다(`config.is_supported_ticker`, 기본 정책 = 전체
+허용). 6자리 형식 검증은 입력 계약(`TechnicalAgentInput`) validator 가 담당한다. 종목 정본(코드·이름·시장)은
+**backend canonical stock context** 가 소유하고, supervisor 가 `stock_name` 을 `TechnicalAgentInput` 으로
+주입한다.
 
 ```python
-BATTERY_TICKERS = {
-    "051910": "LG화학",
-    "373220": "LG에너지솔루션",
-    "006400": "삼성SDI",
-    "096770": "SK이노베이션",
-    "086520": "에코프로",
-    "247540": "에코프로비엠",
-    "003670": "포스코퓨처엠",
-    "066970": "엘앤에프",
-    "348370": "엔켐",
-    "361610": "SK아이이테크놀로지",
+def is_supported_ticker(ticker: str) -> bool:
+    # 기본 정책: 형식상 유효한 ticker 전체 지원. BATTERY_TICKERS membership 아님.
+    # 향후 시장/유형 정책이 필요하면 gate 를 흩뿌리지 말고 이 함수에서만 확장한다.
+    return bool(ticker)
+```
+
+**지원 정책의 단일 경계**는 `technical_supervisor.run` 시작부(OpenAI/cache/KIS 이전)이며, 정책 밖(빈 ticker
+등)만 `OutOfScopeTickerError`. resolver 가 식별한 종목은 기본적으로 여기를 통과한다. 데이터 부족·미상장·
+히스토리 부족은 gate 로 막지 않고 `data_status`(degrade/unavailable)로 표현한다.
+
+```python
+BATTERY_TICKERS = {  # ⚠️ production allowlist·종목명 정본 아님 — dev/smoke/test 표시명 fallback 전용
+    "051910": "LG화학", "373220": "LG에너지솔루션", "006400": "삼성SDI",
+    "096770": "SK이노베이션", "086520": "에코프로", "247540": "에코프로비엠",
+    "003670": "포스코퓨처엠", "066970": "엘앤에프", "348370": "엔켐", "361610": "SK아이이테크놀로지",
 }
 ```
 
-allowlist 밖 종목 요청은 조회하지 않고 범위 밖으로 처리한다.
+*연결: `config.is_supported_ticker`/`dev_stock_name`, `services/kis_client.py`, `supervisor/technical_supervisor.py`, `contracts.md`(TechnicalAgentInput.stock_name)*
 
-```python
-if ticker not in BATTERY_TICKERS:
-    raise OutOfScopeTickerError("MVP 조사 범위 밖 종목입니다.")
-```
-
-*연결: `services/kis_client.py`, `kis_mapping.md` §2, `api_spec.md`(OUT_OF_SCOPE_TICKER)*
-
-종목 마스터를 DB로 공유하는 것은 MVP 범위가 아니다 — allowlist는 자주 바뀌지 않는 **설정값**이므로 config에 둔다. 팀 공통 종목 마스터가 필요해지면 그것은 이 에이전트의 `schema.md`가 아니라 팀 공통 스키마 영역에서 다룬다.
+종목명/마스터 정본은 이 에이전트의 내부 상수가 아니라 **팀 공통 backend stocks(canonical)** 가 소유한다.
+technical 은 supervisor 가 주입한 `stock_name` 을 소비하고, 없으면 dev 표시명(`config.dev_stock_name`) 또는
+ticker 코드로 폴백한다.
 
 ## 12. 1D intraday(Beta) 판단 상수
 

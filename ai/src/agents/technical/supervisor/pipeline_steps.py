@@ -22,7 +22,7 @@ from datetime import date, datetime, timezone
 
 # INTRADAY_FETCH_ENABLED는 이 모듈 코드가 직접 쓰진 않지만 technical_graph가 `steps.`로 조회하고
 # 테스트가 이 모듈에 monkeypatch하므로 유지한다(fetch_minute_ohlcv도 동일).
-from ..config import BATTERY_TICKERS, KIS_PERIOD_DAILY, KIS_PERIOD_MONTHLY, KIS_PERIOD_WEEKLY, REGEN_MAX_COUNT
+from ..config import KIS_PERIOD_DAILY, KIS_PERIOD_MONTHLY, KIS_PERIOD_WEEKLY, REGEN_MAX_COUNT, dev_stock_name
 from ..config import INTRADAY_FETCH_ENABLED  # noqa: F401 - technical_graph가 steps로 참조·테스트 monkeypatch
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
 from ..charts.intraday_context_builder import build_intraday_context
@@ -132,9 +132,11 @@ def normalize_step(
                     input_summary={"original_query_hash": hash_query(agent_input.query)}) as span:
         try:
             normalized = run_normalize_question(
-                client, ticker=agent_input.ticker, query=agent_input.query, as_of=agent_input.as_of)
+                client, ticker=agent_input.ticker, query=agent_input.query,
+                as_of=agent_input.as_of, stock_name=agent_input.stock_name)
         except LlmCallError:
-            name = BATTERY_TICKERS.get(agent_input.ticker, agent_input.ticker)
+            # 종목명 정본 우선순위: 주입 stock_name → dev 표시명 → ticker 코드 (normalize._fallback 과 동일 정책).
+            name = agent_input.stock_name or dev_stock_name(agent_input.ticker) or agent_input.ticker
             normalized = NormalizeResult(
                 f"{name}의 최근 시세와 기술적 신호를 중심으로 현재 차트 국면과 리스크 관찰점을 분석합니다.",
                 GenerationSource.TEMPLATE_FALLBACK,

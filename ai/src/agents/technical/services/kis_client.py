@@ -36,7 +36,7 @@ from ..config import (
     KIS_PERIOD_WEEKLY,
     KIS_TIMEOUT_SECONDS,
     KISSettings,
-    is_allowed_ticker,
+    is_supported_ticker,
     load_kis_settings,
 )
 from ..schemas.intraday import IntradayCandle
@@ -138,9 +138,13 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # 입력 검증
 # ─────────────────────────────────────────────────────────────────────────────
 def validate_ticker(ticker: str) -> None:
-    """allowlist 밖 종목이면 KIS 호출 없이 즉시 실패(config.is_allowed_ticker 사용)."""
-    if not is_allowed_ticker(ticker):
-        raise OutOfScopeTickerError(f"MVP 조사 범위 밖 종목입니다: {ticker!r}")
+    """종목 지원 정책(config.is_supported_ticker) 밖이면 KIS 호출 없이 즉시 실패.
+
+    기본 정책은 형식상 유효한 ticker 전체 허용이므로, 이 경로는 더 이상 BATTERY_TICKERS membership 으로
+    종목을 막지 않는다(전체 종목 확장). 종목 지원 여부는 정책이 아니라 KIS 조회 결과/데이터 상태로 표현한다.
+    """
+    if not is_supported_ticker(ticker):
+        raise OutOfScopeTickerError(f"지원 정책 밖 종목입니다: {ticker!r}")
 
 
 def validate_period(period: str) -> None:

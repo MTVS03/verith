@@ -15,7 +15,6 @@ from src.agents.technical.observability.trace_logger import InMemoryTraceSink, T
 from src.agents.technical.runtime.deadline import Deadline, DeadlineExceeded
 from src.agents.technical.schemas.contracts import TechnicalAgentInput, TechnicalAgentOutput
 from src.agents.technical.schemas.enums import DataStatus
-from src.agents.technical.services.kis_client import OutOfScopeTickerError
 from src.agents.technical.supervisor import technical_graph as tg
 from src.agents.technical.supervisor import technical_supervisor as sup
 from src.agents.technical.supervisor import pipeline_steps as steps
@@ -98,13 +97,12 @@ def test_injected_trace_sink_receives_events():
         assert (node, "node_start") in kinds and (node, "node_end") in kinds
 
 
-# ── allowlist는 graph 이전(run 레벨)에서 차단 ─────────────────────────────────
-def test_allowlist_blocks_before_graph():
-    llm = st.ScriptedLlm([])
-    bad = TechnicalAgentInput(ticker="999999", query="q", request_id="r", as_of=st.AS_OF)
-    with pytest.raises(OutOfScopeTickerError):
-        sup.run(bad, llm_client=llm, fetcher=_fetcher, trace_id="t")
-    assert llm.prompts == []                             # OpenAI 미호출
+# ── 전체 종목 확장: 구 out-of-scope ticker도 gate에 막히지 않고 graph를 통과 ───────────────
+def test_expanded_ticker_runs_through_graph():
+    llm = st.ScriptedLlm(list(_HAPPY))
+    expanded = TechnicalAgentInput(ticker="999999", query="q", request_id="r", as_of=st.AS_OF)
+    out = sup.run(expanded, llm_client=llm, fetcher=_fetcher, trace_id="t")
+    assert isinstance(out, TechnicalAgentOutput) and out.ticker == "999999"  # 정상 완료(미차단)
 
 
 # ── data_limited / regime_unavailable parity ──────────────────────────────────

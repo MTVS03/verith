@@ -55,7 +55,7 @@ class AgentAdapter(Protocol):
 
 
 class TechnicalAdapter:
-    """technical 공개 진입: ticker + query (llm_client 필요)."""
+    """technical 공개 진입: ticker + query + stock_name(canonical, 선택) (llm_client 필요)."""
 
     def run(self, task: TaskEnvelope, deps: ExecutionDeps) -> Any:
         if deps.technical_llm_client is None:
@@ -68,6 +68,7 @@ class TechnicalAdapter:
             query=task.rewritten_query,
             request_id=deps.rid(),
             as_of=deps.as_of(),
+            stock_name=task.context.stock_name,  # backend canonical 종목명 주입(정본)
         )
         return run_technical_agent(
             agent_input,

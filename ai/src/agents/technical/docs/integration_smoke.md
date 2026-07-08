@@ -12,11 +12,15 @@ endpoint)이 살아있는지 사람이 수동으로 확인한다. 단위 테스�
 - pytest에 포함되지 않는다(파일명이 `test_` 아님, opt-in 테스트도 만들지 않음).
 
 > **상위 Supervisor 연계 실증(잠금):** **현재는 `BATTERY_TICKERS`(2차전지 10종) 기준으로
-> supervisor+technical real smoke 실증 완료.** 상위 Supervisor 경유 e2e(`resolver → planning →
-> execution → technical success`)는 `src/supervisor/scripts/smoke_supervisor.py` 로 확인하며,
-> **범위 내 종목만** 사용한다(373220 LG에너지솔루션·051910 LG화학 확인: `source=KIS·data_status=normal·
-> final_regime 산출`). 범위 밖 ticker 는 `technical_supervisor.run()` 시작부에서 `OutOfScopeTickerError`
-> 로 거절된다(KIS/OpenAI 이전). 전체 종목 확장은 이 실증 이후 별도 단계. 경계·정책: `src/supervisor/README.md`.
+> supervisor+technical real smoke 실증 완료** — 373220 LG에너지솔루션·051910 LG화학(`source=KIS·
+> data_status=normal·final_regime 산출`). 상위 Supervisor 경유 e2e(`resolver → planning → execution →
+> technical success`)는 `src/supervisor/scripts/smoke_supervisor.py` 로 확인한다.
+>
+> **전체 종목 확장(구조 완료):** technical 은 이제 `BATTERY_TICKERS` membership gate 로 종목을 막지 않고
+> **형식상 유효한 ticker 를 기본 지원**한다(`config.is_supported_ticker`, §config.md 11). 종목명 정본은
+> 내부 상수가 아니라 backend canonical(`TechnicalAgentInput.stock_name`) 이 담당한다. 데이터 부족·미상장은
+> gate 가 아니라 `data_status` 로 표현. **확장 종목(예: 005930)의 real smoke 는 backend `stocks` 에 해당
+> 종목이 seed 된 뒤 검증**한다(resolver universe 종속). 경계·정책: `src/supervisor/README.md`.
 
 ## 필요한 env (값이 아니라 존재만 확인)
 

@@ -82,6 +82,7 @@ def test_technical_adapter_maps_ticker_and_query(monkeypatch):
     )
     assert out == "tech-out"
     assert captured["ticker"] == "005930" and captured["query"] == "차트질문"
+    assert captured["stock_name"] == "삼성전자"    # backend canonical 종목명 주입 전달
     assert captured["llm"] == "LLM"
 
 
@@ -89,18 +90,6 @@ def test_technical_adapter_requires_llm_client():
     # llm_client 미주입이면 import 전에 즉시 AdapterConfigError.
     with pytest.raises(AdapterConfigError):
         TechnicalAdapter().run(_task("technical"), ExecutionDeps())
-
-
-def test_technical_adapter_rejects_out_of_scope_ticker():
-    # resolved ≠ technical runnable: BATTERY_TICKERS 밖(삼성전자 005930)은 KIS/OpenAI 이전에
-    # OutOfScopeTickerError 로 거절된다(실 네트워크 없음). 현재 MVP 범위 정책 — 버그 아님.
-    from src.agents.technical.services.kis_client import OutOfScopeTickerError
-
-    with pytest.raises(OutOfScopeTickerError):
-        TechnicalAdapter().run(
-            _task("technical", stock_code="005930", stock_name="삼성전자"),
-            ExecutionDeps(technical_llm_client=object()),  # 범위 검사가 llm 사용보다 먼저라 dummy 로 충분
-        )
 
 
 def test_fundamental_adapter_maps_ticker_corp_name(monkeypatch):
