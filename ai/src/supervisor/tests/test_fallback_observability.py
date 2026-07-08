@@ -88,9 +88,9 @@ def test_event_recorded_on_fallback_tool_error_kept_not_found():
     assert ev.source_hits == {}
 
 
-def test_event_is_secret_safe_no_raw_query():
+def test_event_no_raw_query_normalized_only():
     obs = RecordingFallbackObserver()
-    query = "Kakao 초민감정보포함질의 분석해줘"
+    query = "Kakao 아주긴원문형태의 질의 입니다"
     run_supervisor(
         SupervisorInput(query=query),
         resolver=FakeResolver(result=not_found()),
@@ -98,10 +98,25 @@ def test_event_is_secret_safe_no_raw_query():
         observer=obs,
     )
     ev = obs.events[0]
-    # 길이만 남고 raw query 문자열은 어디에도 실리지 않는다.
+    # raw query 원문(공백/원형 그대로)은 저장하지 않는다 — normalized 만(정책 허용, 후보 수집용).
+    assert query not in repr(ev)                 # 원문 그대로는 없음
+    assert ev.normalized_query == "kakao아주긴원문형태의질의입니다"  # 정규화형만
     assert ev.query_len == len(query) and ev.query_norm_len > 0
-    assert "초민감정보포함질의" not in repr(ev)
     assert not hasattr(ev, "query")
+
+
+def test_event_identifying_fields_only_on_resolved():
+    obs = RecordingFallbackObserver()
+    # not_found(fallback 도 miss) → 식별 필드 None(후보 수집 대상 아님).
+    run_supervisor(
+        SupervisorInput(query="전혀없는이름xyz 분석"),
+        resolver=FakeResolver(result=not_found()),
+        fallback=_CURATED,
+        observer=obs,
+    )
+    ev = obs.events[0]
+    assert ev.final_status == "not_found"
+    assert ev.normalized_query is None and ev.stock_code is None
 
 
 def test_observer_optional_no_crash_without_observer():

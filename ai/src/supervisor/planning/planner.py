@@ -58,9 +58,14 @@ def _emit_fallback_event(
     query: str,
     status: str,
     result: FallbackResult | None,
+    resolution: Resolution | None = None,
 ) -> None:
-    """fallback 시도 1건을 관측자에 기록(secret-safe — raw query 아님, 길이만)."""
+    """fallback 시도 1건을 관측자에 기록. raw query 원문은 담지 않는다(normalized/길이만).
+
+    resolved 일 때만 normalized_query·stock_code·name·market 를 채운다(승격 후보 수집용, capture sink 만 소비)."""
     meta = result.meta if result is not None else None
+    stock = resolution.stock if resolution is not None else None
+    resolved = status == "resolved" and stock is not None
     observer.record(
         FallbackEvent(
             attempted=True,
@@ -71,6 +76,10 @@ def _emit_fallback_event(
             candidate_count=(len(result.candidates) if result is not None else 0),
             query_len=len(query),
             query_norm_len=len(_normalize(query)),
+            normalized_query=(_normalize(query) if resolved else None),
+            stock_code=(stock.stock_code if resolved else None),
+            stock_name=(stock.stock_name if resolved else None),
+            market=(stock.market if resolved else None),
         )
     )
 
@@ -88,7 +97,7 @@ def _apply_fallback(
         result: FallbackResult = fallback.lookup(query)
     except FallbackLookupError:
         # fallback 은 보조 — 실패해도 canonical not_found 를 유지한다(장애로 승격하지 않음).
-        _emit_fallback_event(observer, query, "not_found", None)
+        _emit_fallback_event(observer, query, "not_found", None, None)
         return Resolution(used_stock_resolver=True, used_fallback_lookup=True, status="not_found")
 
     if result.status == "resolved" and result.stock is not None:
@@ -120,7 +129,7 @@ def _apply_fallback(
     else:
         resolution = Resolution(used_stock_resolver=True, used_fallback_lookup=True, status="not_found")
 
-    _emit_fallback_event(observer, query, resolution.status, result)
+    _emit_fallback_event(observer, query, resolution.status, result, resolution)
     return resolution
 
 
