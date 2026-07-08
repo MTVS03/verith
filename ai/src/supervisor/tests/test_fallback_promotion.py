@@ -109,6 +109,18 @@ def test_multi_observer_fans_out(tmp_path):
     assert (tmp_path / "cap.jsonl").exists()
 
 
+def test_multi_observer_isolates_failure():
+    # 앞 observer 가 예외를 던져도 뒤 observer 는 계속 기록된다(실패 격리 — docstring 약속).
+    class _Boom:
+        def record(self, event):
+            raise RuntimeError("boom")
+
+    rec = RecordingFallbackObserver()
+    multi = MultiFallbackObserver([_Boom(), rec, _Boom()])
+    multi.record(FallbackEvent(attempted=True, final_status="resolved", final_source="curated"))
+    assert len(rec.events) == 1                  # 중간 observer 가 실패에 가리지 않는다
+
+
 # ── no canonical write (안전성) ──────────────────────────────────────────────
 def test_promotion_modules_do_not_import_backend_or_db():
     # 이 계층은 canonical 을 읽지도 쓰지도 않는다 — DB/backend 접근 심볼 부재로 경계 고정.

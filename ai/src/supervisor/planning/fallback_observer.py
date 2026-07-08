@@ -120,11 +120,20 @@ class JsonlPromotionCaptureSink:
 
 
 class MultiFallbackObserver:
-    """여러 observer 에 동시 기록(예: 운영 logging + opt-in capture). 하나가 실패해도 나머지에 영향 없음."""
+    """여러 observer 에 동시 기록(예: 운영 logging + opt-in capture).
+
+    **실패 격리**: 한 observer 가 예외를 던져도 나머지는 계속 기록한다(관측은 요청/다른 관측을 절대 깨지
+    않는다). 실패는 삼키지 않고 warning 으로 남긴다(원인 추적 가능, 대량 dump 아님)."""
 
     def __init__(self, observers: list[FallbackObserver]) -> None:
         self._observers = list(observers)
+        self._log = logging.getLogger("verith.supervisor.fallback")
 
     def record(self, event: FallbackEvent) -> None:
         for obs in self._observers:
-            obs.record(event)
+            try:
+                obs.record(event)
+            except Exception:  # noqa: BLE001 - 관측은 서로/요청을 깨지 않는다(격리). 원인은 로깅.
+                self._log.warning(
+                    "fallback observer 실패(격리됨): %s", type(obs).__name__, exc_info=True
+                )
