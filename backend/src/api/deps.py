@@ -9,11 +9,17 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends
+from neo4j import AsyncSession as GraphSession
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from db.graph.driver import get_graph_session
 from db.session import get_session
 from src.api.clients.ai_client import AIClient
 from src.api.config import settings
+from src.api.services.news_cleanup_service import NewsCleanupService
+from src.api.services.news_graph_query_service import NewsGraphQueryService
+from src.api.services.news_query_service import NewsQueryService
+from src.api.services.news_service import NewsService
 from src.api.services.stock_resolver_service import StockResolverService
 from src.api.services.technical_report_service import TechnicalReportService
 
@@ -30,6 +36,33 @@ async def get_technical_report_service(
     ai_client: AIClient = Depends(get_ai_client),
 ) -> AsyncGenerator[TechnicalReportService, None]:
     yield TechnicalReportService(session=session, ai_client=ai_client)
+
+
+async def get_news_service(
+    session: AsyncSession = Depends(get_session),
+    graph_session: GraphSession = Depends(get_graph_session),
+) -> AsyncGenerator[NewsService, None]:
+    yield NewsService(session=session, graph_session=graph_session)
+
+
+async def get_news_query_service(
+    session: AsyncSession = Depends(get_session),
+) -> AsyncGenerator[NewsQueryService, None]:
+    yield NewsQueryService(session=session)
+
+
+async def get_news_graph_query_service(
+    session: AsyncSession = Depends(get_session),
+    graph_session: GraphSession = Depends(get_graph_session),
+) -> AsyncGenerator[NewsGraphQueryService, None]:
+    yield NewsGraphQueryService(session=session, graph_session=graph_session)
+
+
+async def get_news_cleanup_service(
+    session: AsyncSession = Depends(get_session),
+    graph_session: GraphSession = Depends(get_graph_session),
+) -> AsyncGenerator[NewsCleanupService, None]:
+    yield NewsCleanupService(session=session, graph_session=graph_session)
 
 
 async def get_stock_resolver_service(

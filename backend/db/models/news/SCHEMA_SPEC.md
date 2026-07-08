@@ -11,6 +11,8 @@
 > - `news.url`은 물리상 **NOT NULL + UNIQUE**(url 기반 upsert의 핵심), `news.title`도 **NOT NULL**.
 > - `news.event_id`는 Neo4j `Event.canonical_id` **논리 링크(FK 없음)**.
 > - **Neo4j 객체(Event/Company/Sector/NewsRef/Keyword/Person/Country)는 PostgreSQL 테이블이 아니다.**
+>
+> ⚠️ 논리 설계의 현행 기준은 아래 **§0 ERD**다(JSON 계약 반영). 원 논리 명세 `erd.dbml`이 옛 HTML 리포트·`BELONGS_TO` 필수 카디널리티를 아직 담고 있다면 §0에 맞춰 reconcile 필요.
 
 ## 경계 (중요)
 
@@ -20,6 +22,89 @@
   news가 import 하지 않는다.
 - ai↔backend API 계약(저장·조회·삭제 엔드포인트, 요청/응답 형태)의 **초안은 아래 §7**에 둔다.
   정식 문서 `verith/docs/api_contract.md`(현재 부재, 이 저장소 편집 범위 밖)로 **승격·확정**해야 한다.
+
+---
+
+## 0. ERD (전체 개요)
+
+> **물리 저장소는 둘이다.** `NEWS`·`REPORTS`는 PostgreSQL 테이블, 나머지(`EVENT`·`COMPANY`·`SECTOR`·`NEWSREF`·`KEYWORD`·`PERSON`·`COUNTRY`)는 Neo4j 노드다. 아래 다이어그램의 관계선 중 **두 저장소를 걸치는 링크(`NEWS.event_id → EVENT`, `NEWSREF → NEWS`)는 DB FK 제약이 아니라 애플리케이션이 보장하는 논리 링크**다(실제 크로스-DB FK를 걸지 않는다).
+
+```mermaid
+erDiagram
+    EVENT ||--o{ NEWS : contains
+    REPORTS }o--o{ NEWS : references
+    COMPANY }o--o{ EVENT : participates_in
+    COMPANY }o--o| SECTOR : belongs_to
+    COMPANY }o--o{ COMPANY : related_to
+    EVENT ||--o{ NEWSREF : has_news
+    EVENT ||--o{ KEYWORD : has_keyword
+    EVENT ||--o{ PERSON : mentions
+    EVENT ||--o{ COUNTRY : about
+    NEWSREF ||--|| NEWS : references
+
+    NEWS {
+        bigint id PK
+        text title
+        text content
+        text summary
+        text url UK
+        string publisher
+        string sentiment "긍정, 중립, 부정"
+        float sentiment_score "KR-FinBert confidence 0~1 (importance 집계 입력)"
+        vector embedding "pgvector"
+        timestamp published_at
+        uuid event_id FK "= Event.canonical_id. 논리 링크(앱 보장, DB FK 아님)"
+        timestamp created_at
+    }
+
+    REPORTS {
+        uuid report_id PK
+        text question
+        string intent "관계, 이유, 요약, 현황"
+        text answer_text "검색/미리보기용 중복 저장"
+        jsonb evidence "근거 news_id 목록(report_json 미러 — 역참조 질의용)"
+        jsonb report_json "ReportModel 전체 = 단일 JSON 계약(frontend 렌더 원본)"
+        timestamp created_at
+    }
+
+    EVENT {
+        uuid id PK
+        string canonical_title
+        float importance
+        vector embedding "centroid, optional(미저장 시 member NEWS로 backend 계산)"
+        timestamp created_at
+    }
+
+    COMPANY {
+        uuid id PK
+        string company_name
+    }
+    SECTOR {
+        uuid id PK
+        string sector_name
+    }
+    NEWSREF {
+        bigint news_id PK "저장 시 url→news_id 로 해소(§3)"
+    }
+    KEYWORD {
+        uuid id PK
+        string keyword
+    }
+    PERSON {
+        uuid id PK
+        string name
+    }
+    COUNTRY {
+        uuid id PK
+        string country_name
+    }
+```
+
+**초안(옛 HTML 버전) 대비 변경점:**
+1. `REPORTS.html` 제거 → **`report_json jsonb`**(ai가 돌려주는 `ReportModel` 통째). ai는 HTML을 만들지 않고 JSON 하나만 낸다(news CLAUDE.md §1, commit `1241fe7`). frontend가 이 JSON을 받아 렌더한다.
+2. `NEWS.sentiment_score` 추가 — importance 통계(`EventArticleStats.sentiment_magnitude_sum`) 계산에 필수(§4, §7.2 stats).
+3. `COMPANY ─ SECTOR` 카디널리티 `||`(필수 1) → **`o|`(0 또는 1)**. `BELONGS_TO`는 회사↔섹터 매핑 부재로 **기본 비활성**(ai `config.GRAPH_ENABLE_BELONGS_TO=False`, 3차·보류). `RELATED_TO`도 동일하게 기본 off(미래용).
+4. `EVENT.embedding`(centroid) 명시 — 병합 후보 조회(`/news/events/recent`)가 `CandidateEvent.embedding`을 요구한다. backend가 저장하거나 member NEWS 임베딩으로 계산해 채운다(ai는 읽기만, §3).
 
 ---
 
@@ -34,7 +119,8 @@
 | url | text NOT NULL UNIQUE | 원문 직링크. 1차 중복 차단(url upsert 키) |
 | publisher | varchar | 언론사명. importance 가중치에 사용 |
 | sentiment | varchar | KR-FinBert 결과: 긍정/중립/부정 |
-| embedding | vector (pgvector) | summary 임베딩(arctic-embed-l-v2.0-ko) |
+| sentiment_score | real (float) nullable | KR-FinBert confidence(0~1, `Article.sentiment_score`). **importance 통계 집계 입력** — `EventArticleStats.sentiment_magnitude_sum` = 감성 있는 기사들의 이 값 합. 없으면(감성 미판정) NULL, 집계에서 제외 |
+| embedding | vector (pgvector) | summary 임베딩(arctic-embed-l-v2.0-ko). Event centroid(§3) 계산 소스 |
 | published_at | timestamp | 7일 롤링 기준 |
 | event_id | uuid nullable | 소속 이벤트 = Event.canonical_id(UUID). ai `Article.event_id: str`와 정합. (news.id는 정수 PK로 별개) |
 | created_at | timestamp | |
@@ -48,14 +134,15 @@
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | report_id | uuid PK | uuid4(랜덤). Pydantic `Field(default_factory=lambda: str(uuid.uuid4()))` |
-| question | text | 사용자 질문(또는 종목 프리셋) |
-| intent | varchar | 관계/이유/요약/현황 |
-| answer_text | text | ④ 답변 텍스트(원본). HTML "뉴스 흐름 요약" 섹션으로 렌더됨 |
-| evidence | jsonb | 근거 news_id 목록(근거 이슈 칩→이벤트→기사 추적) |
-| html | text | 렌더된 HTML 리포트(답변 내장). 또는 경로 |
+| question | text | 사용자 질문(또는 종목 프리셋) = `ReportModel.subject`/원 질문 |
+| intent | varchar | 관계/이유/요약/현황 (검색·필터용 비정규화 컬럼) |
+| answer_text | text | ④ 답변 본문 = `ReportModel.answer_text`. 검색·목록 미리보기용 중복 저장 |
+| evidence | jsonb | 근거 news_id 목록 = `ReportModel.evidence_news_ids`. `report_json`의 미러 — `reports ↔ news` 역참조 질의("이 기사를 인용한 리포트")를 위한 비정규화 |
+| report_json | jsonb | **ai가 돌려주는 `ReportModel` 전체(단일 JSON 계약).** frontend가 이 JSON을 받아 렌더한다 |
 | created_at | timestamp | 시간순 정렬 기준(아이디엔 시간정보 안 넣음) |
 
-- **출력은 HTML 하나.** ④ 답변 텍스트는 별도 채널이 아니라 HTML 안 "뉴스 흐름 요약" 섹션으로 렌더된다. `answer_text`는 그 원본 보관용.
+- **출력은 JSON 하나(HTML 아님).** ai는 HTML을 만들지 않는다(news CLAUDE.md §1, commit `1241fe7 [refactor] news 리포트 출력을 HTML에서 단일 JSON 계약으로 전환`). ④ 답변은 별도 채널이 아니라 `report_json` 안 `answer_text`·`cited_event_ids`·`evidence_news_ids`로 내장된다. **frontend가 `report_json`을 받아 렌더**한다. `answer_text`·`intent`·`evidence`는 검색·역참조용 비정규화 사본일 뿐, 렌더 원본은 `report_json`이다.
+- **리포트 저장 주체**: ai→backend "리포트 저장" 엔드포인트는 현재 저장 계약(§7.2)에 **없다.** ai `run_query()`는 `report_json`을 supervisor에 반환할 뿐이며(TASK 11), 이 테이블에 영속화할지·언제 할지는 supervisor/backend 결정이다. 영속화 시 위 컬럼은 그 `ReportModel` JSON에서 채운다.
 - **컬럼 타입 UUID vs TEXT**: UUID 권장, TEXT도 무방 → backend와 합의 필요.
 
 ## 3. Neo4j — Event 중심 지식그래프
@@ -65,10 +152,11 @@ DBML은 RDB 표기라 관계형 그래프는 여기 목록으로 명세한다. N
 
 - 중심 노드 **Event**: `id`(canonical), `canonical_title`, `importance`
   - 감성 count는 저장 안 함 → 조회 시 실시간 집계.
+  - **centroid embedding(병합 후보용)**: `/news/events/recent`가 `CandidateEvent.embedding`(대표 벡터)을 돌려줘야 한다. backend가 Event 프로퍼티로 저장하거나, 소속 NEWS의 `embedding` 평균으로 계산해 채운다 — **ai는 읽기만 하고 centroid를 만들지 않는다**(ai TASK 05 §3.4). 저장 방식(Event 프로퍼티 vs 즉석 계산)은 backend 재량.
 - 관계:
   - `(Company)-[:PARTICIPATES_IN]->(Event)`  여러 회사가 한 이벤트 공유 가능
-  - `(Company)-[:BELONGS_TO]->(Sector)`
-  - `(Company)-[:RELATED_TO]->(Company)`  같은 이벤트 공유 등에서 파생
+  - `(Company)-[:BELONGS_TO]->(Sector)`  **기본 비활성**(ai `config.GRAPH_ENABLE_BELONGS_TO=False`). 회사↔섹터 매핑이 추출에 없어 3차·보류 → 섹터 없는 회사가 정상(카디널리티 0..1). 매핑 규칙 확정 시 활성화.
+  - `(Company)-[:RELATED_TO]->(Company)`  같은 이벤트 공유 등에서 파생. **기본 비활성**(`config.GRAPH_ENABLE_RELATED_TO=False`, 3차·보류).
   - `(Event)-[:HAS_NEWS]->(NewsRef {news_id})`  본문은 PostgreSQL에서
   - `(Event)-[:HAS_KEYWORD]->(Keyword)`
   - `(Event)-[:MENTIONS]->(Person)`
