@@ -16,6 +16,7 @@ from db.graph.driver import get_graph_session
 from db.session import get_session
 from src.api.clients.ai_client import AIClient
 from src.api.config import settings
+from src.api.services.news_cleanup_service import NewsCleanupService
 from src.api.services.news_graph_query_service import NewsGraphQueryService
 from src.api.services.news_query_service import NewsQueryService
 from src.api.services.news_service import NewsService
@@ -54,3 +55,10 @@ async def get_news_graph_query_service(
     graph_session: GraphSession = Depends(get_graph_session),
 ) -> AsyncGenerator[NewsGraphQueryService, None]:
     yield NewsGraphQueryService(session=session, graph_session=graph_session)
+
+
+async def get_news_cleanup_service(
+    session: AsyncSession = Depends(get_session),
+    graph_session: GraphSession = Depends(get_graph_session),
+) -> AsyncGenerator[NewsCleanupService, None]:
+    yield NewsCleanupService(session=session, graph_session=graph_session)

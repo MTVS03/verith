@@ -11,17 +11,20 @@ import uuid
 from fastapi import APIRouter, Depends, Path, Query
 
 from src.api.deps import (
+    get_news_cleanup_service,
     get_news_graph_query_service,
     get_news_query_service,
     get_news_service,
 )
 from src.api.schemas.news import (
     ArticleRef,
+    CleanupResponse,
     EventArticleStats,
     NewsBatchSaveRequest,
     SaveResponse,
     SubjectQueryResponse,
 )
+from src.api.services.news_cleanup_service import NewsCleanupService
 from src.api.services.news_graph_query_service import NewsGraphQueryService
 from src.api.services.news_query_service import NewsQueryService
 from src.api.services.news_service import NewsService
@@ -36,6 +39,14 @@ async def save_batch(
 ) -> SaveResponse:
     """기사(PostgreSQL) + GraphBatch(Neo4j MERGE)를 한 배치로 저장."""
     return await service.save_batch(req)
+
+
+@router.post("/cleanup", response_model=CleanupResponse)
+async def cleanup(
+    service: NewsCleanupService = Depends(get_news_cleanup_service),
+) -> CleanupResponse:
+    """7일(168h) 롤링 삭제 + 고아 정리 + 살아남은 이벤트 importance 재계산."""
+    return await service.cleanup()
 
 
 @router.get("/events/stats", response_model=EventArticleStats | None)

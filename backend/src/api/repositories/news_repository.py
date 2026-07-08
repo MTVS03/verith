@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 
-from sqlalchemy import Row, distinct, func, select
+from sqlalchemy import Row, delete, distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,3 +114,38 @@ async def get_event_aggregates(
     )
     rows = (await session.execute(stmt)).all()
     return {r.event_id: r for r in rows}
+
+
+async def delete_articles_before(
+    session: AsyncSession, cutoff: datetime
+) -> Sequence[Row]:
+    """published_at 이 cutoff 이전인 기사를 삭제하고 (id, event_id) 목록 반환(commit 은 호출자).
+
+    published_at 이 NULL 인 기사는 나이를 알 수 없어 삭제하지 않는다(NULL < cutoff = false).
+    반환값으로 Neo4j NewsRef 삭제(news_id)와 영향 이벤트(event_id) 재계산을 이어간다.
+    """
+    stmt = (
+        delete(News)
+        .where(News.published_at < cutoff)
+        .returning(News.id, News.event_id)
+    )
+    result = await session.execute(stmt)
+    return result.all()
+
+
+async def get_articles_for_importance(
+    session: AsyncSession, event_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[Row]]:
+    """이벤트별 남은 기사(publisher, sentiment, sentiment_score)를 그룹으로.
+
+    importance 재계산 입력. 반환에 없는 event_id 는 남은 기사가 0건(이벤트 삭제 대상).
+    """
+    if not event_ids:
+        return {}
+    stmt = select(
+        News.event_id, News.publisher, News.sentiment, News.sentiment_score
+    ).where(News.event_id.in_(event_ids))
+    grouped: dict[uuid.UUID, list[Row]] = {}
+    for r in (await session.execute(stmt)).all():
+        grouped.setdefault(r.event_id, []).append(r)
+    return grouped

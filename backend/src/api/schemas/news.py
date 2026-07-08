@@ -100,6 +100,15 @@ class SaveResponse(BaseModel):
     message: str | None = None
 
 
+class CleanupResponse(BaseModel):
+    """7일 롤링 삭제 응답(ai `CleanupResponse` 미러)."""
+
+    ok: bool
+    deleted_articles: int = 0
+    deleted_events: int = 0
+    message: str | None = None
+
+
 # ── 조회 응답 (ai schemas/report.py·event.py 미러) ───────────────────────────
 class ArticleRef(BaseModel):
     """근거 기사 한 건(ai `ArticleRef`). news_id+summary+url 를 묶어 근거 추적 사슬의 원천."""

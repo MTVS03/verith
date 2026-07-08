@@ -125,3 +125,48 @@ async def companies_exist(
     )
     rec = await result.single()
     return bool(rec and rec["n"] > 0)
+
+
+# ── 7일 롤링 cleanup ─────────────────────────────────────────────────────────
+async def cleanup_graph(
+    session: AsyncSession,
+    deleted_news_ids: list[int],
+    empty_event_keys: list[str],
+    importance_updates: dict[str, float],
+) -> int:
+    """삭제된 기사에 대응하는 그래프 정리. 삭제된 Event 수를 반환.
+
+    순서: (1) NewsRef 삭제(news_id) → (2) 살아남은 Event importance 갱신 →
+    (3) 기사수 0 이벤트 DETACH DELETE → (4) 고아 Keyword/Person/Country 삭제(**Company 유지**).
+    SCHEMA_SPEC §5. Event/개체 key = canonical_id/이름 문자열.
+    """
+
+    async def _work(tx: AsyncManagedTransaction) -> int:
+        if deleted_news_ids:
+            await tx.run(
+                "MATCH (nr:NewsRef) WHERE nr.news_id IN $ids DETACH DELETE nr",
+                ids=deleted_news_ids,
+            )
+
+        if importance_updates:
+            await tx.run(
+                "UNWIND $updates AS u MATCH (e:Event {key: u.key}) SET e.importance = u.score",
+                updates=[{"key": k, "score": v} for k, v in importance_updates.items()],
+            )
+
+        deleted_events = 0
+        if empty_event_keys:
+            rec = await (await tx.run(
+                "MATCH (e:Event) WHERE e.key IN $keys DETACH DELETE e RETURN count(e) AS n",
+                keys=empty_event_keys,
+            )).single()
+            deleted_events = rec["n"] if rec else 0
+
+        # 고아 정리: 어떤 Event 도 가리키지 않는 Keyword/Person/Country 삭제(Company 는 유지).
+        await tx.run(
+            "MATCH (n) WHERE (n:Keyword OR n:Person OR n:Country) "
+            "AND NOT (:Event)-->(n) DETACH DELETE n"
+        )
+        return deleted_events
+
+    return await session.execute_write(_work)
