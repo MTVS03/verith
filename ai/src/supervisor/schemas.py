@@ -81,10 +81,16 @@ class Resolution(BaseModel):
     """resolver 사용 여부와 결과. status 로 not_found/not_attempted/error 를 구분한다.
 
     fallback lookup 경계: canonical resolver 가 not_found 일 때만 보조 lookup 을 시도한다(§fallback).
-    `used_fallback_lookup` = 이번 요청에서 fallback 을 시도했는지. `source`/`persisted` = 최종 resolution 의
-    출처/정본성. canonical resolved → (canonical_resolver, True). fallback high-confidence 단일 →
-    (fallback_lookup, False, status=resolved, stock=ephemeral). fallback ambiguous → source=fallback_lookup
-    이되 stock 없음(자동선택 금지). 이 두 필드는 resolved 일 때 `stock.source`/`stock.persisted` 와 일치한다."""
+
+    **세 필드를 함께 읽어야 한다(단독 오독 주의):**
+    - `used_stock_resolver=True` = 1차 canonical resolver 를 **시도**했다(최종 결과가 canonical 에서 나왔다는
+      뜻이 **아니다** — fallback 이 최종일 때도 True 다).
+    - `used_fallback_lookup=True` = 2차 fallback 도 **시도**했다.
+    - `source` = **최종 종목이 어디서 왔는지**(canonical_resolver | fallback_lookup). 최종 출처 판단은 이걸 본다.
+    조합: canonical resolved → (used_stock_resolver=True, used_fallback_lookup=False, source=canonical_resolver,
+    persisted=True). fallback high-confidence 단일 → (True, True, source=fallback_lookup, persisted=False,
+    status=resolved, stock=ephemeral). fallback ambiguous → source=fallback_lookup 이되 stock 없음(자동선택 금지).
+    `source`/`persisted` 는 resolved 일 때 `stock.source`/`stock.persisted` 와 일치한다."""
 
     model_config = ConfigDict(extra="forbid")
 

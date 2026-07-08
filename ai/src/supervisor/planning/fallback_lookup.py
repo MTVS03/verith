@@ -11,9 +11,14 @@ persisted=False 인 임시 context 로만 쓰인다(planner 가 그렇게 감싼
 
 source 경계(무엇을 fallback 으로 볼지): 이 계층은 **supervisor 내부 전용 lookup client** 로,
 `FallbackLookupProtocol` 을 주입식으로 연다. 기본 구현 `StaticFallbackLookup` 은 **명시적으로 큐레이션된
-정규화-별칭 exact 매핑**만 조회한다(사람이 근거를 넣은 데이터 — AI 추정 아님). 운영에서 KIS master/DART
-기반의 얇은 조회 client 로 교체하려면 같은 protocol 로 주입하면 된다. 저장/색인/seed/sync 는 이 계층이
-아니라 별도 승인형 관리 플로우의 몫이다.
+정규화-별칭을 조회**한다(사람이 근거를 넣은 데이터 — AI 추정 아님). 운영에서 KIS master/DART 기반의 얇은
+조회 client 로 교체하려면 같은 protocol 로 주입하면 된다. 저장/색인/seed/sync 는 이 계층이 아니라 별도
+승인형 관리 플로우의 몫이다.
+
+**매칭 정확도(중요):** `StaticFallbackLookup` 은 **정규화 substring containment** 다 — full-string exact
+가 아니라, 정규화한 질의 안에 정규화한 key 가 부분문자열로 들어있으면 hit(예: key "카카오" ⊂ "카카오주가어때").
+fuzzy·edit-distance·유사도 추정은 하지 않는다. 운영 client 로 교체할 때 이 매칭 성격(부분문자열 포함)을
+팀이 알고 있어야 한다.
 
 테스트는 실 네트워크 대신 `FakeFallback`(tests/_fakes.py) 또는 커스텀 entries 를 주입한다.
 """
@@ -63,11 +68,12 @@ DEFAULT_FALLBACK_ENTRIES: dict[str, StockContext] = {}
 
 
 class StaticFallbackLookup:
-    """큐레이션된 정규화-별칭 exact 매핑만 조회하는 얇은 기본 구현(fuzzy 아님).
+    """큐레이션된 정규화-별칭을 **정규화 substring containment** 로 조회하는 얇은 기본 구현(fuzzy 아님).
 
-    query 정규화 문자열에 큐레이션 key(정규화)가 **부분문자열로 정확히** 포함될 때만 후보로 본다. 서로 다른
-    stock_code 가 2개 이상이면 ambiguous(자동선택 금지), 하나면 resolved, 없으면 not_found. persisted 표기는
-    planner 가 최종 부여하므로 여기 stock 은 원자료(code/name/market)만 담는다."""
+    정규화한 query 안에 정규화한 큐레이션 key 가 **부분문자열로** 들어있으면 후보로 본다(full-string exact
+    아님 — edit-distance/유사도도 아님). 서로 다른 stock_code 가 2개 이상이면 ambiguous(자동선택 금지),
+    하나면 resolved, 없으면 not_found. persisted 표기는 planner 가 최종 부여하므로 여기 stock 은
+    원자료(code/name/market)만 담는다."""
 
     def __init__(self, entries: dict[str, StockContext] | None = None) -> None:
         self._entries = entries if entries is not None else DEFAULT_FALLBACK_ENTRIES
