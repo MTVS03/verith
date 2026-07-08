@@ -1,28 +1,34 @@
-"""Stock Resolver — 자연어 질의에서 종목 식별 (단일 종목 확정까지만).
+"""Stock Resolver — 자연어 질의에서 종목 식별 (boundary-aware).
 
-판정 규칙(확정):
-- 매칭 소스: 6자리 코드(원문, stocks 존재분만) + 공식 이름(stocks.stock_name) + 별칭(stock_aliases).
-- longest-match: 정규화 질의에서 부분문자열 출현을 찾되, 더 긴 출현에 완전히 포함된 짧은 출현은 제거
-  (에코프로 ⊂ 에코프로비엠, LG ⊂ LG에너지솔루션).
-- dedup: stock_code 1회, 최고 우선순위(stock_code > stock_name > alias > ambiguous_group) 보존.
-- status:
-    원문에 stocks 에 없는 6자리 코드 존재  → ambiguous / unknown_identifier (조용히 무시 금지)
-    후보 0                                   → not_found / no_match
-    후보 1                                   → resolved / exact_match
-    후보 2+:
-      코드 매칭 종목과 이름/별칭 매칭 종목이 공존(→ 다른 종목)  → conflicting_identifiers
-      전부 ambiguous_group 에서만 파생                          → ambiguous_alias
-      그 외 명시적 복수                                        → multiple_stocks
-- ambiguous_group 은 절대 단일 자동확정하지 않는다.
+전체 종목으로 확장돼도 오탐하지 않도록, **무제한 substring 대신 원문 token 경계** 기준으로 매칭한다.
+매칭 흐름(우선순위):
+  1) 원문 6자리 stock code exact
+  2) 전체 normalized query == 공식명/alias exact
+  3) 독립 token 또는 연속 token 매칭 (경계 보존)
+  4) token 끝의 **승인된 조사/문맥 suffix 하나만** 제거 후 exact (무공백 결합형: "카카오주가"→"카카오")
+  5) 같은 span 은 longest-match
+  6) stock_code 기준 dedup
+짧은 이름(normalized 길이 ≤ 2)은 **전체 질의 완전 일치이거나 문맥 키워드가 있을 때만** 후보로 인정한다
+(예: "대상 주가" 가능, "투자 대상을 알려줘" 금지). ambiguous_group 은 단일 자동확정하지 않는다.
+
+동일 normalized 이름이 여러 stock_code 에 매칭되면 자동 선택하지 않고 ambiguous/multiple_stocks.
+공식명은 stocks.stock_name, 별칭은 stock_aliases 에서 읽는다(둘 다 근거). AI import 없음.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.constants.stock_match import (
+    CONTEXT_SUFFIXES,
+    JOSA_SUFFIXES,
+    SHORT_NAME_MAX_LEN,
+)
 from src.api.repositories import stock_repository as repo
 from src.api.schemas.stock_resolve import (
     ResolvedStock,
@@ -32,8 +38,14 @@ from src.api.schemas.stock_resolve import (
 from src.api.text_normalize import normalize_stock_text
 
 _CODE_RE = re.compile(r"\d{6}")
+_TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
+_MAX_RUN = 5  # 연속 token 최대 결합 수(다어절 종목명 대비)
 _MATCH_PRIORITY = {"stock_code": 0, "stock_name": 1, "alias": 2, "ambiguous_group": 3}
 _MAX_CANDIDATES = 10
+
+_CONTEXT_SET = frozenset(CONTEXT_SUFFIXES)
+# 끝에서 제거할 접미(조사+문맥) — 긴 것 우선.
+_STRIP_SUFFIXES = tuple(sorted(set(JOSA_SUFFIXES) | set(CONTEXT_SUFFIXES), key=len, reverse=True))
 
 
 class EmptyQueryError(ValueError):
@@ -49,10 +61,11 @@ class _Entry:
 
 
 @dataclass
-class _Occ:
+class _Match:
     start: int
-    end: int
+    end: int  # token span [start, end] inclusive
     entry: _Entry
+    via_context: bool  # 제거한 접미가 문맥 키워드였는지
 
 
 @dataclass
@@ -68,52 +81,36 @@ class StockResolverService:
         self._session = session
 
     async def resolve(self, query: str) -> StockResolveResponse:
-        norm = normalize_stock_text(query)
-        if not norm:
+        full_norm = normalize_stock_text(query)
+        if not full_norm:
             raise EmptyQueryError("정규화 결과가 비어 있습니다")
 
         stocks = await repo.get_all_stocks(self._session)
         aliases = await repo.get_all_aliases(self._session)
         stock_by_code = {s.stock_code: s for s in stocks}
 
-        # 1) 원문 6자리 코드 → 존재/미존재 분리.
         codes = _CODE_RE.findall(query)
         known_codes = [c for c in codes if c in stock_by_code]
         unknown_codes = [c for c in codes if c not in stock_by_code]
 
-        # 2) 검색 엔트리: 공식 이름(stock_name) + 별칭.
-        entries: list[_Entry] = []
+        # 검색 엔트리(공식명 + 별칭). normalized 로 색인.
+        entries_by_norm: dict[str, list[_Entry]] = defaultdict(list)
         for s in stocks:
             nt = normalize_stock_text(s.stock_name)
             if nt:
-                entries.append(_Entry(nt, s.stock_name, s.stock_code, "stock_name"))
+                entries_by_norm[nt].append(_Entry(nt, s.stock_name, s.stock_code, "stock_name"))
         for a in aliases:
             mt = "ambiguous_group" if a.alias_type == "ambiguous_group" else "alias"
-            entries.append(_Entry(a.normalized_alias, a.alias, a.stock_code, mt))
-
-        # 3) 정규화 질의 안의 부분문자열 출현 수집.
-        occs: list[_Occ] = []
-        for e in entries:
-            if not e.normalized:
-                continue
-            i = norm.find(e.normalized)
-            while i != -1:
-                occs.append(_Occ(i, i + len(e.normalized), e))
-                i = norm.find(e.normalized, i + 1)
-
-        # 4) longest-match: 더 긴 출현에 완전히 포함된 짧은 출현 제거.
-        kept = [
-            o
-            for o in occs
-            if not any(
-                other.start <= o.start
-                and other.end >= o.end
-                and (other.end - other.start) > (o.end - o.start)
-                for other in occs
+            entries_by_norm[a.normalized_alias].append(
+                _Entry(a.normalized_alias, a.alias, a.stock_code, mt)
             )
-        ]
 
-        # 5) 후보 dedup(stock_code 1회, 최고 우선순위·최장 매칭 보존).
+        tokens = [t for t in (normalize_stock_text(x) for x in _TOKEN_RE.findall(
+            unicodedata.normalize("NFKC", query))) if t]
+
+        matches = self._collect_matches(tokens, entries_by_norm)
+
+        # 후보 dedup(stock_code 1회, 최고 우선순위·최장 이름 보존).
         best: dict[str, _Cand] = {}
 
         def consider(code: str, mt: str, text: str, length: int) -> None:
@@ -124,12 +121,17 @@ class StockResolverService:
 
         for c in known_codes:
             consider(c, "stock_code", c, len(c))
-        for o in kept:
-            consider(o.entry.stock_code, o.entry.match_type, o.entry.original, o.end - o.start)
+        for m in matches:
+            e = m.entry
+            # 짧은 이름 보수 규칙(span-local): 전체 질의 완전 일치이거나, **같은 span 에서** 승인 문맥
+            # 접미가 제거된 경우(via_context)만 인정. 질의 멀리 떨어진 문맥 키워드로는 살리지 않는다.
+            if len(e.normalized) <= SHORT_NAME_MAX_LEN:
+                if not (full_norm == e.normalized or m.via_context):
+                    continue
+            consider(e.stock_code, e.match_type, e.original, len(e.normalized))
 
         candidates = self._sorted_candidates(best, stock_by_code)
 
-        # 6) status 판정.
         code_stocks = set(known_codes)
         name_alias_stocks = {c.stock_code for c in best.values() if c.match_type in ("stock_name", "alias")}
 
@@ -145,17 +147,46 @@ class StockResolverService:
                 reason="exact_match",
                 stock=ResolvedStock(stock_code=s.stock_code, stock_name=s.stock_name, market=s.market),
             )
-        # 후보 2+
         if code_stocks and name_alias_stocks:
             reason = "conflicting_identifiers"
         elif not code_stocks and not name_alias_stocks:
-            reason = "ambiguous_alias"  # 전부 ambiguous_group
+            reason = "ambiguous_alias"
         else:
             reason = "multiple_stocks"
         return StockResolveResponse(status="ambiguous", reason=reason, candidates=candidates)
 
+    def _collect_matches(
+        self, tokens: list[str], entries_by_norm: dict[str, list[_Entry]]
+    ) -> list[_Match]:
+        """token 경계 기준 매칭 + 접미 1개 제거 + 같은 span longest-match."""
+        raw: list[_Match] = []
+        n = len(tokens)
+        for i in range(n):
+            concat = ""
+            for j in range(i, min(i + _MAX_RUN, n)):
+                concat += tokens[j]
+                for e in entries_by_norm.get(concat, ()):
+                    raw.append(_Match(i, j, e, via_context=False))
+                # 끝에서 승인된 접미 1개(가장 긴 것)만 제거 후 exact.
+                for suf in _STRIP_SUFFIXES:
+                    if len(concat) > len(suf) and concat.endswith(suf):
+                        stripped = concat[: -len(suf)]
+                        for e in entries_by_norm.get(stripped, ()):
+                            raw.append(_Match(i, j, e, via_context=(suf in _CONTEXT_SET)))
+                        break
+
+        # longest-match: 더 넓은 token span 에 완전히 포함된 짧은 매칭 제거.
+        kept = [
+            m
+            for m in raw
+            if not any(
+                o.start <= m.start and o.end >= m.end and (o.end - o.start) > (m.end - m.start)
+                for o in raw
+            )
+        ]
+        return kept
+
     def _sorted_candidates(self, best: dict[str, _Cand], stock_by_code) -> list[StockCandidate]:
-        # 정렬: match 우선순위 → matched_text(정규화 매칭) 길이 desc → stock_code asc.
         ordered = sorted(
             best.values(),
             key=lambda c: (_MATCH_PRIORITY[c.match_type], -c.match_len, c.stock_code),

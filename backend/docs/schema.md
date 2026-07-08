@@ -39,21 +39,30 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 
 ---
 
-## 3. 테이블 카탈로그 (22개, 도메인별)
+## 3. 테이블 카탈로그 (23개, 도메인별)
 
 ### Common
 | 테이블 | 요약 | PK |
 |---|---|---|
 | `stocks` | **공통 종목 마스터**(코드·이름·시장). `stock_name` 이 공식 이름 정본 | `stock_code` (varchar) |
 | `stock_aliases` | 종목 별칭(변형/영문/약칭/구명/모호그룹). `stock_code` FK→stocks **ON DELETE CASCADE** | `id` (uuid) |
+| `stock_corp_codes` | **DART 법인식별 정본**(`stock_code`→`corp_code`, 상장사만). `corp_code` UNIQUE, **stocks FK 없음(no-FK)** | `stock_code` (varchar) |
 | `agent_reports` | 전 에이전트 리포트 통합 인덱스 | `id` (uuid) |
 
 > **stocks 소유권/범위:** `stocks` 는 Backend 소유 공통 마스터로, 장기적으로 전체 국내 상장 종목을
-> 담는다. **현재 seed 된 10종은 개발 bootstrap** 이며 전체 정본이 아니다(전체 마스터 동기화는 후속).
+> 담는다. **현재 seed 된 10종은 개발 bootstrap** 이며 전체 정본이 아니다. 전체 KIS 종목 마스터 동기화는
+> [`stock_master_sync.md`](stock_master_sync.md) 참고(수동·네트워크, insert/update만·삭제 없음).
 > Technical 10종 지원 정책(`BATTERY_TICKERS`)과는 **별개**다.
 > `stock_aliases` 제약: `UNIQUE(normalized_alias, stock_code)` · `CHECK(normalized_alias<>'')` ·
 > `index(stock_code)`. 공식 이름은 여기 중복 저장하지 않는다(정본=`stocks.stock_name`).
 > Resolver 응답 의미·경계는 [`stock_resolver.md`](stock_resolver.md) 참고(여기 중복 안 함).
+>
+> **stock_corp_codes 소유권/경계:** DART OpenAPI `corpCode.xml` 기준 **법인식별 정본**(상장사 `stock_code`
+> → 8자리 `corp_code`). `stocks`(KIS/KRX 마스터)와 **책임이 다른 별도 계층**이라 `stock_code → stocks`
+> **물리 FK 를 걸지 않는다**(no-FK 논리 링크) — DART 상장 전체를 stocks 적재 상태와 무관하게 선반영하기
+> 위함. `corp_name_from_dart` 는 DART 공시명 원문이며 **`stocks.stock_name` 정본을 대체하지 않는다**.
+> 제약: `PK(stock_code)` · `UNIQUE(corp_code)`. 동기화는 [`dart_corp_code_sync.md`](dart_corp_code_sync.md)
+> 참고(수동·네트워크, insert/update만·삭제 없음). 조회 endpoint/AI wiring 은 후속 브랜치.
 
 ### Fundamental (재무)
 | 테이블 | 요약 |
@@ -161,9 +170,10 @@ flow_report_verifications.report_id(UQ)         -> flow_reports.id
 
 **FK 를 걸지 않는 것** (앱 레벨 논리 링크):
 `agent_reports.agent_report_id`, `news.event_id`(Neo4j Event.canonical_id),
-`news_reports.evidence`, 모든 `owner_user_id` / `owner_session_id`.
+`news_reports.evidence`, 모든 `owner_user_id` / `owner_session_id`,
+**`stock_corp_codes.stock_code`→stocks**(DART 계층 분리·상장 전체 선반영 목적, 의도적 no-FK).
 
-UNIQUE (9): `technical_reports.request_id`, `news.url`, **`technical_report_signals(report_id, indicator)`**, 그리고 1:1 report_id 6개(fundamental·technical·flow interpretations/verifications).
+UNIQUE (10): `technical_reports.request_id`, `news.url`, **`technical_report_signals(report_id, indicator)`**, **`stock_corp_codes.corp_code`**, 그리고 1:1 report_id 6개(fundamental·technical·flow interpretations/verifications).
 
 **NOT NULL 정책(핵심):** 항상 존재하는 실행 메타데이터와 degraded에도 sentinel로 채워지는 컬럼만 NOT NULL. 예) `technical_reports`: `request_id`·`ticker`·`data_status`·`source`·`trace_id`·`as_of`·`input_payload`·`output_payload`·`final_regime`·`daily_regime`·`alignment_flag` = NOT NULL / `consensus`·`signal_score`·`confidence`·`weekly_trend`·`monthly_trend` = nullable. `news`: `title`·`url` NOT NULL. 통합 ERD 신규 컬럼(`timeframe`, `chart_*`)은 저장 정책 확정 전까지 nullable.
 
