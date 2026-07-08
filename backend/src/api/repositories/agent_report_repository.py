@@ -7,10 +7,28 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.common.agent_report import AgentReport
+
+
+async def count_reports(
+    session: AsyncSession,
+    *,
+    agent_type: str | None = None,
+    client_session_id: str | None = None,
+    stock_code: str | None = None,
+) -> int:
+    """필터 기준 전체 수(archive pagination total)."""
+    stmt = select(func.count()).select_from(AgentReport)
+    if agent_type is not None:
+        stmt = stmt.where(AgentReport.agent_type == agent_type)
+    if client_session_id is not None:
+        stmt = stmt.where(AgentReport.client_session_id == client_session_id)
+    if stock_code is not None:
+        stmt = stmt.where(AgentReport.stock_code == stock_code)
+    return int(await session.scalar(stmt) or 0)
 
 
 async def add(session: AsyncSession, agent_report: AgentReport) -> None:
