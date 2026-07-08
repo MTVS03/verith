@@ -9,16 +9,19 @@
 ## 역할 표
 | DB | 역할 | 내용 | 접속 경계 |
 |---|---|---|---|
-| **`verith_canonical`** | **canonical stocks 정본** | KIS master sync 전체 주권 **2,607**(KOSPI 893 + KOSDAQ 1,714) + battery/representative alias | `sync_stocks --apply` 대상. (app runtime 승격은 후속 결정) |
-| `verith` | dev / smoke (현행 app runtime) | bootstrap 13종 + DART corp_codes 등 혼재 | `DATABASE_URL` — app·scripts·alembic |
+| **`verith_canonical`** | **canonical stocks 정본 + app runtime (ACTIVE)** | KIS master sync 전체 주권 **2,607**(KOSPI 893 + KOSDAQ 1,714) + battery/representative alias + corp_codes **3,976** | `DATABASE_URL` — app·scripts·alembic·`sync_stocks --apply` |
+| `verith` | **legacy(전환 완료로 runtime 아님)** | bootstrap 13종 + corp_codes 혼재. 참고/과거용 | (더 이상 참조 안 함) |
 | **`verith_test`** | **pytest 전용(clean)** | 스키마만(migrate). 테스트가 in-tx seed·rollback 격리 | `TEST_DATABASE_URL` — pytest |
 
+> **전환 완료(2026-07):** app runtime `DATABASE_URL` 을 `verith` → **`verith_canonical`** 로 전환했다
+> (`.env`, gitignore = 로컬 변경). `TEST_DATABASE_URL=verith_test` 는 불변. **테스트 DB 와 runtime DB 를
+> 다시 혼용하지 않는다.**
+
 ## URL 경계
-- **`DATABASE_URL`**: app runtime(FastAPI) · `scripts/*`(seed/sync) · `alembic`. 현재 `verith`.
-- **`TEST_DATABASE_URL`**: pytest 만(`tests/conftest.py`). **전용 `verith_test`** 를 가리켜야 한다.
-  미설정/앱 DB와 동일하면 conftest 가 **경고**(오염 위험 노출).
-- **canonical stock sync**(`sync_stocks --apply`)는 **canonical DB(verith_canonical)** 에 적용한다.
-  공유 `verith` 에는 --apply 하지 않는다(테스트 오염 방지).
+- **`DATABASE_URL`** = **`verith_canonical`**(ACTIVE): app runtime(FastAPI) · `scripts/*`(seed/sync) · `alembic`.
+- **`TEST_DATABASE_URL`** = **`verith_test`**: pytest 만(`tests/conftest.py`). 미설정/앱 DB와 동일하면
+  conftest 가 **경고**(오염 위험 노출).
+- **canonical stock sync**(`sync_stocks --apply`)는 이제 `DATABASE_URL`(=canonical)에 적용된다.
 
 ## 원칙
 - **canonical source = KIS master sync DB(verith_canonical)**. `seed_stocks`(battery 10)·
@@ -50,25 +53,25 @@ DATABASE_URL=…/verith_canonical uv run python -m scripts.sync_stocks --apply
 > **collation 주의:** 볼륨이 다른 libc 로 생성된 경우 `CREATE DATABASE` 가 template1 collation mismatch 로
 > 실패할 수 있다 → `ALTER DATABASE template1 REFRESH COLLATION VERSION;`(postgres·verith 동일) 후 재시도.
 
-## runtime 전환 readiness (verith_canonical 검증 완료)
-app runtime `DATABASE_URL` 을 `verith_canonical` 로 바꿔도 되는지 dry-run 으로 확인했다.
+## runtime 전환 완료 (verith_canonical = ACTIVE)
+app runtime `DATABASE_URL` 을 `verith_canonical` 로 **전환 완료**하고 canonical 기준으로 smoke 검증했다.
 
-| 항목 | 상태 | 근거 |
+| 항목 | 상태 | 근거(canonical runtime) |
 |---|---|---|
-| stocks | ✅ | 2,607 주권(verith 13 대비 상위 정본) |
-| stock_aliases | ✅ | 32(battery+representative seed 동일) |
-| **stock_corp_codes** | ✅ | **3,976 정렬 완료**(verith→canonical 복사; DART 재다운로드 제한으로 검증된 데이터 복사) |
-| reports/news | ✅ | 양쪽 0 — 전환 시 손실 데이터 없음 |
-| app startup | ✅ | `src.api.main` import OK(라우트 10개 로드) on canonical |
-| resolver(broader) | ✅ | NAVER/SK하이닉스/셀트리온 exact resolved, LG ambiguous, synthetic not_found |
-| report CRUD / save | ✅ | technical/news/stock-resolve API + resolver **59 passed** on canonical |
-| fundamental save | ✅ | 저장 경로 정상. `test_fundamental_contract_violation_rejected` 만 실패 = **fake AI output fixture 의 `meta.erd_payload.fundamental_report` 부재**(develop 머지 스키마 변경) — DB/runtime blocker 아님 |
+| stocks / aliases / corp_codes | ✅ | 2,607 주권 / 32 alias / 3,976 corp_codes |
+| reports/news | ✅ | 손실 데이터 없음(양쪽 0) |
+| app startup | ✅ | `src.api.main` import OK(라우트 10개) on canonical |
+| resolver(broader) | ✅ | 삼성전자·NAVER·SK하이닉스·셀트리온 exact / LG ambiguous[003550·051910·373220] / synthetic not_found |
+| representative 회귀 | ✅ | LG에너지솔루션·카카오·삼성전자우 정상 resolved |
+| report CRUD / save | ✅ | technical/news/stock-resolve API + resolver 검증(dry-run 59 passed) |
+| read-only 원칙 | ✅ | resolve smoke 후 canonical stocks 수 불변(2,607) — 질문 경로 자동 write 없음 |
 
-**결론: DATABASE_URL → verith_canonical 전환 가능(하드 blocker 0).** 단 이번 브랜치는 **전환 확정이
-아니라 준비 확인** 단계이므로 `.env` 의 `DATABASE_URL` 은 바꾸지 않는다(실전 전환은 별도 브랜치).
+**broader universe 는 의도된 변화(release note 급):** 전환으로 예전 `not_found` 였던 종목(NAVER·SK하이닉스·
+셀트리온 등)이 이제 `resolved` 되고, "LG" 는 (주)LG(003550) 포함으로 더 정확히 `ambiguous` 된다. **버그가
+아니라 canonical 승격의 결과.**
 
 ## 후속(이번 브랜치 밖)
-- **실전 전환 브랜치**: `.env` `DATABASE_URL` → `verith_canonical` 로 변경 + 앱/스모크 재기동 검증.
-  (선행 corp_code 정렬은 이번에 완료. fundamental fixture 이슈는 병행 정리.)
-- fundamental contract-violation 테스트 fixture(`meta.erd_payload.fundamental_report`) 수정.
+- **fundamental contract-violation 테스트 fixture 수정**(`meta.erd_payload.fundamental_report` 부재 —
+  DB/runtime blocker 아님, `verith_test` 기준 pytest 유일 실패). runtime 전환과 무관해 분리한다.
+- 실행 중인 backend(:8000)는 전환 전 `.env`(verith)로 떠 있을 수 있으니 **재기동해야** canonical 반영.
 - delete/deactivate·상장폐지 lifecycle, sync 이력, alias 운영 경계, min_count 상향.
