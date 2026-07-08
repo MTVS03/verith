@@ -70,6 +70,19 @@ candidates : [ { stock_code, stock_name, market, matched_text, match_type }, ...
   `BATTERY_TICKERS`). Resolver·stocks 와 **동일 개념이 아니다.**
 - `stocks` 에 종목이 있다고 Technical 이 분석 가능한 것은 아니다. 지원 여부는 Technical/상위 계층이 판단한다.
 
+### 4.1 매칭 정확성 정책 (전체 마스터 대비, boundary-aware)
+전체 종목(수천 개)으로 확장돼도 흔한 단어 종목명("대상" 등)이 일반 문장에 오탐하지 않도록, **무제한
+substring 대신 원문 token 경계**로 매칭한다.
+- 매칭: 원문 6자리 코드 → 전체 정규화 완전 일치 → **독립/연속 token** → token 끝의 **승인된 조사/문맥
+  suffix 하나만 제거 후 exact**(무공백 결합형 "카카오주가"→"카카오") → 같은 span longest-match → stock_code dedup.
+- **짧은 이름(정규화 길이 ≤ 2)**: 전체 질의 완전 일치이거나 **종목 문맥 키워드**가 있을 때만 후보
+  (예: "대상 주가" 가능, "투자 대상을 알려줘" 금지).
+- **동일 정규화 이름이 여러 코드**에 걸리면 자동 선택하지 않고 항상 `ambiguous`(공식명 우선순위는
+  동일 stock_code 의 대표 match 선택에만 쓰고, 다른 코드 후보를 제거하지 않는다). 이 상황은 해당
+  alias/`ambiguous_group` 데이터가 **존재할 때** 발생한다(없으면 `not_found`).
+- 승인 조사/문맥 상수: `src/api/constants/stock_match.py`. 임의 fuzzy·일반어 사전 추가 금지.
+  전체 마스터 corpus 기준 오탐/미탐 측정 후 상수·임계를 보고·조정한다.
+
 ## 5. 데이터 상태와 후속 (전체 종목 마스터)
 
 - 현재 `stocks` 10종 seed 는 **개발 bootstrap** 이며 **전체 종목 정본이 아니다**([README](../README.md) seed).

@@ -5,6 +5,7 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 - DB 구조·관계·제약 정본: [`docs/schema.md`](docs/schema.md)
 - Alembic 변경·검증 절차: [`docs/migrations.md`](docs/migrations.md)
 - Stock Resolver 응답 의미·경계: [`docs/stock_resolver.md`](docs/stock_resolver.md)
+- 전체 종목 마스터 동기화(KIS): [`docs/stock_master_sync.md`](docs/stock_master_sync.md)
 
 ## 개발 환경
 
@@ -44,6 +45,15 @@ uv run python -m scripts.seed_stock_aliases
 - 두 스크립트 모두 **idempotent** (`ON CONFLICT ... DO NOTHING`) — 여러 번 실행해도 기존 row 를 덮지 않는다.
 - `seed_stock_aliases` 는 참조 종목이 `stocks` 에 없으면 **부분 seed 없이 fail-fast** 하므로 반드시 `seed_stocks` 를 먼저 실행한다.
 - 별칭 정본은 `src/api/constants/stock_aliases.py`(변형만 — 공식 이름은 `stocks.stock_name`).
+
+**전체 종목 마스터 동기화(bootstrap 과 별개, 수동·네트워크):** 개발 10종 seed 는 bootstrap 이고, 전체
+국내 종목은 KIS 마스터를 `sync_stocks` 로 동기화한다. 기본 dry-run(DB 미변경), `--apply` 에서만 반영.
+```bash
+uv run python -m scripts.sync_stocks            # dry-run
+uv run python -m scripts.sync_stocks --inspect   # 앵커 검산(DB 미변경)
+uv run python -m scripts.sync_stocks --apply      # 실제 반영(commit)
+```
+자세한 출처·파싱·포함/제외·정책은 [`docs/stock_master_sync.md`](docs/stock_master_sync.md).
 
 확인:
 
