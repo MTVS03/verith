@@ -82,21 +82,21 @@ class TechnicalAdapter:
 
 
 class FundamentalAdapter:
-    """fundamental 공개 진입: ticker(+corp_name) — 비동기 그래프. intent 등 세부는 agent 기본값."""
+    """fundamental 공개 진입: ticker + query — 비동기 그래프. 세부 파라미터는 agent가 해석한다."""
 
     def run(self, task: TaskEnvelope, deps: ExecutionDeps) -> Any:
         import asyncio
 
-        from src.agents.fundamental.core.contract import FundamentalRequest
-        from src.agents.fundamental.graph import analyze_fundamental
+        from src.agents.fundamental.core.contract import FundamentalAgentInput
+        from src.agents.fundamental.graph import analyze_fundamental_public
 
-        request = FundamentalRequest(
+        public_input = FundamentalAgentInput(
             request_id=deps.rid(),
             trace_id=deps.tid(),
             ticker=task.context.stock_code,
-            corp_name=task.context.stock_name,
+            query=task.rewritten_query,
         )
-        return asyncio.run(analyze_fundamental(request, use_cache=deps.fundamental_use_cache))
+        return asyncio.run(analyze_fundamental_public(public_input, use_cache=deps.fundamental_use_cache))
 
 
 class FlowAdapter:
