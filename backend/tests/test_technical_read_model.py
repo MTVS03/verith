@@ -374,3 +374,47 @@ def test_trace_detail_fallback_and_limited():
     assert ip.status == "fallback" and ip.llm_involved is False
     vf = next(s for s in td.steps if s.step_key == "verify")
     assert vf.status == "fallback"
+
+
+# ── 의미 잠금(semantics) 테스트 — 문서 계약과 projection 일치 고정 ──────────────
+def test_verification_gate_pass_vs_warn_criteria():
+    from src.api.services.technical_report_service import build_read_model
+    # PASS: outcome=passed AND calc∧regime∧label
+    pass_raw = _raw(verification={"calc_passed": True, "regime_passed": True, "label_matched": True,
+                                  "outcome": "passed", "regen_count": 0})
+    g = build_read_model(report_id=_RID, raw=pass_raw, stock=None).trust_summary.verification_gate
+    assert g.outcome == "passed" and g.verification_warning is False
+    # WARN: label_matched False (정합 깨짐) → outcome passed 여도 warning
+    warn1 = _raw(verification={"calc_passed": True, "regime_passed": True, "label_matched": False,
+                               "outcome": "passed", "regen_count": 0})
+    assert build_read_model(report_id=_RID, raw=warn1, stock=None).trust_summary.verification_gate.verification_warning is True
+    # WARN: outcome != passed
+    warn2 = _raw(verification={"calc_passed": True, "regime_passed": True, "label_matched": True,
+                               "outcome": "template_fallback", "regen_count": 1})
+    assert build_read_model(report_id=_RID, raw=warn2, stock=None).trust_summary.verification_gate.verification_warning is True
+
+
+def test_source_coverage_excludes_template_fallback():
+    from src.api.services.technical_report_service import build_read_model
+    raw = _raw()
+    raw["technical_signals"] = [
+        {"indicator": "moving_average", "detail_source": "llm"},
+        {"indicator": "rsi", "detail_source": "llm_regenerated"},
+        {"indicator": "volume", "detail_source": "template_fallback"},   # 분자 제외
+    ]
+    sl = build_read_model(report_id=_RID, raw=raw, stock=None).trust_summary.source_linkage
+    assert sl.total_signal_items == 3 and sl.sourced_signal_items == 2    # template 제외
+    assert sl.source_coverage_ratio == round(2 / 3, 3)
+
+
+def test_charts_all_periods_returned_eager():
+    from src.api.services.technical_report_service import build_charts_read_model
+    raw = _raw()
+    raw["charts"] = [
+        {"period": "3m", "chart_data": {"candle_unit": "D", "candles": []}},
+        {"period": "1y", "chart_data": {"candle_unit": "D", "candles": []}},
+        {"period": "5y", "chart_data": {"candle_unit": "W", "candles": []}},
+    ]
+    cm = build_charts_read_model(report=_report(output_payload=raw), stock=None)
+    assert cm.available_periods == ["3m", "1y", "5y"]                    # all-period eager(잠금)
+    assert len(cm.charts) == 3

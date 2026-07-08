@@ -99,22 +99,42 @@
 | `verification_gate` | outcome?·calc_passed?·regime_passed?·label_matched?·verification_warning | 검증 게이트 카드 |
 | `source_linkage` | total_signal_items·sourced_signal_items·source_coverage_ratio | 출처 연결(신호 중 LLM 근거 비율, 저장 detail_source 기준) |
 
-**값 의미 잠금(QA 드리프트 방지 — 숫자보다 해석을 고정):**
-- `source_coverage_ratio` = `sourced_signal_items / total_signal_items`, `sourced` = `detail_source ∈ {llm, llm_regenerated}`
-  (즉 **지표 설명이 LLM 근거로 붙은 비율**). total=0 이면 `0.0`. **정확도/적중률/수익성 지표가 아니다** — "설명 커버리지"일 뿐.
-- `signal_label` = `consensus`(strong_positive…strong_negative)의 **표시 라벨**(방향·세기 요약). **매수/매도 신호가 아니다.**
-- `verification_gate` = 내부 **검증 게이트 통과 여부**(계산/국면/라벨 정합). **분석의 정답·수익 보장이 아니다.**
-  `verification_warning=true` = "게이트 미통과/불일치" 주의 표시(리포트가 틀렸다는 단정 아님).
+**값 의미 잠금(QA 드리프트 방지 — 숫자보다 해석을 고정). 전부 저장값 projection, backend 재계산/재판정 없음.**
+
+- **`signal_label`** = `signal.consensus`(strong_positive/weak_positive/neutral/weak_negative/strong_negative)를
+  사용자용 한글 라벨로 매핑한 **표시값**(강한 긍정…강한 부정). **별도 AI 재판정 아님**, **매수/매도 신호 아님**.
+  `signal_score`(−1~1)와 짝. consensus 없으면 `null`.
+
+- **`source_coverage_ratio`** — 신호 설명이 **LLM 근거로 붙은 비율**(≠ 적중률/정확도/수익성). **badge 가능**.
+  - **분모** `total_signal_items` = `technical_signals` 전체 개수.
+  - **분자** `sourced_signal_items` = `detail_source ∈ {llm, llm_regenerated}` 인 개수. **`template_fallback` 은 제외**.
+    (주의: `detail_source` 는 항상 채워지므로 "채워짐 여부"가 아니라 **LLM 근거 여부**가 분자다.)
+  - `ratio = round(분자/분모, 3)`, **분모 0 이면 `0.0`**(0-safe, null 아님).
+
+- **`verification_gate`** = 내부 **검증 게이트** 결과(계산/국면/라벨 정합). **분석의 정답·수익 보장 아님.** FAIL enum 은 없다.
+  | 상태 | 조건 | badge |
+  |---|---|---|
+  | **PASS** | `outcome == "passed"` **AND** `calc_passed ∧ regime_passed ∧ label_matched` (`verification_warning=false`) | 통과 표시(또는 무표시) |
+  | **WARN** | `outcome != "passed"`(예: `template_fallback`) **OR** calc/regime/label 중 하나라도 false (`verification_warning=true`) | 주의 아이콘 |
+  - `verification_warning` = 위 WARN 조건의 boolean. **"리포트가 틀렸다"는 단정이 아니라 "게이트 미통과/불일치 주의".**
+  - 상세 원본은 detail 의 `verification` 블록(regen_count·failed_indicators 등). `trust_summary.verification_gate` 는 그 **요약**.
+
+- **`data_quality`**(= `trace_summary.data_quality` 동일 블록) — 데이터 충분성 요약:
+  `data_status`(normal/stale_cache/data_limited/regime_unavailable) · `limited`(= data_status ∈ {data_limited,
+  regime_unavailable}, `flags.limited_data` 와 동일) · `available_periods[]`(저장된 차트 period 목록) ·
+  `chart_count`(차트 개수) · `intraday_available`(intraday_context 존재 또는 "1d" 차트 유무). **재계산 아님.**
 
 ### 5.2 차트 full — `GET /api/technical/reports/{id}/charts`
-detail 의 `charts` 는 **메타만**(period/candle_unit/display_order/has_chart_data/annotation_count). 실제 렌더용
-full payload 는 이 전용 endpoint 로(응답 경량 유지, 차트 탭 열 때만 호출).
+**기본 정책(잠금): all-period eager load.** 이 endpoint 는 `available_periods` 전부(3m/1y/5y…)의 full payload 를
+**한 번에** 반환한다. 프론트는 상세 진입 시 이 응답 하나로 **3m/1y/5y 탭 전환까지 즉시 가능**해야 한다(이미 생성된
+리포트를 기다림 없이 읽게 하는 UX 우선). detail 의 `charts` 는 **메타만**(period/candle_unit/display_order/
+has_chart_data/annotation_count)이고, 실제 렌더용 full payload 는 이 전용 endpoint 로 온다.
+> **`?period=` 는 기본 계약이 아니라 향후 최적화 옵션이다.** 지금은 파라미터 없이 전체를 받는 게 정본이며, payload
+> 가 커지면 나중에 `?period=3m` 로 기간별 분리 호출을 **추가**할 수 있다(계약 shape 불변, additive). 프론트는
+> period 필터를 옵션으로만 감안하고, **기본은 all-period eager 를 기대**하면 된다.
 `TechnicalChartsReadModel`: `report_id`·`stock`·`available_periods[]`·`charts[]`(`ChartItemFull`:
 period·candle_unit?·display_order·has_chart_data·annotation_count·**`chart_data`(AI ChartData: candles/overlays/
 subcharts/annotations)**·`annotations[]`(편의 승격)). `chart_data` 는 raw internal 이 아니라 **AI 차트 렌더 계약**이다.
-> **운영 노트(payload 크기):** 현재는 3m/1y/5y **전 기간을 한 번에** 반환한다. candles 가 많아 응답이 커지면
-> 향후 `?period=` 필터로 **기간별 lazy-load** 로 쪼갤 수 있다(계약 shape 는 그대로, additive). 프론트가 처음부터
-> period 파라미터를 옵션으로 감안해두면 전환이 매끄럽다.
 
 ### 5.3 trace drawer — `GET /api/technical/reports/{id}/trace`
 단계별 처리 타임라인 UI 용. **⚠️ 단계별 `duration_ms` 는 현재 저장 구조에 없어 `null`**(측정/영속화 전까지). steps 는
