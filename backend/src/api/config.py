@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # backend → AI 호출 timeout(초). 숫자 튜닝값 — env 로 override 가능.
     AI_REQUEST_TIMEOUT_SECONDS: float = 60.0
 
+    # DART OpenAPI 키 — **corp_code sync 스크립트 전용**. app startup 필수값 아님
+    # (_load_settings 에서 검증하지 않는다). 값은 수동 sync 실행 시에만 필요하다.
+    DART_API_KEY: str = ""
+    DART_BASE_URL: str = "https://opendart.fss.or.kr/api"
+
 
 def _load_settings() -> Settings:
     """설정 로드 + DATABASE_URL 필수 검증.

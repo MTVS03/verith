@@ -92,7 +92,8 @@ async def test_duplicate_dedup(resolver):
 
 # 12. deterministic ordering (ambiguous_group → stock_code asc)
 async def test_deterministic_ordering(resolver):
-    r = await resolver.resolve("LG 소식")
+    # "뉴스"는 승인된 종목 문맥 키워드 → 짧은 그룹명 "LG" 후보 인정.
+    r = await resolver.resolve("LG 뉴스")
     assert [c.stock_code for c in r.candidates] == ["051910", "373220"]
 
 
