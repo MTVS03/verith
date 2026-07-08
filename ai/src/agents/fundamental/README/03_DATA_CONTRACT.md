@@ -4,6 +4,39 @@
 
 DB ERD는 동결 상태입니다. 이 폴더의 작업은 백엔드 스키마 변경을 제안하거나 요구하지 않습니다. `meta.erd_payload`는 저장 미리보기 계약이며, 실제 DB write는 이 워커가 수행하지 않습니다.
 
+## 공개 입력 계약: FundamentalAgentInput
+
+Supervisor가 호출하는 공개 입력은 `core/contract.py`의 `FundamentalAgentInput`입니다. 내부 분석 파라미터(`intent`, `fs_div`, `report_mode`, `years`)는 외부에서 받지 않고, `query`를 결정론 규칙으로 해석해 `FundamentalRequest`로 변환합니다.
+
+```json
+{
+  "request_id": "req-001",
+  "trace_id": "trace-001",
+  "ticker": "005930",
+  "query": "삼성전자 최근 3년 수익성 분석해줘"
+}
+```
+
+| 필드 | 검증 | 의미 |
+| --- | --- | --- |
+| `request_id` | 빈 문자열 금지 | 요청 추적 ID |
+| `trace_id` | 빈 문자열 금지 | 실행 trace ID |
+| `ticker` | 6자리 숫자 문자열 | backend stock_resolver가 확정한 종목코드 |
+| `query` | 빈 문자열 금지 | 사용자 자연어 질문 또는 Supervisor가 보존한 질의 |
+
+Technical 입력과의 대칭은 아래와 같습니다.
+
+| 축 | TechnicalAgentInput | FundamentalAgentInput |
+| --- | --- | --- |
+| 종목 | `ticker` 6자리 문자열 | `ticker` 6자리 문자열 |
+| 질의 | `query` | `query` |
+| 요청 추적 | `request_id` | `request_id` |
+| 실행 추적 | 출력에서 `trace_id` 생성 | 입력 `trace_id` 보존 |
+| 기준 시각 | `as_of` 입력 | DART 보고서 탐색/연간 기본값으로 내부 결정 |
+| 내부 파라미터 | 기술 분석 내부에서 결정 | `intent`, `fs_div`, `report_mode`, `years`를 query 해석기로 결정 |
+
+해석 결과는 응답 `meta.input_interpretation`에 기록합니다. `corp_code`는 `stock_corp_codes` backend 정본 조회를 우선하고, DB 미설정/실패 시 기존 정적 맵으로 폴백하며 이때 `CORP_CODE_FALLBACK_STATIC`을 `risk_flags`와 `meta.corp_code_resolution`에 남깁니다. DB DSN은 `VERITH_DB_URL`을 우선 사용하고, 미설정이면 backend와 같은 접속 문자열을 공유하기 위해 `DATABASE_URL`을 호환 alias로 읽습니다.
+
 ## 주 계약: FundamentalResponse JSON
 
 `core/contract.py` 기준 최상위 응답은 `FundamentalResponse`입니다. 프론트/백엔드는 이 JSON을 계약으로 사용하고, `report_html`에서 값을 역파싱하지 않습니다.
@@ -42,6 +75,8 @@ DB ERD는 동결 상태입니다. 이 폴더의 작업은 백엔드 스키마 �
 | `report_evidence` | ratio id에 연결된 DART 접수번호, 사업연도, 재무제표 구분, 계정 ID/명, 금액, 통화, role, source URL |
 | `report_interpretation` | report id, 해석 문장, interpretation source |
 | `report_verification` | binding, consistency, verdict stability, outcome, regen count |
+| `report_insights` | 배당/주주/감사의견 등 정기공시 보강 payload |
+| `report_filing_snippets` | 현재 AI가 공시 원문 스니펫을 별도 생산하지 않아 빈 배열로 명시 |
 | `retrieval_summary` | DART source policy 요약 |
 
 `report_id`는 `trace_id`, `ticker`, `bsns_year`, `reprt_code`를 포함한 UUID5 기반입니다.
