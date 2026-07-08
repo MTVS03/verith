@@ -57,16 +57,34 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
 
 # 출력 형식 (문장만 반환)
 
-확정 필드를 되돌려주지 말고, 아래 JSON만 반환합니다.
+확정 필드를 되돌려주지 말고, 아래 JSON만 반환합니다. **프론트가 섹션별로 바로 뿌릴 수 있도록 구조화**합니다.
+각 섹션은 입력의 확정값을 **근거로 설명**할 뿐, 값을 재계산·재판정하지 않습니다.
 
 ```json
 {
-  "interpretation_text": "3~5문장의 한국어 종합 해석. final_regime·consensus·confidence·alignment_flag·risk를 근거로 현재 기술적 상태를 서술하고, 마지막 문장은 비추천형 안내로 맺습니다.",
+  "one_line_summary": "한 줄 요약(국면·종합신호·신뢰도 중심, 20~40자).",
+  "interpretation_text": "3~5문장 종합 해석. 마지막 문장은 비추천형 안내로 맺습니다.",
+  "trend_interpretation": "추세(regime) 해석 1~2문장. regime_context·daily/final_regime 근거.",
+  "signal_interpretation": "종합 신호(consensus)·신뢰도(confidence_level) 해석 1~2문장.",
+  "risk_interpretation": "확인된 risk_items 해석 1~2문장. 없으면 '특이 위험 없음' 취지.",
+  "timeframe_alignment": "daily/weekly/monthly·alignment_flag 관계 서술 1문장(정합/역행/불명확).",
+  "key_drivers": ["방향을 만든 핵심 근거 2~4개(지표·신호 기반, 짧게)."],
+  "warning_points": ["주의/위험 포인트 0~3개(risk_items 기반)."],
+  "what_to_watch_next": "다음에 확인할 것 1문장(관찰 대상, 행동 지시 아님).",
+  "invalidation_or_caution": "현재 해석이 무효화되는 조건/한계 1문장(risk와 분리, data_status 제한 포함).",
   "details": [
     { "indicator": "moving_average", "detail": "해당 지표의 확정 signal·value·metrics를 자연어로 푼 한 문장." }
   ]
 }
 ```
+
+# 섹션 작성 규칙 (구조화)
+
+- **directional_bias 는 반환하지 않습니다** — 방향성(상승/중립/하락)은 시스템이 `consensus`에서 파생합니다.
+- 여러 timeframe이 엇갈리면(`alignment_flag=counter_trend`) `timeframe_alignment`에서 **불일치를 분명히 설명**합니다.
+- `data_status`가 `data_limited`·`regime_unavailable`이면 **단정하지 말고** 신뢰도 제한을 `invalidation_or_caution`에 담습니다.
+- `risk`(현재 확인된 위험)와 `invalidation_or_caution`(해석이 틀어지는 조건)은 **분리**해서 씁니다.
+- 각 섹션은 **근거 있는 서술**이 우선입니다("좋은 문장"보다 입력 확정값에 정확히 근거).
 
 # interpretation_text 작성 규칙
 
