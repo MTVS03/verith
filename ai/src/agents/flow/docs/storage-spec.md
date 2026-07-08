@@ -20,16 +20,29 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 {
   "version": 1,
   "report_id": "uuid4 문자열",
+  "trace_id":  "uuid4 문자열 (기본 = report_id · 상관관계 ID)",
   "meta":   { "stock_name": "삼성전자", "ticker": "005930",
               "market": "KOSPI200", "base_date": "2026-07-06" },
   "signals": { "consecutive": …, "strength": …, "alignment": "동반매수",
                "daily": […], "persistence": …, "inst_detail": …,
                "ownership": […], "price_daily": […] },
   "verification": { "gate1": {passed, checks[], failures[]},
-                    "gate2": {…}, "gate3": {…} },
-  "interpretation": "LLM 해석 (게이트3 통과분만, 아니면 null)"
+                    "gate2": {…}, "gate3": {…},
+                    "outcome": "explained | fact_only",
+                    "regen_count": 0 },
+  "interpretation": "LLM 해석 (게이트3 통과분만, 아니면 null)",
+  "interpretation_meta": { "source": "llm | fallback",
+                           "provider": "openai | null",
+                           "model": "gpt-4o-mini | null" }
 }
 ```
+
+- 2026-07-08 추가 필드(version 유지 — additive/하위 호환): `trace_id`,
+  `verification.outcome`·`regen_count`, `interpretation_meta`. 모두 flow 가 이미
+  아는 값을 옮겨 담은 것(새 계산 아님). `outcome`/`interpretation_meta.source` 는
+  게이트3 통과 여부의 재표현이고, `provider`/`model` 은 해석이 실린 경우에만
+  채워진다(interpretation null ↔ provider/model null, 출처 정합). `data_status`
+  는 아직 미포함 — enum 이 백엔드 소관이라 확인 B 합의 후 추가.
 
 - `signals`의 키는 한글이다(개인·외국인·기관·증권…). 화면·검증 문장과 같은
   어휘로 대조되게 하려는 의도 — 바꾸지 말 것. 화면의 모든 숫자는 이 signals에서
@@ -50,8 +63,8 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 | `base_date` | Date | payload.meta.base_date |
 | `alignment` | String | payload.signals.alignment (승격 복사) |
 | `signals` | JSONB | payload.signals (통짜) |
-| `data_status` | String | **flow 미산출 — 확인 B** |
-| `trace_id` | String | **= report_id 로 채움 (확인 C)** |
+| `data_status` | String | **flow 미산출 — 확인 B (미결)** |
+| `trace_id` | String | payload.`trace_id` (기본=report_id) ✅ 실림 |
 | `created_at` | TIMESTAMPTZ | DB now() (flow 미산출) |
 - 인덱스: (ticker, base_date DESC), (trace_id)
 
@@ -59,9 +72,9 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 | 컬럼 | 매핑 원천 |
 |---|---|
 | `interpretation` | payload.interpretation (null이면 게이트3 통과 해석 없음) |
-| `interpretation_source` | **flow 미산출 — 확인 D** (예: "llm" / "fallback") |
-| `provider` | `"openai"` (flow가 앎 — payload에 추가 가능) |
-| `model` | `"gpt-4o-mini"` (config — payload에 추가 가능) |
+| `interpretation_source` | payload.`interpretation_meta.source` ("llm"/"fallback") ✅ |
+| `provider` | payload.`interpretation_meta.provider` ("openai", 해석 실릴 때만) ✅ |
+| `model` | payload.`interpretation_meta.model` ("gpt-4o-mini", 해석 실릴 때만) ✅ |
 
 **`flow_report_verifications`** (1:1, FK→flow_reports.id CASCADE)
 | 컬럼 | 매핑 원천 |
@@ -70,8 +83,8 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 | `gate2_passed` | payload.verification.gate2.passed |
 | `gate3_passed` | payload.verification.gate3.passed |
 | `checks` | verification 3게이트의 checks(+failures) JSONB |
-| `outcome` | **flow 미산출 — 확인 E** (예: "explained" / "fact_only") |
-| `regen_count` | flow 내부 explain_retries (state에 있음 — payload에 추가 가능) |
+| `outcome` | payload.`verification.outcome` ("explained"/"fact_only") ✅ |
+| `regen_count` | payload.`verification.regen_count` (explain_retries) ✅ |
 
 ## 3. 불변식 (저장·조회가 지켜야 할 요구)
 
@@ -85,23 +98,25 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 5. **report_id 는 AI 서버 발급 uuid4가 관통**. 로그·검증·저장·조회를 한 ID가
    꿰뚫는 상관관계 ID — 저장 시 새 ID를 만들면 추적이 끊긴다.
 
-## 4. 백엔드 확인 사항 (남은 것)
+## 4. 백엔드 확인 사항
 
+**flow 측 반영 완료 (2026-07-08, C·D·E) — payload 에 실려 나감:**
+- **C. `trace_id`** = payload.trace_id(기본 report_id). 슈퍼바이저가 상위 추적 ID를
+  주면 `build_payload(trace_id=…)` 로 대체 가능(형식만 알려주면 됨).
+- **D. `interpretation_source`** = payload.interpretation_meta.source =
+  "llm"(게이트3 통과) / "fallback"(생략·상한초과). null 의미(§3-4)와 정합:
+  interpretation null ↔ source "fallback" ↔ provider/model null.
+- **E. `outcome`·`regen_count`** = payload.verification.outcome("explained"/
+  "fact_only") · regen_count(explain_retries). 백엔드는 파생 말고 이 값을 그대로 저장.
+
+**남은 것 (백엔드 답 필요):**
 - **A. `flow_reports.id` 에 우리 report_id(uuid4)를 넣어도 되나?** 컬럼 default가
   `gen_random_uuid()`라 DB가 새로 만들 수 있는데, 그러면 §3-5가 깨진다. 우리 UUID를
-  그대로 PK로 받아 달라.
-- **B. `data_status` 값 규칙**은? flow는 게이트 결과로 파생 가능(예: 게이트2 실패→
-  degraded). 원하는 enum을 알려주면 payload에 실어 준다.
-- **C. `trace_id` = report_id 로 봐도 되나,** 슈퍼바이저가 전 에이전트를 묶는 상위
-  추적 ID인가? 후자면 슈퍼바이저가 주입하는 값의 형식을 알려 달라.
-- **D. `interpretation_source` 값 규칙**(llm/fallback 등)? null 의미(§3-4)와 정합 필요.
-- **E. `outcome`·`regen_count`를 payload에서 받을지, 백엔드가 verification에서
-  파생할지.** flow는 둘 다 안다(outcome=게이트3 통과 여부, regen=explain_retries) —
-  payload에 추가는 쉽다. "받을지"만 정해 달라.
-
-> B·D·E와 provider·model·regen_count는 **flow가 payload에 넣는 건 간단**하다.
-> 백엔드가 "payload에서 받겠다"고 하면 flow가 다음 커밋에서 필드를 추가한다
-> (version은 유지 — 추가 필드는 하위 호환). "백엔드가 파생하겠다"면 flow는 그대로 둔다.
+  그대로 PK로 받아 달라(technical 선례처럼 백엔드가 자체 PK를 만들면 우리 report_id는
+  최소한 trace_id 로 보존됨 — 이미 payload 에 있음).
+- **B. `data_status` 값 규칙 (미결)**: flow는 게이트 결과로 파생 가능(예: 게이트2
+  실패→degraded, 정상→ok). **원하는 enum을 정해 주면** payload 에 실어 준다 —
+  enum 어휘가 백엔드 소관이라 지금 커밋에서 뺐다(추측 값으로 굳히면 재작업).
 
 ## 5. 지금 안 만드는 것 (요구가 실물로 오면)
 

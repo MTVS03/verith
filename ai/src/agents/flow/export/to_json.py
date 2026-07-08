@@ -22,8 +22,9 @@ from uuid import UUID
 
 from ..schemas import GateResult
 
-# 페이로드 스키마 버전. 구조가 바뀌면 +1 — 저장된 JSON 을 불러오는 쪽이
-# 세대를 구분할 유일한 열쇠(저장/불러오기 대비의 최소 장치).
+# 페이로드 스키마 버전. **깨는** 변경(필드 삭제·의미 변경·타입 변경)에만 +1 —
+# 저장된 JSON 을 불러오는 쪽이 세대를 구분할 열쇠. 필드 **추가**는 하위 호환이라
+# 버전을 올리지 않는다(옛 소비자는 새 키를 무시하면 그만). storage-spec.md 참조.
 PAYLOAD_VERSION = 1
 
 
@@ -35,25 +36,50 @@ def build_payload(
     gate3: GateResult | None = None,
     interpretation: str | None = None,
     report_id: UUID | None = None,
+    *,
+    regen_count: int = 0,
+    provider: str | None = None,
+    model: str | None = None,
+    trace_id: UUID | str | None = None,
 ) -> dict:
     """검증된 조각들을 JSON 호환 dict 로 조립한다 (옮겨 담기만).
 
     interpretation 은 게이트3 통과분만 싣는다 — render_node 와 같은 규칙
     (두 출구 일관). 이것이 이 모듈의 유일한 판정이며, 새 판정이 아니라
     같은 규칙의 재적용이다. gate3 판정 자체는 실패여도 그대로 싣는다.
+
+    저장 계약(storage-spec.md) 대응 추가 필드 — 모두 이미 아는 값을 옮겨 담을
+    뿐 새 계산이 아니다:
+    - trace_id: 상관관계 ID. 기본 = report_id(슈퍼바이저가 상위 ID를 주면 그걸로).
+    - verification.outcome / interpretation_meta.source: gate3 통과 여부의
+      재표현("explained"/"llm" vs "fact_only"/"fallback") — interpretation 필터와
+      같은 규칙의 재적용이지 새 판정이 아니다.
+    - verification.regen_count: state.explain_retries(게이트3 재시도 횟수).
+    - interpretation_meta.provider/model: 해석 LLM 식별. 해석이 실린 경우에만
+      싣는다(interpretation null 이면 provider/model 도 null — 출처와 정합).
     """
     passed3 = gate3 is not None and gate3.passed
+    rid = str(report_id) if report_id else None
+    tid = str(trace_id) if trace_id else rid   # 기본 = report_id
     return {
         "version": PAYLOAD_VERSION,
-        "report_id": str(report_id) if report_id else None,   # UUID→str (유일한 실변환)
+        "report_id": rid,                # UUID→str (유일한 실변환)
+        "trace_id": tid,
         "meta": meta,                    # base_date 는 이미 ISO 문자열(호출부 책임)
         "signals": signals,              # compute_signals dict 그대로 (한글 키 포함)
         "verification": {
             "gate1": gate1.model_dump() if gate1 else None,
             "gate2": gate2.model_dump() if gate2 else None,
             "gate3": gate3.model_dump() if gate3 else None,
+            "outcome": "explained" if passed3 else "fact_only",
+            "regen_count": regen_count,
         },
         "interpretation": interpretation if passed3 else None,
+        "interpretation_meta": {
+            "source": "llm" if passed3 else "fallback",
+            "provider": provider if passed3 else None,
+            "model": model if passed3 else None,
+        },
     }
 
 

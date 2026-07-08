@@ -17,11 +17,12 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from langchain_openai import ChatOpenAI
 
+from .. import config
 from ..core.signals import SUBJECTS
 from ..schemas import GateResult
 
 _PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "explain.txt"
-_MODEL = "gpt-4o-mini"    # 해석용(비용 낮음). 필요 시 교체.
+_MODEL = config.INTERPRETER_MODEL    # 해석용(비용 낮음). 교체는 config 한 곳에서 — payload 기록과 동기.
 _TEMPERATURE = 0.2        # 낮게 — 해석이 튀지 않게.
 
 

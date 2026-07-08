@@ -79,6 +79,10 @@ def run(
         gate3=_get(final, "gate3"),
         interpretation=_get(final, "interpretation"),
         report_id=_get(final, "report_id"),
+        # 저장 계약 필드 — 모두 state·config 에 이미 있는 값(옮겨 담기만).
+        regen_count=_get(final, "explain_retries") or 0,
+        provider=config.INTERPRETER_PROVIDER,
+        model=config.INTERPRETER_MODEL,
     )
 
     return AgentOutput(
