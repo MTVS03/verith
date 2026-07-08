@@ -50,7 +50,25 @@ DATABASE_URL=…/verith_canonical uv run python -m scripts.sync_stocks --apply
 > **collation 주의:** 볼륨이 다른 libc 로 생성된 경우 `CREATE DATABASE` 가 template1 collation mismatch 로
 > 실패할 수 있다 → `ALTER DATABASE template1 REFRESH COLLATION VERSION;`(postgres·verith 동일) 후 재시도.
 
+## runtime 전환 readiness (verith_canonical 검증 완료)
+app runtime `DATABASE_URL` 을 `verith_canonical` 로 바꿔도 되는지 dry-run 으로 확인했다.
+
+| 항목 | 상태 | 근거 |
+|---|---|---|
+| stocks | ✅ | 2,607 주권(verith 13 대비 상위 정본) |
+| stock_aliases | ✅ | 32(battery+representative seed 동일) |
+| **stock_corp_codes** | ✅ | **3,976 정렬 완료**(verith→canonical 복사; DART 재다운로드 제한으로 검증된 데이터 복사) |
+| reports/news | ✅ | 양쪽 0 — 전환 시 손실 데이터 없음 |
+| app startup | ✅ | `src.api.main` import OK(라우트 10개 로드) on canonical |
+| resolver(broader) | ✅ | NAVER/SK하이닉스/셀트리온 exact resolved, LG ambiguous, synthetic not_found |
+| report CRUD / save | ✅ | technical/news/stock-resolve API + resolver **59 passed** on canonical |
+| fundamental save | ✅ | 저장 경로 정상. `test_fundamental_contract_violation_rejected` 만 실패 = **fake AI output fixture 의 `meta.erd_payload.fundamental_report` 부재**(develop 머지 스키마 변경) — DB/runtime blocker 아님 |
+
+**결론: DATABASE_URL → verith_canonical 전환 가능(하드 blocker 0).** 단 이번 브랜치는 **전환 확정이
+아니라 준비 확인** 단계이므로 `.env` 의 `DATABASE_URL` 은 바꾸지 않는다(실전 전환은 별도 브랜치).
+
 ## 후속(이번 브랜치 밖)
-- **app runtime `DATABASE_URL` → `verith_canonical` 전환**(broader universe 를 앱/스모크에서 라이브로).
-  전제: corp_codes 를 canonical 에 재적용(`sync_corp_codes --apply`), fundamental 코드 이슈 해결.
+- **실전 전환 브랜치**: `.env` `DATABASE_URL` → `verith_canonical` 로 변경 + 앱/스모크 재기동 검증.
+  (선행 corp_code 정렬은 이번에 완료. fundamental fixture 이슈는 병행 정리.)
+- fundamental contract-violation 테스트 fixture(`meta.erd_payload.fundamental_report`) 수정.
 - delete/deactivate·상장폐지 lifecycle, sync 이력, alias 운영 경계, min_count 상향.
