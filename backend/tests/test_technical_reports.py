@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.models.common.agent_report import AgentReport
 from db.models.common.stock import Stock
@@ -80,8 +81,14 @@ async def test_create_upserts_stock(client, db_session):
 
 # stocks 마스터 보호: 요청 stock_name 이 기존 마스터를 덮지 못한다
 async def test_stock_master_not_overwritten_by_request(client, db_session):
-    # 기존 마스터를 미리 심어둔다(다른 이름)
-    db_session.add(Stock(stock_code=TICKER, stock_name="정상마스터명"))
+    # 기존 마스터를 다른 이름으로 강제(seed 된 DB에서도 견고하도록 upsert — raw add 금지).
+    await db_session.execute(
+        pg_insert(Stock)
+        .values(stock_code=TICKER, stock_name="정상마스터명")
+        .on_conflict_do_update(
+            index_elements=[Stock.stock_code], set_={"stock_name": "정상마스터명"}
+        )
+    )
     await db_session.flush()
     resp = await client.post(_POST, json={**_REQ, "stock_name": "가짜회사명"})
     assert resp.status_code == 201

@@ -20,6 +20,7 @@ from src.api.services.news_cleanup_service import NewsCleanupService
 from src.api.services.news_graph_query_service import NewsGraphQueryService
 from src.api.services.news_query_service import NewsQueryService
 from src.api.services.news_service import NewsService
+from src.api.services.stock_resolver_service import StockResolverService
 from src.api.services.technical_report_service import TechnicalReportService
 
 
@@ -62,3 +63,9 @@ async def get_news_cleanup_service(
     graph_session: GraphSession = Depends(get_graph_session),
 ) -> AsyncGenerator[NewsCleanupService, None]:
     yield NewsCleanupService(session=session, graph_session=graph_session)
+
+
+async def get_stock_resolver_service(
+    session: AsyncSession = Depends(get_session),
+) -> AsyncGenerator[StockResolverService, None]:
+    yield StockResolverService(session=session)
