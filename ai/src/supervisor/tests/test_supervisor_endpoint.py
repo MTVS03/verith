@@ -8,9 +8,19 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.dependencies import get_adapters, get_cache, get_llm_client, get_resolver
+from src.api.dependencies import (
+    get_adapters,
+    get_cache,
+    get_fallback,
+    get_fallback_observer,
+    get_llm_client,
+    get_resolver,
+)
 from src.api.errors import ai_unavailable
 from src.main import app
+from src.supervisor.planning.fallback_lookup import StaticFallbackLookup
+from src.supervisor.planning.fallback_observer import RecordingFallbackObserver
+from src.supervisor.planning.fallback_source import CompositeFallbackLookup, CuratedFallbackSource, FallbackEntry
 from src.supervisor.execution.adapters import TechnicalAdapter
 from src.supervisor.schemas import AGENT_ORDER
 from src.supervisor.tests._fakes import FakeResolver, not_found, resolved
@@ -54,10 +64,15 @@ def api():
     app.dependency_overrides.clear()
 
 
-def _wire(*, resolver, adapters, llm_factory=None):
+def _wire(*, resolver, adapters, llm_factory=None, fallback=None, observer=None):
     app.dependency_overrides[get_resolver] = lambda: resolver
     app.dependency_overrides[get_adapters] = lambda: adapters
     app.dependency_overrides[get_llm_client] = lambda: (llm_factory or _ok_llm_factory())
+    # 기본은 no-op fallback(빈 StaticFallbackLookup → 항상 not_found) — 오케스트레이션 테스트가 운영
+    # curated 내용에 의존하지 않게 한다. fallback 경로를 볼 때만 명시 주입.
+    app.dependency_overrides[get_fallback] = lambda: (fallback or StaticFallbackLookup())
+    if observer is not None:
+        app.dependency_overrides[get_fallback_observer] = lambda: observer
 
 
 def test_health(api):
@@ -86,6 +101,7 @@ def test_analyze_echoes_provided_ids(api):
 
 
 def test_analyze_not_found_skips_stock_dependent(api):
+    # 기본 no-op fallback → canonical not_found 가 그대로 유지되고 종목 의존 agent 는 skip.
     _wire(resolver=FakeResolver(result=not_found()), adapters=_fake_adapters())
     r = api.post(_ANALYZE, json={"query": "삼성전자 수급 보여줘"})
     by = {x["agent_type"]: x for x in r.json()["results"]}
@@ -93,6 +109,51 @@ def test_analyze_not_found_skips_stock_dependent(api):
         assert by[a]["status"] == "skipped" and by[a]["reason"] == "stock_not_found"
     for a in ("news", "industry"):
         assert by[a]["status"] == "success"
+
+
+def test_analyze_fallback_resolves_ephemeral_through_endpoint(api):
+    # canonical not_found + 운영형 fallback(curated) → endpoint 응답에 fallback ephemeral 이 실린다.
+    fallback = CompositeFallbackLookup(
+        [CuratedFallbackSource((FallbackEntry("035720", "카카오", "KOSPI", ("Kakao",)),))]
+    )
+    _wire(
+        resolver=FakeResolver(result=not_found()),
+        adapters=_fake_adapters(),
+        fallback=fallback,
+    )
+    r = api.post(_ANALYZE, json={"query": "Kakao 분석해줘"})
+    assert r.status_code == 200
+    body = r.json()
+    res = body["resolution"]
+    assert res["status"] == "resolved"
+    assert res["used_fallback_lookup"] is True
+    assert res["source"] == "fallback_lookup" and res["persisted"] is False   # ephemeral(정본 아님)
+    assert res["stock"]["stock_code"] == "035720" and res["stock"]["persisted"] is False
+    # 종목이 (ephemeral 로) 확정 → 5 agent 모두 success, context 는 persisted=false 로 전파.
+    by = {x["agent_type"]: x for x in body["results"]}
+    for a in ("technical", "fundamental", "flow"):
+        assert by[a]["status"] == "success"
+        assert by[a]["context"]["persisted"] is False and by[a]["context"]["source"] == "fallback_lookup"
+
+
+def test_analyze_fallback_records_observability_event(api):
+    obs = RecordingFallbackObserver()
+    fallback = CompositeFallbackLookup(
+        [CuratedFallbackSource((FallbackEntry("035720", "카카오", "KOSPI", ("Kakao",)),))]
+    )
+    _wire(
+        resolver=FakeResolver(result=not_found()),
+        adapters=_fake_adapters(),
+        fallback=fallback,
+        observer=obs,
+    )
+    r = api.post(_ANALYZE, json={"query": "Kakao 분석해줘"})
+    assert r.status_code == 200
+    # endpoint 경로에서도 fallback 사용이 관측된다(secret-safe).
+    assert len(obs.events) == 1
+    ev = obs.events[0]
+    assert ev.final_status == "resolved" and ev.final_source == "curated"
+    assert "Kakao" not in repr(ev)              # raw query 미노출
 
 
 def test_analyze_resolver_tool_error_is_not_found_distinct(api):

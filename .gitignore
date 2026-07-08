@@ -333,3 +333,7 @@ ai/src/agents/technical/scripts/chart_annotation_diagnostics_output/
 
 ai/src/agents/technical/scripts/kis_sample_output/
 **/kis_sample_output/
+
+# fallback 관측/집계 산출물(운영 데이터) — sample 만 커밋
+/ai/src/supervisor/planning/data/
+**/ai/src/supervisor/planning/data/

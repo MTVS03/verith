@@ -22,6 +22,8 @@ from src.api.dependencies import (
     LlmClientFactory,
     get_adapters,
     get_cache,
+    get_fallback,
+    get_fallback_observer,
     get_fetcher,
     get_llm_client,
     get_resolver,
@@ -29,6 +31,8 @@ from src.api.dependencies import (
 )
 from src.api.errors import AppError
 from src.supervisor.execution.adapters import AgentAdapter, ExecutionDeps
+from src.supervisor.planning.fallback_lookup import FallbackLookupProtocol
+from src.supervisor.planning.fallback_observer import FallbackObserver
 from src.supervisor.planning.resolve_client import ResolverProtocol
 from src.supervisor.runtime import run_analysis, to_response_dict
 from src.supervisor.schemas import SupervisorInput
@@ -67,6 +71,8 @@ async def analyze(
     cache=Depends(get_cache),
     trace_sink=Depends(get_trace_sink),
     resolver: ResolverProtocol = Depends(get_resolver),
+    fallback: FallbackLookupProtocol = Depends(get_fallback),
+    observer: FallbackObserver = Depends(get_fallback_observer),
     adapters: dict[str, AgentAdapter] = Depends(get_adapters),
 ) -> dict:
     """planning + execution 을 한 번 흘려 5 tasks / 5 results 를 반환한다.
@@ -98,7 +104,13 @@ async def analyze(
     inp = SupervisorInput(query=body.query, request_id=request_id, trace_id=trace_id)
 
     execution = await run_in_threadpool(
-        run_analysis, inp, resolver=resolver, adapters=adapters, deps=deps
+        run_analysis,
+        inp,
+        resolver=resolver,
+        fallback=fallback,
+        observer=observer,
+        adapters=adapters,
+        deps=deps,
     )
     response = to_response_dict(execution)
     response["request_id"] = request_id

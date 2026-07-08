@@ -25,6 +25,8 @@ from datetime import UTC, datetime
 
 from src.agents.technical.services.openai_llm_client import default_openai_client
 from src.supervisor.execution.adapters import ExecutionDeps, default_adapters
+from src.supervisor.planning.fallback_observer import RecordingFallbackObserver
+from src.supervisor.planning.fallback_source import default_fallback_lookup
 from src.supervisor.planning.resolve_client import StockResolverClient
 from src.supervisor.runtime import run_analysis
 from src.supervisor.schemas import SupervisorInput
@@ -57,6 +59,10 @@ def main() -> None:
 
     # 실 의존성 주입 — endpoint 가 하는 wiring 을 스크립트에서 재현.
     resolver = StockResolverClient()
+    # canonical not_found 일 때만 쓰는 보조 lookup(ephemeral, 정본 write 없음). 운영형 curated + DART 공시명
+    # 스냅샷 기반(결정론, 네트워크 없음). observer 로 fallback 사용을 관측(secret-safe).
+    fallback = default_fallback_lookup()
+    observer = RecordingFallbackObserver()
     try:
         llm_client = default_openai_client()
     except RuntimeError:
@@ -71,11 +77,18 @@ def main() -> None:
     )
     inp = SupervisorInput(query=query, request_id=deps.request_id, trace_id=deps.trace_id)
 
-    execution = run_analysis(inp, resolver=resolver, adapters=default_adapters(), deps=deps)
+    execution = run_analysis(
+        inp, resolver=resolver, fallback=fallback, observer=observer,
+        adapters=default_adapters(), deps=deps,
+    )
 
     res = execution.resolution
-    print(f"[smoke] resolution: used={res.used_stock_resolver} status={res.status} "
+    print(f"[smoke] resolution: used={res.used_stock_resolver} fallback={res.used_fallback_lookup} "
+          f"status={res.status} source={res.source} persisted={res.persisted} "
           f"stock={res.stock.stock_code if res.stock else None}")
+    for ev in observer.events:   # fallback 이 실제로 탄 경우만(secret-safe 요약)
+        print(f"[smoke] fallback_event: status={ev.final_status} final_source={ev.final_source} "
+              f"source_hits={ev.source_hits} match_types={ev.match_types} candidates={ev.candidate_count}")
     for r in execution.results:
         line = f"  - {r.agent_type:11} {r.status:8} reason={r.reason}"
         if r.status == "success" and r.agent_type == "technical":
