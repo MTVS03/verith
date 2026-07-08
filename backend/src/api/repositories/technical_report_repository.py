@@ -95,6 +95,58 @@ async def count_followups(session: AsyncSession, report_id: UUID) -> int:
     return int(n or 0)
 
 
+async def followup_counts_for(
+    session: AsyncSession, report_ids: list[UUID]
+) -> dict[UUID, int]:
+    """여러 report 의 follow-up 수를 한 번(GROUP BY)에 — 목록 N+1 방지. 없으면 0(호출측 default)."""
+    if not report_ids:
+        return {}
+    rows = await session.execute(
+        select(TechnicalReportFollowup.report_id, func.count())
+        .where(TechnicalReportFollowup.report_id.in_(report_ids))
+        .group_by(TechnicalReportFollowup.report_id)
+    )
+    return {rid: int(n) for rid, n in rows.all()}
+
+
+async def list_technical_reports(
+    session: AsyncSession,
+    *,
+    stock_code: str | None = None,
+    client_session_id: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[TechnicalReport]:
+    """technical report 목록 — created_at DESC(최신순). 필터: stock_code / client_session_id."""
+    stmt = select(TechnicalReport)
+    if stock_code is not None:
+        stmt = stmt.where(TechnicalReport.stock_code == stock_code)
+    if client_session_id is not None:
+        stmt = stmt.where(TechnicalReport.client_session_id == client_session_id)
+    stmt = stmt.order_by(TechnicalReport.created_at.desc()).limit(limit).offset(offset)
+    return list(await session.scalars(stmt))
+
+
+async def count_technical_reports(
+    session: AsyncSession, *, stock_code: str | None = None, client_session_id: str | None = None
+) -> int:
+    """목록 필터 기준 전체 수(pagination total)."""
+    stmt = select(func.count()).select_from(TechnicalReport)
+    if stock_code is not None:
+        stmt = stmt.where(TechnicalReport.stock_code == stock_code)
+    if client_session_id is not None:
+        stmt = stmt.where(TechnicalReport.client_session_id == client_session_id)
+    return int(await session.scalar(stmt) or 0)
+
+
+async def get_stocks(session: AsyncSession, stock_codes: list[str]) -> dict[str, Stock]:
+    """여러 canonical 종목을 한 번에 조회(목록 stock 블록 batch)."""
+    if not stock_codes:
+        return {}
+    rows = await session.scalars(select(Stock).where(Stock.stock_code.in_(stock_codes)))
+    return {s.stock_code: s for s in rows}
+
+
 async def get_interpretation(
     session: AsyncSession, report_id: UUID
 ) -> TechnicalReportInterpretation | None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.api.clients.ai_client import (
     AIContractError,
@@ -18,6 +18,7 @@ from src.api.schemas.technical_report import (
     FollowupItem,
     TechnicalReportCreateRequest,
     TechnicalReportFollowupsReadModel,
+    TechnicalReportListResponse,
     TechnicalReportReadModel,
 )
 from src.api.services.technical_report_service import TechnicalReportService
@@ -41,6 +42,20 @@ async def create_technical_report(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except AITimeoutError as exc:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
+
+
+@router.get("", response_model=TechnicalReportListResponse)
+async def list_technical_reports(
+    stock_code: str | None = None,
+    client_session_id: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> TechnicalReportListResponse:
+    """technical report 목록 index(created_at DESC) — 상세 진입 전 탐색/비교용 경량 read model."""
+    return await service.list_technical_reports(
+        stock_code=stock_code, client_session_id=client_session_id, limit=limit, offset=offset
+    )
 
 
 @router.get("/{report_id}", response_model=TechnicalReportReadModel)

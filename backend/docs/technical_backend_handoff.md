@@ -118,10 +118,24 @@ thread 는 이 endpoint 로 받는다(스레드가 길어져도 detail payload �
   `verification_outcome`. **read 계약은 raw 미노출** — `_followup_context` 가 `base_report_*` 키만 요약으로 복원.
 - **read-after-write**: POST 로 만든 row 는 즉시 `GET .../{id}/followups`(created_at 오름차순)에 나타난다.
 
-## 목록 (별도 경량 인덱스)
-`GET /api/reports?agent_type=technical` 은 full read model 이 아니라 **인덱스 요약**(`AgentReportListItem`:
-report id·stock·question·data_status·summary 등)이다. 상세는 위 read model 로 조회한다(표준 REST: 목록=요약,
-상세=full).
+## 목록 index (technical 전용, 상세와 분리된 경량)
+`GET /api/technical/reports?stock_code=&client_session_id=&limit=20&offset=0` — **created_at DESC**. 상세 진입
+전에 탐색/비교/판단하도록, detail read model 을 재사용하지 않고 **경량 index item** 을 준다(projection only).
+```jsonc
+{ "items": [ {
+    "report_id": "uuid",
+    "stock":   { "stock_code":"373220", "stock_name":"LG에너지솔루션", "market":"KOSPI" },   // canonical
+    "summary": { "one_line_summary":"...", "directional_bias":"bullish", "final_regime":"..." },
+    "status":  { "data_status":"normal", "path_label":"normal", "verification_warning":false, "limited_data":false },
+    "engagement": { "followup_count": 2 },
+    "meta":    { "as_of":"ISO8601", "created_at":"ISO8601", "trace_id":"..." }
+  } ], "total": 42, "limit": 20, "offset": 0 }
+```
+- **블록 소비**: `summary`(카드 헤더 한 줄+방향)·`status`(뱃지: path_label·verification_warning·limited_data)·
+  `engagement`(followup_count 뱃지)·`meta`(정렬/시각). charts·full interpretation·verification 상세는 **목록에 없음**.
+- `status` 축약은 detail `trace_summary` 파생과 **동일 규칙**(일관성 테스트로 잠금). followup_count·canonical
+  stock 은 batch 조회(N+1 없음). 필터: `stock_code`·`client_session_id`(정렬/필터 확장 여지).
+- 참고: cross-agent `GET /api/reports` 는 별도 인덱스로 그대로 유지(다른 용도).
 
 ## 안정성 보장
 - POST 201 응답 == GET 200 응답(동일 report) — shape·값 완전 동일(테스트 잠금).

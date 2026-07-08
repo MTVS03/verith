@@ -257,6 +257,50 @@ class FollowupReportSummary(BaseModel):
     as_of: datetime | None = None
 
 
+# ── list/index read model (detail 과 분리 — 목록 화면용 경량) ────────────────
+class ListSummaryBlock(BaseModel):
+    one_line_summary: str | None = None
+    directional_bias: str | None = None
+    final_regime: str | None = None
+
+
+class ListStatusBlock(BaseModel):
+    data_status: str | None = None
+    path_label: str = "normal"
+    verification_warning: bool = False
+    limited_data: bool = False
+
+
+class ListEngagementBlock(BaseModel):
+    followup_count: int = 0
+
+
+class ListMetaBlock(BaseModel):
+    as_of: datetime | None = None
+    created_at: datetime | None = None
+    trace_id: str | None = None
+
+
+class TechnicalReportListItem(BaseModel):
+    """목록 1건 — 상세 진입 전 탐색/비교/판단용 핵심값(detail read model 재사용 아님, projection only)."""
+
+    report_id: UUID
+    stock: StockBlock
+    summary: ListSummaryBlock
+    status: ListStatusBlock
+    engagement: ListEngagementBlock
+    meta: ListMetaBlock
+
+
+class TechnicalReportListResponse(BaseModel):
+    """목록 응답 — created_at DESC. total 은 필터 기준 전체 수(pagination)."""
+
+    items: list[TechnicalReportListItem] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 20
+    offset: int = 0
+
+
 class TechnicalReportFollowupsReadModel(BaseModel):
     """GET /api/technical/reports/{id}/followups — parent report 기준 대화 흐름.
 

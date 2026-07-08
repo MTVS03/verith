@@ -258,7 +258,44 @@ async def test_create_followup_read_after_write(client):
     assert (await client.get(f"{_POST}/{rid}")).json()["followup_count"] == 3
 
 
-# 5) GET /api/reports 목록
+# 4e) technical 전용 목록 index (GET /api/technical/reports)
+async def test_technical_list_index_shape_and_sort(client):
+    rid1 = await _create(client)
+    rid2 = await _create(client)                                 # 더 최신
+    resp = await client.get(_POST, params={"limit": 10})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"items", "total", "limit", "offset"}
+    assert body["total"] >= 2 and body["limit"] == 10 and body["offset"] == 0
+    item = body["items"][0]
+    assert set(item.keys()) == {"report_id", "stock", "summary", "status", "engagement", "meta"}
+    assert set(item["summary"].keys()) == {"one_line_summary", "directional_bias", "final_regime"}
+    assert set(item["status"].keys()) == {
+        "data_status", "path_label", "verification_warning", "limited_data"}
+    assert item["engagement"]["followup_count"] == 0
+    assert item["stock"]["stock_code"] == TICKER and item["stock"]["stock_name"]
+    # created_at DESC → 방금 만든 rid2 가 앞
+    ids = [i["report_id"] for i in body["items"]]
+    assert ids.index(str(rid2)) < ids.index(str(rid1))
+    # 목록엔 charts/interpretation full/verification detail 없음(경량)
+    assert "charts" not in item and "interpretation" not in item and "verification" not in item
+
+
+async def test_technical_list_reflects_followup_count(client):
+    rid = await _create(client)
+    await client.post(f"{_POST}/{rid}/followups", json={"question": "q?", "answer": "a"})
+    body = (await client.get(_POST, params={"stock_code": TICKER})).json()
+    mine = next(i for i in body["items"] if i["report_id"] == str(rid))
+    assert mine["engagement"]["followup_count"] == 1
+
+
+async def test_technical_list_empty_and_filter(client):
+    # 매칭 없는 stock_code → 빈 목록, shape 안정
+    body = (await client.get(_POST, params={"stock_code": "999999"})).json()
+    assert body["items"] == [] and body["total"] == 0
+
+
+# 5) GET /api/reports 목록(cross-agent, 유지)
 async def test_list_reports(client):
     rid = await _create(client)
     resp = await client.get("/api/reports", params={"agent_type": "technical"})

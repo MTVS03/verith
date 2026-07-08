@@ -253,3 +253,42 @@ def test_parent_snapshot_roundtrips_through_read_context():
     assert ctx.has_context_snapshot is True
     assert ctx.base_report_regime == "uptrend_intact" and ctx.base_report_bias == "bullish"
     assert ctx.base_report_signal_score == 0.3
+
+
+# ── list/index item projection ───────────────────────────────────────────────
+def test_list_item_projection_and_blocks():
+    from db.models.common.stock import Stock
+    from src.api.services.technical_report_service import build_list_item
+    stock = Stock(stock_code="373220", stock_name="LG에너지솔루션", market="KOSPI")
+    it = build_list_item(report=_report(), stock=stock, followup_count=2)
+    assert it.report_id == _RID
+    assert it.stock.stock_name == "LG에너지솔루션"                # canonical 우선
+    assert it.summary.one_line_summary == "과열·약한 긍정"
+    assert it.summary.directional_bias == "bullish" and it.summary.final_regime == "uptrend_intact"
+    assert it.status.data_status == "normal" and it.status.path_label == "normal"
+    assert it.status.verification_warning is False and it.status.limited_data is False
+    assert it.engagement.followup_count == 2
+    assert it.meta.created_at is None or it.meta.trace_id == "trace-1"
+
+
+def test_list_item_status_matches_detail_trace_summary():
+    # 목록 status 축약이 detail trace_summary 파생과 동일 규칙(일관성 잠금).
+    from src.api.services.technical_report_service import build_list_item, build_read_model
+    raw = _raw(interpretation={"text": "폴백.", "source": "template_fallback"},
+               verification={"calc_passed": True, "regime_passed": True, "label_matched": False,
+                             "outcome": "template_fallback", "regen_count": 1},
+               data_status="data_limited")
+    detail = build_read_model(report_id=_RID, raw=raw, stock=None).trace_summary
+    it = build_list_item(report=_report(output_payload=raw), stock=None, followup_count=0)
+    assert it.status.path_label == detail.generation_path.path_label == "template_fallback"
+    assert it.status.verification_warning == detail.flags.verification_warning is True
+    assert it.status.limited_data == detail.flags.limited_data is True
+
+
+def test_list_item_backward_safe_empty_payload():
+    from src.api.services.technical_report_service import build_list_item
+    it = build_list_item(report=_report(output_payload={}), stock=None, followup_count=0)
+    assert it.summary.one_line_summary is None
+    assert it.status.path_label == "normal" and it.status.verification_warning is False
+    assert it.summary.final_regime == "uptrend_intact"            # denorm 컬럼 fallback
+    assert it.stock.stock_code == "373220"

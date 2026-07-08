@@ -42,6 +42,10 @@ from src.api.schemas.technical_report import (
     FollowupReportSummary,
     GenerationPathBlock,
     InterpretationBlock,
+    ListEngagementBlock,
+    ListMetaBlock,
+    ListStatusBlock,
+    ListSummaryBlock,
     MetaBlock,
     RiskItemBlock,
     RisksBlock,
@@ -52,6 +56,8 @@ from src.api.schemas.technical_report import (
     SummaryBlock,
     TechnicalReportCreateRequest,
     TechnicalReportFollowupsReadModel,
+    TechnicalReportListItem,
+    TechnicalReportListResponse,
     TechnicalReportReadModel,
     TraceFlagsBlock,
     TraceSummaryBlock,
@@ -363,6 +369,67 @@ def build_followups_read_model(
     )
 
 
+def _derive_status(raw: dict) -> tuple[str, bool, bool]:
+    """(path_label, limited, verification_warning) — trace_summary 와 **동일 규칙**의 경량 파생(목록용)."""
+    interp = _d(raw.get("interpretation"))
+    verification = _d(raw.get("verification"))
+    interp_source = interp.get("source")
+    template_fallback_used = interp_source == "template_fallback"
+    regen = verification.get("regen_count")
+    had_regeneration = isinstance(regen, int) and regen > 0
+    if template_fallback_used:
+        path_label = "template_fallback"
+    elif had_regeneration or interp_source == "llm_regenerated":
+        path_label = "regenerated"
+    else:
+        path_label = "normal"
+    limited = raw.get("data_status") in ("data_limited", "regime_unavailable")
+    calc, rgm, lbl = (
+        verification.get("calc_passed"),
+        verification.get("regime_passed"),
+        verification.get("label_matched"),
+    )
+    outcome = verification.get("outcome")
+    v_consistent = bool(calc) and bool(rgm) and bool(lbl) if verification else None
+    v_warning = bool(outcome and outcome != "passed") or (v_consistent is False)
+    return path_label, limited, v_warning
+
+
+def build_list_item(
+    *, report: TechnicalReport, stock: Stock | None, followup_count: int
+) -> TechnicalReportListItem:
+    """technical report row → 목록 item(projection only, raw 미노출, detail read model 재사용 아님)."""
+    raw = report.output_payload if isinstance(report.output_payload, dict) else {}
+    interp = _d(raw.get("interpretation"))
+    regime = _d(raw.get("regime"))
+    path_label, limited, v_warning = _derive_status(raw)
+    return TechnicalReportListItem(
+        report_id=report.id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else report.stock_code),
+            stock_name=(stock.stock_name if stock else report.stock_name),
+            market=(stock.market if stock else None),
+        ),
+        summary=ListSummaryBlock(
+            one_line_summary=interp.get("one_line_summary"),
+            directional_bias=interp.get("directional_bias"),
+            final_regime=regime.get("final_regime") or report.final_regime,
+        ),
+        status=ListStatusBlock(
+            data_status=raw.get("data_status") or report.data_status,
+            path_label=path_label,
+            verification_warning=v_warning,
+            limited_data=limited,
+        ),
+        engagement=ListEngagementBlock(followup_count=followup_count),
+        meta=ListMetaBlock(
+            as_of=_parse_dt(raw.get("as_of")) or report.as_of,
+            created_at=report.created_at,
+            trace_id=raw.get("trace_id") or report.trace_id,
+        ),
+    )
+
+
 class TechnicalReportService:
     def __init__(self, session: AsyncSession, ai_client: AIClient) -> None:
         self._session = session
@@ -615,6 +682,32 @@ class TechnicalReportService:
         await tr_repo.add_followup(self._session, row)
         await self._session.commit()
         return _followup_item(row)
+
+    async def list_technical_reports(
+        self,
+        *,
+        stock_code: str | None = None,
+        client_session_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> TechnicalReportListResponse:
+        """technical 목록 index(created_at DESC). followup_count·canonical stock 은 batch 조회(N+1 방지)."""
+        rows = await tr_repo.list_technical_reports(
+            self._session, stock_code=stock_code, client_session_id=client_session_id,
+            limit=limit, offset=offset,
+        )
+        total = await tr_repo.count_technical_reports(
+            self._session, stock_code=stock_code, client_session_id=client_session_id
+        )
+        counts = await tr_repo.followup_counts_for(self._session, [r.id for r in rows])
+        stocks = await tr_repo.get_stocks(self._session, list({r.stock_code for r in rows}))
+        items = [
+            build_list_item(
+                report=r, stock=stocks.get(r.stock_code), followup_count=counts.get(r.id, 0)
+            )
+            for r in rows
+        ]
+        return TechnicalReportListResponse(items=items, total=total, limit=limit, offset=offset)
 
     async def list_reports(
         self,
