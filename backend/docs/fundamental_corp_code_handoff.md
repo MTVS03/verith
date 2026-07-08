@@ -1,105 +1,61 @@
-# Fundamental Corp Code Sync — Handoff
+# Fundamental Backend Handoff
 
 `docs/fundamental_corp_code_handoff.md`
 
-이 문서는 Fundamental(재무) 담당자가 다음 브랜치에서 구현할 작업을 넘겨주기 위한 handoff 문서다.
-목표는 Fundamental AI가 DART 기준으로 전체 종목을 다룰 수 있도록, backend에 `stock_code -> corp_code`
-정본 경계를 만드는 것이다.
+이 문서는 Fundamental(재무) 담당자가 backend 쪽 구현을 이어받을 때 참고할 handoff 문서다.
+목표는 **이미 구축된 backend 정본 계층**을 바탕으로, Fundamental AI가 DART 기준으로 전체 종목을
+다룰 수 있게 다음 단계를 정리하는 것이다.
+
+중요: 이 문서는 더 이상 “`stock_code -> corp_code` 정본을 새로 만드는 문서”가 아니다.
+그 작업은 **이미 완료되었고 실데이터까지 반영**되었다.
+이제 다음 작업은 그 정본을 **fundamental이 어떻게 소비할지 연결하는 것**이다.
 
 이 문서는 구현 지시와 범위를 다루며, PostgreSQL 물리 스키마 정본은 [`schema.md`](schema.md),
 마이그레이션 절차는 [`migrations.md`](migrations.md), 현재 종목 식별 경계는
 [`stock_resolver.md`](stock_resolver.md), KIS 종목 마스터 동기화는
-[`stock_master_sync.md`](stock_master_sync.md) 를 따른다.
+[`stock_master_sync.md`](stock_master_sync.md), 전체 Supervisor/Backend 연결은
+[`supervisor_backend_integration.md`](supervisor_backend_integration.md) 를 따른다.
 
 ---
 
-## 1. 배경
+## 1. 현재 상태 요약
 
-현재 backend는 다음을 갖고 있다.
+현재 backend는 이미 아래 공통 기반을 갖고 있다.
 
-- `stocks`: KIS/KRX 기준 공통 종목 마스터 (`stock_code`, `stock_name`, `market`)
-- `stock_resolver`: 종목명/코드 식별
-- `stock master sync`: KIS 종목마스터 기반 `stocks` 확장 경계
+- `stocks`
+  - KIS/KRX 기준 공통 종목 마스터
+  - `stock_code`, `stock_name`, `market`
+- `stock_resolver`
+  - 자연어에서 종목/회사 식별
+- `stock master sync`
+  - KIS 종목마스터 기반 `stocks` 확장 경계
+- `stock_corp_codes`
+  - DART 기준 `stock_code -> corp_code` 정본 계층
 
-하지만 Fundamental AI는 아직 backend 정본을 직접 쓰지 않고, AI 내부의 10종 하드코딩
-`CORP_CODE_MAP` 에 의존한다. 그 결과:
-
-- backend `stocks` 가 전체 종목으로 확장돼도
-- Fundamental AI는 여전히 10종만 지원할 수 있다
-
-즉, 재무 쪽의 실제 병목은 `DART_API_KEY` 자체가 아니라 `stock_code -> corp_code`
-정본 부재다.
-
----
-
-## 2. 이번 브랜치 목표
-
-이번 브랜치의 목표는 backend에 DART 기준 `stock_code -> corp_code` 정본 저장 경계를
-구축하는 것이다.
-
-이번 브랜치에서 한다:
-
-- DART `corpCode.xml` downloader 구현
-- ZIP/XML parser 구현
-- `stock_code -> corp_code` sync 서비스 구현
-- 저장용 DB 모델 + migration 추가
-- dry-run / `--apply` / `--inspect` 수동 스크립트 추가
-- repository accessor 추가
-- fake fixture 기반 테스트 추가
-- 문서 정리
-
-이번 브랜치에서 하지 않는다:
-
-- Fundamental AI 코드 직접 수정
-- 조회 endpoint 추가
-- supervisor / chat API wiring
-- KIS stock master sync 변경
-- `stock_resolver` 변경
-- `stocks.stock_name` 을 DART 이름으로 덮어쓰기
+즉, 재무 쪽의 “정본 부재” 문제는 이미 해결되었다.
+이제 남은 건 Fundamental AI가 backend 정본을 **실제로 소비하도록 연결하는 것**이다.
 
 ---
 
-## 3. 확정 결정
+## 2. 이번 문서가 넘겨주는 핵심
+
+이번 handoff의 핵심은 아래 2개다.
+
+1. `stock_corp_codes` 정본 계층은 이미 완료되었고, 재구현 대상이 아니다
+2. 다음 Fundamental backend/AI 브랜치의 본질은
+   - backend 정본 소비 경계 만들기
+   - AI의 `CORP_CODE_MAP` 의존 제거 방향 설계
+
+즉, 다음 fundamental 관련 브랜치는 더 이상 “sync 구현”이 아니라
+**“정본 소비 전환” 브랜치**로 이해하면 된다.
+
+---
+
+## 3. 이미 완료된 것
 
 ### 3.1 저장 구조
 
-`B안` 채택: 별도 테이블 `stock_corp_codes`
-
-이유:
-
-- `stocks` 는 KIS/KRX 종목 마스터 역할을 유지해야 한다
-- DART 이름은 KIS 이름과 다를 수 있으므로 분리 보관이 안전하다
-- corp_code 계층은 fundamental 외에 industry/news 등 다른 에이전트에도 재사용 가능하다
-- backend 종목 마스터와 DART 식별자 소유권이 분리된다
-
-### 3.2 FK 정책
-
-`no-FK` 채택: `stock_corp_codes.stock_code -> stocks.stock_code` 는 논리 링크로만 둔다.
-
-이유:
-
-- bootstrap 10종 seed 상태에 묶이지 않고 DART 상장 전체를 선반영할 수 있다
-- KIS 종목 sync와 DART corp sync를 서로 독립적으로 운용할 수 있다
-- 현재 단계에서는 공통 정본 확보가 더 중요하고, 강한 결합은 다음 단계에서 재검토 가능하다
-
-### 3.3 이상치 정책
-
-`fail-fast` 채택:
-
-- 같은 `stock_code` 에 다른 `corp_code` 가 나오면 실패
-- 같은 `corp_code` 가 여러 `stock_code` 로 나오면 실패
-- 과소데이터(상장 row 0 / 보수 하한 미만)면 실패
-
-다만 아래는 실패 사유로 보지 않는다:
-
-- `corp_name_from_dart` 와 `stocks.stock_name` 차이
-- `modify_date` 빈 값 또는 비정상 형식
-
----
-
-## 4. 저장 스키마
-
-신규 테이블:
+신규 테이블 `stock_corp_codes` 가 이미 존재한다.
 
 ```text
 stock_corp_codes
@@ -111,210 +67,276 @@ stock_corp_codes
   updated_at           timestamptz NULL
 ```
 
-규칙:
+원칙:
 
-- `stock_code` 는 문자열 유지(앞자리 0 보존)
-- `corp_code` 는 DART 8자리 문자열
-- `corp_name_from_dart` 는 DART 원문 이름 보존
-- `modify_date` 는 원문 보존용 문자열
-- `updated_at` 은 실제 row 변경 시에만 설정
+- `stocks` 와 **역할이 다른 별도 계층**
+- `stock_code -> stocks.stock_code` 는 **no-FK 논리 링크**
+- `corp_name_from_dart` 는 DART 공시명 원문
+- `stocks.stock_name` 정본은 절대 덮어쓰지 않음
 
-주의:
+### 3.2 DART sync 경계
 
-- `stocks.stock_name` 은 KIS/KRX 기준 정본으로 유지한다
-- DART 이름으로 `stocks` 를 업데이트하지 않는다
+아래 구성은 이미 구현돼 있다.
 
----
+- client
+  - `backend/src/api/clients/dart_corp_code_client.py`
+- parser
+  - `backend/src/api/services/dart_corp_code_parser.py`
+- sync service
+  - `backend/src/api/services/corp_code_sync_service.py`
+- repository
+  - `backend/src/api/repositories/corp_code_repository.py`
+- script
+  - `backend/scripts/sync_corp_codes.py`
+- migration
+  - `20260708_6ca978063906_add_stock_corp_codes.py`
 
-## 5. DART 파싱 규칙
+### 3.3 정책
 
-근거:
+이미 확정된 정책:
 
-- DART OpenAPI `corpCode.xml`
-- 기존 AI fundamental 구현은 이미 이 포맷을 사용 중이나, backend는 이를 참고만 하고
-  독자 구현한다(AI import 금지)
+- `B안`: `stocks` 와 분리된 별도 테이블
+- `no-FK`: `stock_code -> stocks.stock_code` 는 논리 링크
+- `fail-fast`
+  - 같은 `stock_code` 에 다른 `corp_code`
+  - 같은 `corp_code` 에 다른 `stock_code`
+  - 과소데이터
+- `delete/deactivate` 없음
+- `updated_at` 은 실제 변경 시에만 갱신
+- `DART_API_KEY` 는 sync 전용, app startup 필수값 아님
 
-읽을 필드:
+### 3.4 실데이터 반영 상태
 
-- `corp_code`
-- `corp_name`
-- `stock_code`
-- `modify_date`
+실데이터 기준 상태:
 
-처리:
+- `stock_corp_codes` 3,976행 반영 완료
+- 대표 종목 매핑 검증 완료
+  - 삼성전자 `00126380`
+  - 카카오 `00258801`
+  - LG화학 `00356361`
+- 재-dry-run 결과 멱등 확인
+  - `inserted=0`
+  - `updated=0`
+  - `unchanged=3976`
 
-- `stock_code.strip()` 후 빈 값이면 제외(비상장/미연결 법인)
-- `corp_code` 빈 값이면 이상치로 fail-fast
-- `corp_name` 빈 값이면 이상치로 fail-fast
-- `modify_date` 는 원문 보존
-  - 빈 값이면 `NULL`
-  - 비정상 형식이어도 sync 실패로 보지 않음
-
-구현 원칙:
-
-- ZIP download / unzip 책임과 XML parse 책임을 분리
-- parser 는 순수 함수 유지
-- 테스트는 fake ZIP/XML fixture 만 사용
-
----
-
-## 6. Sync 정책
-
-insert:
-
-- 새 `stock_code -> corp_code` row 추가
-
-update:
-
-- `corp_code`
-- `corp_name_from_dart`
-- `modify_date`
-
-중 하나라도 실제로 바뀌면 row 갱신 + `updated_at` 설정
-
-delete / deactivate:
-
-- 이번 브랜치에서는 하지 않음
-- 이번 실행에서 DART 결과에 누락된 row 도 DB에 유지
-
-실행 방식:
-
-- 기본: dry-run
-- `--apply`: commit
-- `--inspect`: 샘플 row / 카운트 / 이상치 관찰용
-
-운영 원칙:
-
-- 실 네트워크 호출은 수동 script 에서만
-- startup / pytest / app request path 에서 호출 금지
-- 전체 파싱/검증 후 단일 트랜잭션으로 반영
+즉 이 계층은 이제 “설계 단계”가 아니라 **실반영 완료된 정본 계층**이다.
 
 ---
 
-## 7. 예상 파일
+## 4. 왜 이 구조가 맞는가
 
-신규:
+### 4.1 `stocks` 와 분리한 이유
 
-- `backend/src/api/clients/dart_corp_code_client.py`
-- `backend/src/api/services/dart_corp_code_parser.py`
-- `backend/src/api/services/corp_code_sync_service.py`
-- `backend/db/models/common/stock_corp_code.py`
-- `backend/src/api/repositories/corp_code_repository.py`
-- `backend/scripts/sync_corp_codes.py`
-- `backend/tests/test_dart_corp_code_client.py`
-- `backend/tests/test_dart_corp_code_parser.py`
-- `backend/tests/test_corp_code_sync_service.py`
-- `backend/docs/dart_corp_code_sync.md`
-- alembic migration 1개
+`stocks` 는 KIS/KRX 종목 마스터 역할을 유지해야 한다.
 
-수정:
+반면 `stock_corp_codes` 는:
 
-- `backend/db/models/registry.py`
-- `backend/src/api/config.py`
-- `backend/README.md`
-- `backend/docs/schema.md`
+- DART 식별자 계층
+- `stock_code -> corp_code`
+- DART 이름(`corp_name_from_dart`) 보관
 
-이번 브랜치에서 수정하지 않을 것:
+을 맡는다.
 
-- `backend/src/api/main.py`
-- `backend/src/api/routes/*`
-- `ai/src/agents/fundamental/**`
-- `backend/src/api/services/stock_resolver_service.py`
-- `backend/src/api/services/stock_sync_service.py`
+즉 출처도 다르고, 정본도 다르다.
+둘을 섞지 않는 것이 맞다.
+
+### 4.2 no-FK 이유
+
+`stock_corp_codes` 에 물리 FK를 걸지 않은 이유는:
+
+- bootstrap 10종 seed 상태에 묶이지 않기 위해
+- DART 상장 전체를 선반영하기 위해
+- KIS `stocks` sync 와 DART corp sync 를 독립적으로 운영하기 위해
+
+이 구조는 fundamental 뿐 아니라 industry/news 쪽 식별자 계층으로도 재사용 가능하다.
 
 ---
 
-## 8. 설정 정책
+## 5. Fundamental AI의 현재 병목
 
-`DART_API_KEY` 는 backend 설정에 추가할 수 있다. 단:
+현재 Fundamental AI는 아직 backend 정본을 직접 쓰지 않고,
+AI 내부의 하드코딩 `CORP_CODE_MAP` 에 의존한다.
 
-- sync 스크립트/서비스 전용
-- backend app startup 필수값으로 승격 금지
-- `DATABASE_URL`, `AI_SERVICE_URL` 처럼 `_load_settings()` 에서 즉시 검증하지 않음
+그 결과:
 
-즉, 앱 전체를 띄우는 데 `DART_API_KEY` 가 없어도 되고,
-corp code sync 를 실행할 때만 필요하게 만든다.
+- backend `stocks` 가 전체 종목으로 확장돼도
+- backend `stock_corp_codes` 가 실데이터로 채워져 있어도
+- Fundamental AI는 여전히 10종 중심 구조에 묶일 수 있다
 
----
-
-## 9. 테스트 원칙
-
-필수:
-
-- fake ZIP / fake XML fixture 기반
-- 실 네트워크 0
-- DB rollback 격리
-- insert/update/no-delete/fail-fast 검증
-- 빈 `stock_code`
-- 중복 `stock_code`
-- 중복 `corp_code`
-- 빈/이상 `modify_date`
-
-회귀 확인:
-
-- 기존 technical / stocks / resolver / KIS sync 에 영향 없음
-
-권장 검증 항목:
-
-- parser 단위 테스트
-- client unzip/error 단위 테스트
-- sync 서비스 단위/통합 테스트
-- alembic `check`
-- ruff
+즉 지금의 실제 병목은 DART 키가 아니라,
+**backend 정본 소비 경계가 아직 붙지 않은 것**이다.
 
 ---
 
-## 10. 완료 조건
+## 6. 다음 브랜치의 목표
 
-아래를 모두 만족하면 이 브랜치는 완료로 본다.
+다음 fundamental 관련 브랜치의 목표는 아래다.
 
-1. `stock_corp_codes` 모델 + migration 생성 완료
-2. DART client / parser / sync / script 구현 완료
-3. dry-run / `--apply` / `--inspect` 인터페이스 정리
-4. fake fixture 기반 테스트 추가 완료
-5. ruff / pytest / alembic check 통과
-6. 문서 반영 완료
-7. 실 네트워크 실행은 하지 않고, 마지막에만 승인 요청을 남김
+### 6.1 해야 하는 것
 
----
+- backend 정본(`stock_corp_codes`) 소비 경계 만들기
+- `stock_code` 기준으로 `corp_code` 를 안정적으로 조회할 수 있게 하기
+- Fundamental AI가 장기적으로 `CORP_CODE_MAP` 대신 backend 정본을 보도록 전환하기
 
-## 11. 다음 브랜치(이번 범위 밖)
+### 6.2 이번 handoff 기준 추천 범위
 
-이번 브랜치가 끝난 뒤 다음 단계는 아래다.
+추천:
 
-### 11.1 Fundamental AI wiring
+- `corp_code_repository.get_corp_code(stock_code)` 를 기준 진입점으로 사용
+- 필요 시 내부 조회 endpoint 추가
+- Supervisor가 넘긴 `stock_code` 를 fundamental 쪽 입력으로 소비
+- fundamental agent가 backend 정본을 통해 `corp_code` 를 확보하게 연결
 
-목표:
+이번 단계에서 하지 말 것:
 
-- AI 내부 `CORP_CODE_MAP` 제거 또는 fallback 격하
-- Fundamental AI가 backend 정본 `stock_corp_codes` 를 소비
-
-가능한 방식:
-
-- 내부 endpoint 추가 후 HTTP 조회
-- 또는 공통 service / repository 경계 소비
-
-이번 브랜치에서는 결정/구현하지 않는다.
-
-### 11.2 Supervisor 연결
-
-목표:
-
-- 사용자 질의
-- `stock_resolver` 로 종목 식별
-- 재무 요청이면 `stock_code + corp_code + canonical stock_name` 전달
-
-이 역시 이번 브랜치 범위 밖이다.
+- `stock_corp_codes` 재구현
+- DART sync 재설계
+- `stocks.stock_name` 을 DART 이름으로 덮어쓰기
+- `stock_resolver` 로직 변경
 
 ---
 
-## 12. 팀원에게 바로 전달할 구현 지시 요약
+## 7. 추천 연결 구조
 
-- `B안 + no-FK + fail-fast` 로 간다
-- 신규 테이블은 `stock_corp_codes`
-- DART `corpCode.xml` 기준으로 상장사(`stock_code` 있음)만 동기화
-- `stocks` 는 안 건드리고, DART 이름은 별도 저장
-- endpoint/AI wiring은 하지 않는다
-- `DART_API_KEY` 는 sync 전용 설정
-- fake ZIP/XML 기준으로 client/parser/sync/model/migration/script/test/docs 까지만 완결한다
+전체 흐름은 아래처럼 보는 것이 좋다.
 
+```text
+사용자 질문
+  ↓
+Supervisor
+  - 필요 시 stock_resolver 호출
+  - stock_code / stock_name / market context 생성
+  ↓
+Fundamental task
+  ↓
+backend corp_code 조회 경계
+  - stock_code -> corp_code
+  ↓
+Fundamental AI가 DART 조회 수행
+```
+
+핵심:
+
+- Supervisor는 우선 `stock_code` context만 안정적으로 주면 된다
+- `corp_code` 는 Supervisor가 추정하지 않는다
+- Fundamental이 backend 정본을 소비해서 가져가는 구조가 맞다
+
+---
+
+## 8. 권장 backend 후속 구현 범위
+
+다음 fundamental backend/연결 브랜치에서 추천하는 범위는 아래다.
+
+### 8.1 repository accessor 재사용
+
+이미 존재:
+
+- `get_corp_code(stock_code)`
+
+이 accessor를 먼저 기준점으로 둔다.
+
+### 8.2 내부 조회 경계
+
+선택적으로 추가 가능:
+
+- 내부 service
+- 내부 endpoint
+- AI용 thin client
+
+중요:
+
+- DB 직접 접근보다 경계를 두는 쪽이 장기적으로 안전
+- timeout / auth / observability 도 여기서 제어 가능
+
+### 8.3 AI 전환
+
+장기 방향:
+
+- `CORP_CODE_MAP` 제거
+- backend 정본 우선
+- 정본 없으면 명시적 미지원/미식별 처리
+
+즉 LLM이나 AI 코드가 corp_code를 임의 생성하면 안 된다.
+
+---
+
+## 9. 실무 주의사항
+
+### 9.1 `get_all_corp_codes()` 전체 로드
+
+현재 repository에는 전체 로드 accessor도 있다.
+이건 지금은 문제 없지만, 운영 API를 붙일 때는:
+
+- pagination
+- streaming
+- search 조건
+
+을 고려하는 편이 좋다.
+
+즉 다음 브랜치에서 조회 API를 만들 때는 전체 로드를 그대로 노출하지 않는 것이 좋다.
+
+### 9.2 `corp_name_from_dart` 의미
+
+이 필드는 DART 공시명 원문 보관용이다.
+
+즉:
+
+- 표시 보조 정보로는 쓸 수 있음
+- 하지만 `stocks.stock_name` 정본을 대체하지는 않음
+
+### 9.3 상장폐지 필터
+
+실데이터 기준 `stock_corp_codes` 는 현재 상장폐지 이력까지 포함할 수 있다.
+이건 현재 구조상 문제는 아니다.
+
+이유:
+
+- `stock_corp_codes` 는 corp_code 매핑 정본 계층
+- 현재 상장분 여부는 필요 시 `stocks` 와 join 해서 좁히면 됨
+
+따라서 상장폐지 필터는 별도 정책/브랜치로 다루는 것이 맞다.
+
+---
+
+## 10. 관련 문서 관계
+
+이 문서는 아래 문서들과 함께 읽으면 된다.
+
+- [`dart_corp_code_sync.md`](dart_corp_code_sync.md)
+  - sync 구현/운영 정본
+- [`stock_resolver.md`](stock_resolver.md)
+  - 종목 식별 경계
+- [`stock_master_sync.md`](stock_master_sync.md)
+  - KIS 기반 `stocks` 정본
+- [`supervisor_backend_integration.md`](supervisor_backend_integration.md)
+  - Supervisor와 backend 전체 연결 구조
+
+즉 관계를 한 줄로 정리하면:
+
+- `stocks` = KIS/KRX 종목 정본
+- `stock_resolver` = 자연어 -> 종목 식별
+- `stock_corp_codes` = DART 식별자 정본
+- Fundamental 후속 브랜치 = 이 정본을 실제로 소비하게 만드는 연결 작업
+
+---
+
+## 11. 이번 문서 기준으로 하지 않을 것
+
+이 handoff 범위에서는 다음을 하지 않는다.
+
+- `stock_corp_codes` sync 로직 재구현
+- DART downloader/parser 재수정
+- `stock_resolver` 변경
+- KIS stock master sync 변경
+- `stocks` 이름 정본 교체
+- Fundamental AI 내부 분석 로직 수정
+
+즉, 이 문서는 **기반을 새로 만드는 문서가 아니라, 이미 완성된 기반을 fundamental이 어떻게 받아서 써야 하는지 넘겨주는 문서**다.
+
+---
+
+## 12. 한 줄 결론
+
+이제 Fundamental 쪽의 다음 작업은  
+**“backend에 이미 존재하는 `stock_corp_codes` 정본 계층을 기준으로, Fundamental AI가 `CORP_CODE_MAP` 대신 backend 정본을 소비하도록 연결하는 것”**  
+으로 이해하면 된다.

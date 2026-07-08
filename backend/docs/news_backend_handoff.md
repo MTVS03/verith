@@ -13,6 +13,7 @@
 [`schema.md`](schema.md), 마이그레이션 절차는 [`migrations.md`](migrations.md),
 공통 종목 식별 경계는 [`stock_resolver.md`](stock_resolver.md), 공통 종목 마스터(KIS)는
 [`stock_master_sync.md`](stock_master_sync.md)를 따른다.
+Supervisor와의 전체 연결은 [`supervisor_backend_integration.md`](supervisor_backend_integration.md)를 본다.
 
 ---
 
@@ -38,9 +39,66 @@ repository 기준으로 확인된 사실:
 
 ---
 
-## 2. 이번 backend 작업의 목표
+## 2. 현재 구현 상태와 남은 작업
 
-News backend 작업의 핵심은 아래 3개다.
+News 쪽은 이 4개 문서 중 유일하게 backend 구현이 이미 꽤 진행된 상태다.
+
+현재 repository 기준으로 **이미 구현된 것**:
+
+- `POST /news/batch/save`
+- `POST /news/cleanup`
+- `GET /news/events/recent`
+- `GET /news/events/stats`
+- `GET /news/query/subject`
+- `GET /news/query/shared`
+- `GET /news/events/{event_id}/articles`
+- 관련 service / repository / schema / 테스트
+
+즉 아래 범위는 이미 develop 기준으로 **완료 또는 구현 진행 완료**로 본다.
+
+- 기사 원본 저장
+- GraphBatch 반영
+- URL -> `news_id` 해소
+- single-hop / multi-hop 조회
+- 대표 기사 조회
+- importance 재계산 및 cleanup
+
+이 문서에서 이제 중요한 것은 “뉴스 backend를 새로 설계하는 것”이 아니라,
+**이미 구현된 것 위에서 남은 작업이 무엇인지 분리해 주는 것**이다.
+
+### 현재 남은 작업
+
+현재 기준으로 **아직 남아 있는 것**:
+
+- `news_reports` 저장 API
+  - `POST /news/reports`
+- `news_reports` 상세 조회 API
+  - `GET /news/reports/{report_id}`
+- 공통 report 목록 연결
+  - `GET /reports?agent_type=news`
+- 선택적으로 `DELETE /news/reports/{report_id}`
+- 필요 시 `agent_reports` 인덱스 연결 정책 정리
+- owner 필드(`owner_user_id`, `owner_session_id`) 실제 사용 정책
+- 내부 인증 / 운영 설정 hardening
+
+즉 뉴스 팀원이 **이제 안 해도 되는 것**은:
+
+- 배치 저장 경계 재설계
+- GraphBatch -> Neo4j 기본 연결 재구현
+- subject/shared/recent/stats/articles 조회 재구현
+- cleanup 로직 재구현
+
+반대로 **지금부터 해야 하는 것**은:
+
+- 질의 결과 리포트(`news_reports`) persistence
+- 필요 시 `agent_reports` 검색 인덱스 연결
+- Supervisor가 만든 5-card 구조와의 최종 연결
+
+---
+
+## 3. backend 작업의 본질
+
+News backend의 남은 핵심은 아래 3개다.
 
 - 배치 흐름의 기사 원본 + 그래프 델타를 backend 가 원자적으로 저장하게 만들기
 - 질의 흐름이 읽는 조회 API 를 backend 에서 제공하게 만들기
@@ -54,7 +112,7 @@ News backend 작업의 핵심은 아래 3개다.
 
 ---
 
-## 3. 가장 중요한 원칙
+## 4. 가장 중요한 원칙
 
 ### 3.1 AI 는 DB 에 직접 닿지 않는다
 
@@ -87,12 +145,12 @@ backend 는 이 둘을 분리해서 다루면 안 된다.
 
 즉 URL -> `news_id` 해소와 PostgreSQL/Neo4j 반영 순서는 backend 책임이다.
 
-### 3.3 상위 supervisor 는 범위 밖
+### 4.3 상위 supervisor 는 범위 밖
 
 뉴스가 종목 질문으로 들어오든, 자유 질문으로 들어오든,
 그 라우팅/의도판단은 이 문서 범위가 아니다.
 
-이 문서의 backend 범위는:
+이 문서의 backend 범위는 여전히:
 
 - 저장
 - 조회
@@ -103,7 +161,17 @@ backend 는 이 둘을 분리해서 다루면 안 된다.
 
 ---
 
-## 4. 공통 종목 경계 원칙
+단, Supervisor와의 연결 관점에서는 News는 5개 agent 중 **가장 stock context 의존도가 낮은 agent**다.
+
+즉:
+
+- 종목형 질문이면 resolved stock context 를 받아 쓸 수 있음
+- 비종목 질문이어도 실행 가능한 경우가 많음
+- stock resolve 실패가 곧 news 실행 불가를 의미하지는 않음
+
+---
+
+## 5. 공통 종목 경계 원칙
 
 News 는 “전체 뉴스”를 다루므로 특정 10종 종목 universe 에 묶이면 안 된다.
 다만 종목이나 회사명을 식별해야 할 때는 공통 자산을 재사용하는 쪽이 맞다.
@@ -130,7 +198,7 @@ News 는 “전체 뉴스”를 다루므로 특정 10종 종목 universe 에 �
 
 ---
 
-## 5. 저장 정본과 책임 분리
+## 6. 저장 정본과 책임 분리
 
 ### 5.1 기사 원본 정본
 
@@ -179,11 +247,11 @@ backend 는 News AI 결과를 받아 아래처럼 재해석하면 안 된다.
 
 ---
 
-## 6. 권장 backend API 범위
+## 7. backend API 범위
 
-현재 AI 쪽 config 기준으로 backend 는 아래 엔드포인트를 제공하는 방향이 가장 자연스럽다.
+현재 AI 쪽 config 및 backend 현재 상태 기준으로 엔드포인트는 아래처럼 이해하면 된다.
 
-### 6.1 배치 저장 / 정리
+### 7.1 배치 저장 / 정리
 
 - `POST /news/batch/save`
 - `POST /news/cleanup`
@@ -195,7 +263,11 @@ backend 는 News AI 결과를 받아 아래처럼 재해석하면 안 된다.
 - URL -> `news_id` 해소
 - 7일 롤링 삭제 트리거
 
-### 6.2 질의 조회
+상태:
+
+- **구현됨**
+
+### 7.2 질의 조회
 
 - `GET /news/events/recent`
 - `GET /news/events/stats`
@@ -210,7 +282,11 @@ backend 는 News AI 결과를 받아 아래처럼 재해석하면 안 된다.
 - single-hop / multi-hop 이벤트 조회
 - 이벤트별 대표 기사 조회
 
-### 6.3 리포트 저장/조회
+상태:
+
+- **구현됨**
+
+### 7.3 리포트 저장/조회
 
 권장:
 
@@ -225,9 +301,13 @@ backend 는 News AI 결과를 받아 아래처럼 재해석하면 안 된다.
 리포트 저장은 배치 저장과 별도다.
 배치는 원자료 저장, 리포트는 질의 결과 저장이다.
 
+상태:
+
+- **아직 남은 작업**
+
 ---
 
-## 7. `news` 테이블 쪽 구현 원칙
+## 8. `news` 테이블 쪽 구현 원칙
 
 ### 7.1 URL 기준 멱등성
 
@@ -258,7 +338,7 @@ PostgreSQL 은 기사 원본과 연결 키만 가진다.
 
 ---
 
-## 8. `news_reports` 테이블 쪽 구현 원칙
+## 9. `news_reports` 테이블 쪽 구현 원칙
 
 권장 매핑:
 
@@ -267,6 +347,9 @@ PostgreSQL 은 기사 원본과 연결 키만 가진다.
 - `intent` <- query understanding 결과 intent
 - `answer_text` <- `report_json.answer_text`
 - `evidence` <- `cited_event_ids`, `evidence_news_ids` 등 근거 묶음 JSON
+
+현재 시점에서 이 섹션은 “향후 구현해야 할 남은 작업”이다.
+즉 `news_reports` 저장/조회가 아직 없다면, 다음 뉴스 backend 브랜치의 중심은 여기다.
 
 선택 필드:
 
@@ -278,9 +361,9 @@ PostgreSQL 은 기사 원본과 연결 키만 가진다.
 
 ---
 
-## 9. cleanup 책임
+## 10. cleanup 책임
 
-News cleanup 은 backend 가 책임지는 것이 맞다.
+News cleanup 은 backend 가 책임지는 것이 맞고, 현재 구현도 이 방향과 정합하다.
 
 현재 AI 문서 기준으로 cleanup 의 의미는:
 
@@ -296,7 +379,7 @@ PostgreSQL + Neo4j 정합성을 같이 보는 정리 작업이다.
 
 ---
 
-## 10. 테스트 원칙
+## 11. 테스트 원칙
 
 News backend 브랜치 테스트는 아래 기준을 따른다.
 
@@ -308,7 +391,7 @@ News backend 브랜치 테스트는 아래 기준을 따른다.
 - DB rollback 격리
 - Neo4j 는 fake or test instance 분리
 
-권장 테스트:
+이미 있는 테스트:
 
 - `POST /news/batch/save` 원자 저장 성공
 - URL 중복 업서트
@@ -317,6 +400,9 @@ News backend 브랜치 테스트는 아래 기준을 따른다.
 - `POST /news/cleanup` 동작
 - `GET /news/query/subject` / `shared` 조회 계약
 - `GET /news/events/{event_id}/articles` 응답 계약
+
+남은 작업에 대해 추가할 테스트:
+
 - `POST /news/reports` 저장
 - `GET /news/reports/{report_id}` 조회
 
@@ -327,24 +413,24 @@ News backend 브랜치 테스트는 아래 기준을 따른다.
 
 ---
 
-## 11. 팀원에게 넘길 구현 순서
+## 12. 팀원에게 넘길 구현 순서
 
 추천 순서:
 
-1. `news` / `news_reports` 기존 모델과 AI schema 를 먼저 대조
-2. `POST /news/batch/save` service/repository 구현
-3. PostgreSQL + Neo4j 원자 저장 경계 구현
-4. cleanup endpoint 구현
-5. query read endpoint 구현
-6. `POST /news/reports` / `GET /news/reports/{report_id}` 구현
+1. `news_reports` 모델과 AI `ReportModel` schema 를 먼저 대조
+2. `POST /news/reports` 저장 service/repository 구현
+3. `GET /news/reports/{report_id}` 구현
+4. `GET /reports?agent_type=news` 연결 여부 결정
+5. 필요 시 `DELETE /news/reports/{report_id}` 구현
+6. `agent_reports` 인덱스 연결 여부 결정
 7. fixture 기반 테스트 보강
 
 이 순서가 가장 자연스럽다.
-배치 저장 경계가 먼저 안정돼야 query/report 도 흔들리지 않는다.
+배치 저장/조회/cleanup 은 이미 들어와 있으므로, 이제 중심은 `news_reports` persistence 다.
 
 ---
 
-## 12. 이번 브랜치에서 하지 않을 것
+## 13. 이번 브랜치에서 하지 않을 것
 
 - 상위 supervisor 구현
 - News 전용 stock resolver 제작
@@ -355,7 +441,7 @@ News backend 브랜치 테스트는 아래 기준을 따른다.
 
 ---
 
-## 13. 한 줄 결론
+## 14. 한 줄 결론
 
-News backend 는 “뉴스 답변 생성기”가 아니라,
-**AI 가 만든 기사/그래프/리포트 결과를 PostgreSQL + Neo4j 경계에서 일관되게 저장·조회·정리하는 backend 레이어**로 가는 것이 맞다.
+News backend 는 이제 “기본 저장/조회 경계를 새로 만드는 단계”가 아니라,
+**이미 구현된 기사/그래프/조회/cleanup 위에서 `news_reports` persistence 와 Supervisor 연계를 마무리하는 단계**로 보는 것이 맞다.

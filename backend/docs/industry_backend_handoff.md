@@ -10,6 +10,7 @@
 [`schema.md`](schema.md), 마이그레이션 절차는 [`migrations.md`](migrations.md),
 공통 종목 식별 경계는 [`stock_resolver.md`](stock_resolver.md), 공통 종목 마스터(KIS)는
 [`stock_master_sync.md`](stock_master_sync.md)를 따른다.
+Supervisor와의 전체 연결은 [`supervisor_backend_integration.md`](supervisor_backend_integration.md)를 본다.
 
 ---
 
@@ -23,6 +24,9 @@
 - `industry_reports.payload`가 전체 JSON 정본이고, `report_id`는 `payload.reportId`와 대응한다
 - Industry AI는 현재 AI 패키지 내부의 `COMPANIES` 10종 리스트와 raw/extracted data를 전제로 움직인다
 - Industry AI는 종목을 `stock_code` 중심으로 다루며, DART/Neo4j/벡터 검색을 사용한다
+
+추가로 현재 제품 방향 기준으로 보면 Industry는 5개 agent fan-out 구조에서
+**종목 context가 있으면 더 좋지만, 산업/거시형 질문은 종목 없이도 실행 가능한 agent** 로 보는 것이 맞다.
 
 관련 근거:
 
@@ -44,6 +48,13 @@
 - 새 Industry 전용 종목 마스터를 만드는 것 아님
 - 새 Industry 전용 KIS sync를 만드는 것 아님
 - backend가 Industry payload를 저장하고, 종목 식별은 공통 경계를 쓰게 만드는 것
+
+즉 Supervisor와의 연결을 고려하면:
+
+- 종목형 질문이면 resolved stock context를 저장에 반영
+- 산업형 질문이면 종목 없이도 payload 저장/조회가 가능
+
+한 구조로 가는 것이 맞다.
 
 ---
 
@@ -176,6 +187,11 @@ Industry도 질의 기반으로 동작한다면, 종목 식별은 공통 resolve
 
 즉 `stocks`에 종목이 있다고 Industry AI가 자동으로 그 종목을 지원하는 것은 아니다.
 
+반대로도 마찬가지다.
+
+- 종목 context가 없다고 해서 Industry가 반드시 실행 불가인 것은 아니다
+- 상위 Supervisor가 산업/섹터형 질문으로 판단하면 Industry는 standalone 실행 가능하다
+
 ---
 
 ## 7. 권장 데이터 매핑
@@ -255,6 +271,11 @@ Industry backend 브랜치 테스트는 아래 기준을 따른다.
 - Industry backend 브랜치는 “AI가 payload를 잘 만들었는지”를 테스트하는 곳이 아니다
 - “backend가 payload를 안전하게 저장/조회하는지”만 본다
 
+Supervisor 연계 관점에서는 특히 아래 2개가 중요하다.
+
+- 종목 context가 있을 때 `agent_reports.stock_code` 저장
+- 종목 context가 없어도 Industry payload 저장/조회가 가능한지
+
 ---
 
 ## 10. 팀원에게 넘길 구현 순서
@@ -297,4 +318,3 @@ Industry backend 브랜치 테스트는 아래 기준을 따른다.
 Industry backend는 새 KIS 경계를 만드는 작업이 아니라,
 이미 있는 공통 `stocks/resolver`를 재사용하면서 Industry AI의 `research-report.v1` payload를
 `industry_reports`에 저장/조회할 수 있게 만드는 작업이다.
-
