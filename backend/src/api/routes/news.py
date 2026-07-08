@@ -21,6 +21,8 @@ from src.api.schemas.news import (
     CandidateEvent,
     CleanupResponse,
     EventArticleStats,
+    ExistingUrlsRequest,
+    ExistingUrlsResponse,
     NewsBatchSaveRequest,
     SaveResponse,
     SubjectQueryResponse,
@@ -40,6 +42,15 @@ async def save_batch(
 ) -> SaveResponse:
     """기사(PostgreSQL) + GraphBatch(Neo4j MERGE)를 한 배치로 저장."""
     return await service.save_batch(req)
+
+
+@router.post("/exists", response_model=ExistingUrlsResponse)
+async def existing_urls(
+    req: ExistingUrlsRequest,
+    service: NewsQueryService = Depends(get_news_query_service),
+) -> ExistingUrlsResponse:
+    """수집한 url 중 이미 저장된 것을 돌려준다. ai 배치가 신규 기사만 처리하도록(중복 재처리 방지)."""
+    return ExistingUrlsResponse(existing=await service.get_existing_urls(req.urls))
 
 
 @router.post("/cleanup", response_model=CleanupResponse)

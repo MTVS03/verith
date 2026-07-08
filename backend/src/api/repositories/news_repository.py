@@ -49,6 +49,18 @@ async def upsert_articles(
     return {url: news_id for url, news_id in result.all()}
 
 
+async def get_existing_urls(session: AsyncSession, urls: list[str]) -> set[str]:
+    """입력 url 중 이미 news 에 저장된 것들의 집합을 돌려준다(신규 기사 선별용).
+
+    ai 배치가 수집한 url 중 **이미 저장된 것을 비싼 LLM 처리 전에 건너뛰게** 하려는 조회다.
+    없으면 빈 집합. url 은 UNIQUE 라 IN 조회로 충분하다(SCHEMA_SPEC §7.1).
+    """
+    if not urls:
+        return set()
+    result = await session.execute(select(News.url).where(News.url.in_(urls)))
+    return {row[0] for row in result.all()}
+
+
 async def get_articles_by_event(
     session: AsyncSession, event_id: uuid.UUID, limit: int
 ) -> Sequence[Row]:
