@@ -14,23 +14,25 @@ Backend 가 `stocks`(공통 종목 마스터)를 KIS 공개 종목마스터로 �
 - 마스터 URL(인증 불필요): `https://new.real.download.dws.co.kr/common/master/{kospi_code,kosdaq_code}.mst.zip`
 - 포맷: ZIP → **cp949 고정폭**. 레코드 = `front` + `tail`.
   - `front = row[:len-TAIL]`: 단축코드 `[0:9]` · 표준코드 `[9:21]` · 한글명 `[21:]`
-  - `tail = row[-TAIL:]`: 고정폭 필드 (**KOSPI 228 / KOSDAQ 222** — 시장별 개수·위치 상이)
+  - `tail = row[-TAIL:]`: 고정폭 필드 (**KOSPI 227 / KOSDAQ 221** — 시장별 개수·위치 상이)
 
-## 2. 사용하는 tail 필드 (offset·width)
-공식 `field_specs` 누적합으로 계산. **KOSPI/KOSDAQ 위치가 다르므로 시장별 spec 을 둔다**
+## 2. 사용하는 tail 필드 (offset·width) — 실데이터 검산 확정
+`--inspect` 실데이터 앵커 검산으로 확정한 값이다(공식 field_specs 누적합은 tail 길이가 1 커서 group 이
+' S'로 밀렸었다 — 실측으로 교정). **KOSPI/KOSDAQ 위치가 다르므로 시장별 spec 을 둔다**
 (`src/api/constants/kis_master.py`).
 
 | 필드 | KOSPI (offset,w) | KOSDAQ (offset,w) | 용도 |
 |---|---|---|---|
-| 증권그룹구분코드(그룹코드) | (0,2) | (0,2) | 1차 포함/제외 |
-| ETP 상품구분코드 | (21,1) | (18,1) | ETF/ETN 이중 제외 |
+| 증권그룹구분코드(그룹코드) | (0,2) | (0,2) | 1차 포함/제외 (주권=`ST`) |
+| ETP 상품구분코드 | (35,1) | (18,1) | ETF/ETN 이중 제외 |
 | 기업인수목적회사여부(SPAC) | (29,1) | (24,1) | SPAC 제외(공식 플래그) |
-| 우선주 구분 코드 | (105,1) | (152,1) | 포함(제거 안 함) |
+| 우선주 구분 코드 | (158,1) | (152,1) | 포함(제거 안 함), is_preferred 통계용 |
 
-> **offset/width 는 확정(공식 파서), 값 semantics 는 검산 전 임시 추정.** 주권코드 `ST`·SPAC/ETP 플래그
-> 설정값은 `--inspect` 실데이터 검산 전까지 **PROVISIONAL**(`kis_master.FLAG_VALUE_SEMANTICS_VERIFIED=False`).
-> 1차 포함 판정은 항상 그룹코드==`ST`, SPAC/ETP 는 **보조 제외**이며 추정이 틀려도 실제 주권을 배제하지
-> 않는다(fail-open — 최악의 경우 SPAC/ETP 일부 유입). 검산 후 값을 확정하고 플래그를 올린다.
+> **offset·값 semantics 검산 완료(`FLAG_VALUE_SEMANTICS_VERIFIED=True`).** 앵커: 005930 삼성전자(주권
+> `ST`·etp N·pref 0), 005935 삼성전자우(pref set), 069500 KODEX200(ETF `EF`·etp Y·group 제외), 293940
+> 신한알파리츠(`RT`), KOSDAQ 디비금융제N호스팩(spac set). 1차 포함 판정은 그룹코드==`ST`, SPAC/ETP 는
+> **보조 제외**(fail-open — KOSPI spac·KOSDAQ etp/pref 는 앵커 부재로 값 미검증이나 false 제외 0이고
+> ETF/ETN/REIT 는 group 으로 이미 제외됨). 실측 규모: KOSPI 주권 ~893 / KOSDAQ ~1,714.
 
 ## 3. 포함/제외 (공식 필드 우선)
 1. **증권그룹구분코드 == `ST`(주권)** 만 포함 — 보통주·우선주 모두 ST. 그 외(EF=ETF·EN=ETN·RT=REIT·…) 제외.

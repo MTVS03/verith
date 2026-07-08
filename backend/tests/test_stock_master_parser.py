@@ -66,9 +66,9 @@ def test_spac_flag_excludes_even_if_stock_group():
     assert result.records == [] and result.excluded["spac"] == 1
 
 
-# ── 값 semantics 상태: 검산 전 임시 추정(PROVISIONAL) ────────────────────────
-def test_flag_value_semantics_marked_provisional():
-    assert FLAG_VALUE_SEMANTICS_VERIFIED is False
+# ── 값 semantics 상태: 실데이터 --inspect 검산 완료(VERIFIED) ─────────────────
+def test_flag_value_semantics_verified():
+    assert FLAG_VALUE_SEMANTICS_VERIFIED is True
 
 
 def test_spac_flag_fail_open_on_unverified_value():
