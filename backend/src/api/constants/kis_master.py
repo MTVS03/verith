@@ -42,16 +42,24 @@ KOSDAQ_FIELDS: dict[str, tuple[int, int]] = {
 MARKET_KOSPI = "KOSPI"
 MARKET_KOSDAQ = "KOSDAQ"
 
-# ── 증권그룹구분코드 (KIS 표준) ─────────────────────────────────────────────
-# 포함 대상은 주권(ST)뿐 — 보통주·우선주 모두 ST. 그 외(EF/EN/RT/MF/…)는 제외.
-GROUP_CODE_STOCK = "ST"  # 주권
+# ── 값 의미(value semantics) 상태 ───────────────────────────────────────────
+# offset/width 는 공식 파서로 **확정**됐다. 그러나 아래 "값"의 의미(주권코드 'ST', 플래그 설정값)는
+# `sync_stocks --inspect` 실데이터 검산 전까지 **임시 추정(PROVISIONAL)** 이다. 확정 시 True 로 올린다.
+FLAG_VALUE_SEMANTICS_VERIFIED = False
+
+# 증권그룹구분코드 — 주권 값(KIS 표준 추정). 1차 포함 판정의 근거. 보통주·우선주 모두 이 값.
+GROUP_CODE_STOCK = "ST"  # 검산 전 추정
+
+# 플래그 설정으로 볼 값(검산 전 추정). 안전을 위해 **fail-open**: 추정이 틀려도 실제 주권을 배제하지
+# 않고(포함 1차 판정은 그룹코드==ST), 최악의 경우 SPAC/ETP 일부가 유입될 뿐이다. SPAC/ETP 는 보조 제외.
+_FLAG_SET_VALUES_PROVISIONAL = frozenset({"Y", "1"})
 
 
 def spac_flag_set(value: str) -> bool:
-    """기업인수목적회사여부 플래그가 설정됐는지(Y/1). 공백/N/0 은 미설정."""
-    return value.strip().upper() in {"Y", "1"}
+    """기업인수목적회사여부 플래그가 설정됐는지(**추정값 기준**, 보조 제외용). 공백/N/0 은 미설정."""
+    return value.strip().upper() in _FLAG_SET_VALUES_PROVISIONAL
 
 
 def etp_flag_set(value: str) -> bool:
-    """ETP 상품구분 플래그가 설정됐는지. ETF/ETN 이중 제외용."""
-    return value.strip().upper() in {"Y", "1"}
+    """ETP 상품구분 플래그가 설정됐는지(**추정값 기준**). ETF/ETN 은 그룹코드로 이미 제외되므로 이중 안전장치."""
+    return value.strip().upper() in _FLAG_SET_VALUES_PROVISIONAL

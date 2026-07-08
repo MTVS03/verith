@@ -24,24 +24,22 @@ if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from src.api.clients.kis_master_client import KisMasterClient  # noqa: E402
-from src.api.constants.kis_master import (  # noqa: E402
-    FRONT_CODE,
-    FRONT_NAME_START,
-    KOSDAQ_FIELDS,
-    KOSDAQ_TAIL,
-    KOSPI_FIELDS,
-    KOSPI_TAIL,
-    MARKET_KOSDAQ,
-    MARKET_KOSPI,
-)
+from src.api.constants.kis_master import MARKET_KOSDAQ, MARKET_KOSPI  # noqa: E402
+from src.api.services.stock_master_parser import inspect_rows  # noqa: E402
 from src.api.services.stock_sync_service import sync_stocks  # noqa: E402
 
-# 검산용 앵커: (code → 기대 성격). 실행 시 실제 tail 필드로 offset/코드값 확인.
-_ANCHORS = {
-    "005930": "삼성전자 (주권 ST, 포함)",
-    "005935": "삼성전자우 (주권 ST·우선주, 포함)",
-    "069500": "KODEX200 (ETF, 제외)",
-    "293940": "신한알파리츠 (REIT, 제외)",
+# 검산용 앵커(시장별): 포함(주권) 예시. 제외 예시는 --inspect 가 실데이터에서 자동 스캔한다.
+_ANCHORS: dict[str, dict[str, str]] = {
+    MARKET_KOSPI: {
+        "005930": "삼성전자 (주권 ST, 포함)",
+        "005935": "삼성전자우 (주권 ST·우선주, 포함)",
+        "069500": "KODEX200 (ETF, 제외 기대)",
+        "293940": "신한알파리츠 (REIT, 제외 기대)",
+    },
+    MARKET_KOSDAQ: {
+        "086520": "에코프로 (주권 ST, 포함)",
+        "247540": "에코프로비엠 (주권 ST, 포함)",
+    },
 }
 
 
@@ -72,24 +70,18 @@ async def _run(apply: bool) -> None:
 
 
 def _inspect() -> None:
-    print("⚠️ KIS 마스터 다운로드(외부 네트워크) — 검산만, DB 미변경.")
+    print("⚠️ KIS 마스터 다운로드(외부 네트워크) — 검산만, DB 미변경. "
+          "값 semantics(ST/플래그)는 이 출력으로 확정한다.")
     client = KisMasterClient()
     for market in (MARKET_KOSPI, MARKET_KOSDAQ):
-        tail_len, fields = (
-            (KOSPI_TAIL, KOSPI_FIELDS) if market == MARKET_KOSPI else (KOSDAQ_TAIL, KOSDAQ_FIELDS)
-        )
         text = client.fetch_mst(market).decode("cp949")
-        rows = {r[FRONT_CODE[0]:FRONT_CODE[1]].strip(): r for r in text.splitlines() if len(r) > tail_len}
-        print(f"[{market}]")
-        for code, desc in _ANCHORS.items():
-            row = rows.get(code)
-            if row is None:
-                continue
-            tail = row[-tail_len:]
-            name = row[: len(row) - tail_len][FRONT_NAME_START:].strip()
-            vals = {k: tail[o:o + w] for k, (o, w) in fields.items()}
-            print(f"  {code} {name:12} group={vals['group']!r} spac={vals['spac']!r} "
-                  f"etp={vals['etp']!r} pref={vals['pref']!r}  ← {desc}")
+        anchors = _ANCHORS[market]
+        rows = inspect_rows(text, market, anchors.keys())
+        print(f"[{market}] (앵커 + 제외 자동 스캔)")
+        for rec in rows:
+            desc = anchors.get(rec["code"], "그룹≠ST 자동 검출(제외 대상)")
+            print(f"  {rec['code']} {rec['name']:14} group={rec['group']!r} spac={rec['spac']!r} "
+                  f"etp={rec['etp']!r} pref={rec['pref']!r}  ← {desc}")
 
 
 def main() -> None:

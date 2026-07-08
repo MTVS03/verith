@@ -72,6 +72,12 @@ async def test_short_name_without_context_rejected(resolver):
     assert r.status == "not_found"
 
 
+async def test_far_context_does_not_revive_short_name(resolver):
+    # 멀리 떨어진 "주가"(카카오 쪽)로 "대상"이 살아나면 안 됨 → 카카오만 resolved.
+    r = await resolver.resolve("대상은 모르겠고 카카오 주가만 볼래")
+    assert r.status == "resolved" and r.stock.stock_code == "035720"
+
+
 # ── 동일 이름 다코드: 조건부 ambiguous ───────────────────────────────────────
 async def test_same_name_not_found_without_alias(resolver, db_session):
     # 공식명은 "동원산업"/"동원F&B" — "동원" alias/group 이 없으면 "동원 뉴스"는 not_found.

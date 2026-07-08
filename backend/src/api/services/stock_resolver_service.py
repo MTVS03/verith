@@ -107,7 +107,6 @@ class StockResolverService:
 
         tokens = [t for t in (normalize_stock_text(x) for x in _TOKEN_RE.findall(
             unicodedata.normalize("NFKC", query))) if t]
-        context_present = any(t in _CONTEXT_SET for t in tokens)
 
         matches = self._collect_matches(tokens, entries_by_norm)
 
@@ -124,9 +123,10 @@ class StockResolverService:
             consider(c, "stock_code", c, len(c))
         for m in matches:
             e = m.entry
-            # 짧은 이름 보수 규칙.
+            # 짧은 이름 보수 규칙(span-local): 전체 질의 완전 일치이거나, **같은 span 에서** 승인 문맥
+            # 접미가 제거된 경우(via_context)만 인정. 질의 멀리 떨어진 문맥 키워드로는 살리지 않는다.
             if len(e.normalized) <= SHORT_NAME_MAX_LEN:
-                if not (full_norm == e.normalized or m.via_context or context_present):
+                if not (full_norm == e.normalized or m.via_context):
                     continue
             consider(e.stock_code, e.match_type, e.original, len(e.normalized))
 

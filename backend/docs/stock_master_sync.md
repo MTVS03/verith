@@ -27,6 +27,11 @@ Backend 가 `stocks`(공통 종목 마스터)를 KIS 공개 종목마스터로 �
 | 기업인수목적회사여부(SPAC) | (29,1) | (24,1) | SPAC 제외(공식 플래그) |
 | 우선주 구분 코드 | (105,1) | (152,1) | 포함(제거 안 함) |
 
+> **offset/width 는 확정(공식 파서), 값 semantics 는 검산 전 임시 추정.** 주권코드 `ST`·SPAC/ETP 플래그
+> 설정값은 `--inspect` 실데이터 검산 전까지 **PROVISIONAL**(`kis_master.FLAG_VALUE_SEMANTICS_VERIFIED=False`).
+> 1차 포함 판정은 항상 그룹코드==`ST`, SPAC/ETP 는 **보조 제외**이며 추정이 틀려도 실제 주권을 배제하지
+> 않는다(fail-open — 최악의 경우 SPAC/ETP 일부 유입). 검산 후 값을 확정하고 플래그를 올린다.
+
 ## 3. 포함/제외 (공식 필드 우선)
 1. **증권그룹구분코드 == `ST`(주권)** 만 포함 — 보통주·우선주 모두 ST. 그 외(EF=ETF·EN=ETN·RT=REIT·…) 제외.
 2. AND **SPAC 플래그 미설정** — SPAC 제외(공식 플래그 우선; 종목명 "스팩"은 보조 검증만).
@@ -58,8 +63,9 @@ uv run python -m scripts.sync_stocks --inspect    # 앵커 종목 tail 필드 �
 uv run python -m scripts.sync_stocks --apply       # 실제 반영(commit)
 ```
 - **기본은 dry-run**(DB 미변경). `--apply` 일 때만 commit.
-- `--inspect` 는 삼성전자(005930 ST)·삼성전자우(005935 ST·우선주)·KODEX200(069500 EF 제외)·
-  신한알파리츠(293940 RT 제외) 등의 `group/spac/etp/pref` 를 출력해 offset/코드값을 **실데이터로 검산**.
+- `--inspect` 는 **KOSPI**(삼성전자 005930 ST·삼성전자우 005935 우선주·KODEX200 069500 EF·신한알파리츠
+  293940 RT)와 **KOSDAQ**(에코프로 086520·에코프로비엠 247540 ST) 앵커 + **그룹≠ST 자동 검출 제외 예시**의
+  `group/spac/etp/pref` 를 출력해 양 시장 offset/값 semantics 를 **실데이터로 검산**한다.
 - ⚠️ 실행 전 외부 네트워크 호출·URL·DB 변경 여부(dry-run/`--apply`)를 확인하고 승인 후 실행한다.
 - 앱 startup·pytest 에서 실행하지 않는다. 테스트는 fake downloader/fixture bytes 사용.
 

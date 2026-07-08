@@ -75,8 +75,9 @@ candidates : [ { stock_code, stock_name, market, matched_text, match_type }, ...
 substring 대신 원문 token 경계**로 매칭한다.
 - 매칭: 원문 6자리 코드 → 전체 정규화 완전 일치 → **독립/연속 token** → token 끝의 **승인된 조사/문맥
   suffix 하나만 제거 후 exact**(무공백 결합형 "카카오주가"→"카카오") → 같은 span longest-match → stock_code dedup.
-- **짧은 이름(정규화 길이 ≤ 2)**: 전체 질의 완전 일치이거나 **종목 문맥 키워드**가 있을 때만 후보
-  (예: "대상 주가" 가능, "투자 대상을 알려줘" 금지).
+- **짧은 이름(정규화 길이 ≤ 2)**: 전체 질의 완전 일치이거나, **같은 연속 token span 안에서** 승인 문맥
+  접미가 제거된 경우에만 후보(= span-local). 질의 **멀리 떨어진** 문맥 키워드로는 살리지 않는다.
+  (예: "대상 주가" 가능, "투자 대상을 알려줘" 금지, "대상은 모르겠고 카카오 주가만" → 카카오만 resolved).
 - **동일 정규화 이름이 여러 코드**에 걸리면 자동 선택하지 않고 항상 `ambiguous`(공식명 우선순위는
   동일 stock_code 의 대표 match 선택에만 쓰고, 다른 코드 후보를 제거하지 않는다). 이 상황은 해당
   alias/`ambiguous_group` 데이터가 **존재할 때** 발생한다(없으면 `not_found`).
