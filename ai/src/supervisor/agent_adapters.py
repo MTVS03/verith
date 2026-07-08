@@ -27,6 +27,9 @@ class ExecutionDeps:
 
     technical_llm_client: Any = None
     technical_fetcher: Any = None
+    technical_cache: Any = None          # Redis OHLCV 캐시(선택)
+    technical_trace_sink: Any = None     # trace sink(선택)
+    technical_deadline: Any = None       # technical 내부 예산(선택) — 상위 deadline 은 후속
     fundamental_use_cache: bool = True
     industry_graph: Any = None       # 미주입 시 adapter 가 build
     industry_app: Any = None         # 미리 컴파일된 그래프 주입(테스트/재사용)
@@ -71,6 +74,9 @@ class TechnicalAdapter:
             llm_client=deps.technical_llm_client,
             fetcher=deps.technical_fetcher,
             trace_id=deps.tid(),
+            trace_sink=deps.technical_trace_sink,
+            cache=deps.technical_cache,
+            deadline=deps.technical_deadline,
         )
 
 

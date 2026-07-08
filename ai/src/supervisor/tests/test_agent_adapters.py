@@ -70,7 +70,8 @@ def test_technical_adapter_maps_ticker_and_query(monkeypatch):
         def __init__(self, **kw):
             captured.update(kw)
 
-    def _run(agent_input, *, llm_client, fetcher=None, trace_id=None):
+    def _run(agent_input, *, llm_client, fetcher=None, trace_id=None,
+             trace_sink=None, cache=None, deadline=None):
         captured["llm"] = llm_client
         return "tech-out"
 
