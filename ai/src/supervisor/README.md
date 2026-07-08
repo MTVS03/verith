@@ -34,16 +34,33 @@
 
 ## Technical 계약 (내 소유 범위)
 - **technical public contract**: `TechnicalAgentInput{ticker(6자리), query, request_id, as_of}` +
-  런타임 의존성 `llm_client`(필수)·`fetcher`/`trace_sink`/`cache`/`deadline`(선택).
+  런타임 의존성 `llm_client`(필수)·`fetcher`/`trace_sink`/`cache`/`deadline`(선택). 이 값들은 runtime
+  context / endpoint dependency 계층에서 만들어 주입한다(adapter 는 받기만 함).
 - **supervisor → technical 로 넘기는 것**: `ticker=context.stock_code`, `query=rewritten_query`,
   `request_id`/`trace_id`/`as_of`=runtime context, `llm_client` 등 deps=endpoint 주입.
+- **지원 범위(중요)**: technical 은 현재 **`BATTERY_TICKERS`(2차전지 10종) MVP 범위**만 실행 가능하다
+  (`agents/technical/config.py`, `is_allowed_ticker`). 범위 밖 ticker 는 `technical_supervisor.run()`
+  시작부에서 **OpenAI/cache/KIS 이전에** `OutOfScopeTickerError` 로 거절된다.
 - **adapter 가 흡수하는 차이**: 없음(technical 은 supervisor-friendly 에 가깝다). `llm_client` 미주입
   시 import 전 `AdapterConfigError` → 해당 agent 만 failed(부분 성공 유지).
+
+## 지원 범위 mismatch: resolved ≠ technical runnable (정책)
+- **stock resolve 성공은 "종목 식별 성공"일 뿐이다.** technical 실행 가능 여부는 **별도의 agent support
+  policy**이며, 현재는 `BATTERY_TICKERS` 10종이다.
+- 따라서 supervisor 가 resolved 한 종목이어도(예: 삼성전자 005930) technical 은 범위 밖이면
+  **실행 실패(failed)**한다. **이것은 버그가 아니라 현재 MVP 범위 정책**이다.
+- **이번 단계 처리(옵션 A)**: supervisor planning 은 그대로 5개 task 를 만들고, 범위 밖 종목은
+  **execution 단계에서 `OutOfScopeTickerError` → failed(격리)** 로 드러난다(다른 agent 는 계속 진행).
+  supervisor planning 에 technical universe 를 깊게 녹이지 않는다.
+- **후속(옵션 B, 이번 단계 아님)**: technical 지원 종목 정책을 supervisor 가 알게 해서 resolved 여도
+  범위 밖이면 `can_run=false` + `reason=out_of_scope` 로 **실행 전 차단**.
+- **smoke·문서·운영 기대는 범위 내 종목으로 맞춘다**(예: 373220 LG에너지솔루션 · 051910 LG화학 ·
+  006400 삼성SDI · 247540 에코프로비엠). 범위 밖(삼성전자 등)은 technical smoke 문맥에 쓰지 않는다.
 
 ## adapter 별 입력 매핑 / 흡수 차이 (thin)
 | agent | 공개 입력 | 매핑 | 흡수 차이 |
 |---|---|---|---|
-| technical | ticker + query (+llm) | stock_code + rewritten_query | 없음 |
+| technical | ticker + query (+llm) | stock_code + rewritten_query | 없음. 단 BATTERY_TICKERS 밖이면 실행 시 OutOfScopeTickerError(위 mismatch 절) |
 | fundamental | FundamentalRequest(ticker, intent…) | ticker(+corp_name=stock_name) | free query 슬롯 없음 → query 미전달, intent 등 agent 기본값. **corp_code 미조립**(후속) |
 | flow | stock_name/ticker + query | context + rewritten_query | base_date 등은 flow 내부 |
 | news | question | rewritten_query | 종목 context 는 보조(불필요) |
@@ -63,7 +80,8 @@
 - **순차 실행**으로 계약·구조를 먼저 안정화. 병렬화·상위 전체 deadline·per-call timeout orchestration은
   **후속**(구조는 병렬 확장 가능하게 유지). technical 내부 `deadline` 전달 경계만 `ExecutionDeps`에 마련.
 - 실 KIS/OpenAI/backend 결합은 **수동 smoke** 로만: `scripts/smoke_supervisor.py`
-  (`uv run python -m src.supervisor.scripts.smoke_supervisor "삼성전자 차트 어때?"`). pytest 미포함.
+  (`uv run python -m src.supervisor.scripts.smoke_supervisor "LG에너지솔루션 차트 어때?"`).
+  **범위 내 종목(BATTERY_TICKERS)만** 사용. pytest 미포함.
 
 ## 테스트 (실 네트워크 0)
 fake resolver + fake adapter/llm + sys.modules 주입 + FastAPI dependency_overrides. planning/execution/
