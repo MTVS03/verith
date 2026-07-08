@@ -85,8 +85,9 @@ uv run python -m scripts.sync_stocks --apply       # 실제 반영(commit)
   (`is_supported_ticker`, allowlist 아님). stocks 확장이 곧 특정 agent 지원 확대를 의미하지 않는다.
 
 ## 8. 현재 한계 / 후속
-- **shared dev=test DB(`verith`) 에는 아직 --apply 안 함** — 별도 canonical DB(`verith_canonical`)에
-  적용·검증했다(resolver broader 검증 + 테스트 ripple 격리 측정). 공유 DB 반영은 별도 결정.
+- **공용 `verith` 에 --apply 완료(승격)** — `verith.stocks` 13 → **2,607**(주권 전체). 테스트는 전용
+  `verith_test`(pytest, `TEST_DATABASE_URL`)로 격리돼 공유 DB apply 에 오염되지 않는다([`db_boundaries.md`](db_boundaries.md)).
+  `verith_canonical` 은 이행 검증용 사본(정리 대상).
 - schema/migration 변경 없음(`is_active`/`status`/`last_synced_at`/`delisted_at` 없음). 삭제·비활성화·
   상장폐지 lifecycle·sync 이력은 데이터·정책 확정 후 별도(예: `stock_master_sync_runs`).
 - min_count 하한: 실측(KOSPI 893/KOSDAQ 1,714) 확보 → 기본 500 에서 상향 권장(후속).
