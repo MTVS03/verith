@@ -117,6 +117,36 @@ Supervisor와의 연결 관점에서 Flow backend는 아래 전제를 갖는다.
 - Flow backend는 그 context를 저장 인덱스(`agent_reports`)에 반영할 수 있음
 - 하지만 Flow backend 자체가 질문 문자열에서 종목을 다시 추정하면 안 됨
 
+### 4.1 중요한 스키마 변경 반영 상태
+
+이 문서를 넘기는 시점 기준으로 backend 물리 스키마는 이미 한 단계 더 정리돼 있다.
+
+- `flow_reports` 는 이제 `ticker` 문자열만 들고 있는 테이블이 아니다
+- **`flow_reports.stock_code -> stocks.stock_code` FK 가 이미 추가된 상태**다
+- 즉 Flow backend 저장 경로를 새로 붙일 때는, 예전처럼 `ticker`만 넣는 방식으로 구현하면 안 된다
+
+의미:
+
+- `ticker` 는 기존 AI payload / 하위호환 / 원본 보존용 문자열로 남아 있을 수 있음
+- 하지만 backend 저장 정본 기준 종목 연결은 **`stock_code`** 다
+- 따라서 저장 service/repository 에서는 **`ticker == stock_code` 기준으로 함께 저장**해야 한다
+
+다시 말해, Flow 담당자는 저장 시 최소 아래를 같이 맞춰야 한다.
+
+- `flow_reports.ticker = payload/meta 의 ticker`
+- `flow_reports.stock_code = payload/meta 의 ticker`  (현재 구조상 동일값)
+- `agent_reports.stock_code = payload/meta 의 ticker`
+
+그리고 이 값은 반드시 공통 `stocks` 에 존재해야 한다.
+즉 저장 전에:
+
+- supervisor 가 넘긴 canonical stock context 를 신뢰하거나
+- backend 공통 마스터(`stocks`)를 먼저 확보한 뒤 저장
+
+중 하나로 가야 한다.
+
+Flow backend 가 종목 문자열을 임의 보정하거나, 별도 Flow 전용 마스터를 두는 방향은 금지다.
+
 ---
 
 ## 5. 권장 구현 범위
@@ -169,6 +199,7 @@ Flow payload version 1 기준으로 backend 는 최소 승격만 한다.
 
 - `id` <- 가능하면 AI `report_id` 그대로 사용
 - `ticker` <- `payload.meta.ticker`
+- `stock_code` <- `payload.meta.ticker` (**필수, `stocks.stock_code` FK**)
 - `stock_name` <- `payload.meta.stock_name`
 - `market` <- `payload.meta.market`
 - `base_date` <- `payload.meta.base_date`
@@ -246,6 +277,10 @@ Flow AI 문서상 `data_status` 는 아직 backend 쪽 enum 합의가 선행되�
 - `agent_reports` 는 검색/목록용 인덱스다
 - Flow 정본은 여전히 flow 3테이블 + payload 매핑이다
 
+추가로, 지금은 `flow_reports` 자체도 `stocks` FK를 갖기 때문에
+`agent_reports.stock_code`만 채우고 root report 쪽 `stock_code`를 비워두는 구현은 불완전하다.
+즉 **root report 와 agent index 둘 다 같은 canonical `stock_code`를 가져야 한다.**
+
 ---
 
 ## 9. 테스트 원칙
@@ -289,6 +324,8 @@ Supervisor 연계 관점에서 추가로 보면:
 
 1. AI storage spec 과 backend flow 모델 3개를 나란히 비교
 2. `POST /flow/reports` 저장 service/repository 구현
+   - 특히 `flow_reports.stock_code` FK 반영
+   - 저장 시 `ticker == stock_code` 동시 보존
 3. `agent_reports` 인덱스 연결
 4. `GET /flow/reports/{report_id}` 조회 구현
 5. 필요 시 `DELETE` 구현

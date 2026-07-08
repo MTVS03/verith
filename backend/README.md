@@ -78,6 +78,8 @@ SELECT stock_code, stock_name, market FROM stocks ORDER BY stock_code;
 팀원이 **외부 KIS/DART sync 를 다시 돌리지 않고도** 공용 `verith` canonical 상태를 pull 후 재현할 수 있게,
 repo 에 **SQL dump snapshot** 을 커밋해 둔다([`dumps/README.md`](dumps/README.md)).
 
+권장 순서:
+
 ```bash
 docker compose up -d postgres
 
@@ -87,11 +89,26 @@ uv run alembic upgrade head
 docker exec -i verith-postgres psql -U verith -d verith < dumps/shared_verith_snapshot.sql
 ```
 
+restore 후 확인:
+
+```bash
+docker exec verith-postgres psql -U verith -d verith -c "SELECT COUNT(*) FROM stocks;"
+docker exec verith-postgres psql -U verith -d verith -c "SELECT COUNT(*) FROM stock_aliases;"
+docker exec verith-postgres psql -U verith -d verith -c "SELECT COUNT(*) FROM stock_corp_codes;"
+```
+
 이 dump 는 다음 canonical 상태를 담는다.
 
 - `stocks` — **2,607**
 - `stock_aliases` — **32**
 - `stock_corp_codes` — **3,976**
+
+주의:
+
+- 이 dump 는 **공용 `verith` 데이터를 snapshot 기준으로 다시 맞춘다**. 즉 `stocks` / `stock_aliases` /
+  `stock_corp_codes` 는 snapshot 상태로 덮어쓴다고 생각하면 된다.
+- 스키마는 dump 가 아니라 **Alembic** 이 관리하므로, 반드시 `uv run alembic upgrade head` 를 먼저 실행한다.
+- backend 가 이미 떠 있으면 restore 후 **재기동**하는 편이 안전하다.
 
 ## 테스트
 
