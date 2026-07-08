@@ -18,6 +18,8 @@
 | GET | `/api/technical/reports` | — (query) | 200 `TechnicalReportListResponse` | — |
 | GET | `/api/technical/reports/{id}` | — | 200 `TechnicalReportReadModel` | 404 |
 | DELETE | `/api/technical/reports/{id}` | — | 204 | 404 |
+| GET | `/api/technical/reports/{id}/charts` | — | 200 `TechnicalChartsReadModel` | 404 |
+| GET | `/api/technical/reports/{id}/trace` | — | 200 `TechnicalTraceDetailReadModel` | 404 |
 | GET | `/api/technical/reports/{id}/followups` | — | 200 `TechnicalReportFollowupsReadModel` | 404 |
 | POST | `/api/technical/reports/{id}/followups` | `FollowupCreateRequest` | 201 `FollowupItem` | 404/422 |
 
@@ -55,7 +57,8 @@
 | `risks` | items[] `{ flag, note?, ref_price? }` | 리스크(현재 확인된 위험) |
 | `charts` | available_periods[]·items[] `{ period, candle_unit?, display_order, has_chart_data, annotation_count }` | 차트 탭·렌더 여부 |
 | `verification` | outcome?·calc_passed?·regime_passed?·label_matched?·regen_count?·failed_indicators[]·summary? | 검증 상세 |
-| `trace_summary` | §6 | 생성/검증/품질 요약 |
+| `trace_summary` | §5 | 생성/검증/품질 요약 |
+| `trust_summary` | §5.1 | 상단 카드 집계(신뢰도/데이터품질/검증게이트/출처연결) |
 | `followup_count` | int | 후속 대화 수(스레드는 §7 별도 호출) |
 
 > `risks`(현재 확인된 위험) ↔ `interpretation.invalidation_or_caution`(해석이 틀어지는 조건)은 **분리**된 개념이다.
@@ -86,6 +89,42 @@
 | `flags.limited_data` | bool | 데이터 부족 경고 |
 | `flags.has_intraday_context` | bool | 장중 컨텍스트 유무 |
 | `flags.has_daily/weekly/monthly_chart` | bool | 타임프레임별 차트 유무 |
+
+### 5.1 trust_summary (상단 카드 — detail 응답 내, 프론트 재계산 불필요)
+**저장값 projection**(계산 재실행 없음).
+| 블록 | 필드 | 용도 |
+|---|---|---|
+| `signal_quality` | signal_score?·signal_label?(consensus 파생)·consensus?·confidence?·confidence_basis? | 신뢰도 카드 |
+| `data_quality` | data_status?·available_periods[]·intraday_available·chart_count·limited | 데이터 품질 카드(= trace_summary.data_quality 동일) |
+| `verification_gate` | outcome?·calc_passed?·regime_passed?·label_matched?·verification_warning | 검증 게이트 카드 |
+| `source_linkage` | total_signal_items·sourced_signal_items·source_coverage_ratio | 출처 연결(신호 중 LLM 근거 비율, 저장 detail_source 기준) |
+
+**값 의미 잠금(QA 드리프트 방지 — 숫자보다 해석을 고정):**
+- `source_coverage_ratio` = `sourced_signal_items / total_signal_items`, `sourced` = `detail_source ∈ {llm, llm_regenerated}`
+  (즉 **지표 설명이 LLM 근거로 붙은 비율**). total=0 이면 `0.0`. **정확도/적중률/수익성 지표가 아니다** — "설명 커버리지"일 뿐.
+- `signal_label` = `consensus`(strong_positive…strong_negative)의 **표시 라벨**(방향·세기 요약). **매수/매도 신호가 아니다.**
+- `verification_gate` = 내부 **검증 게이트 통과 여부**(계산/국면/라벨 정합). **분석의 정답·수익 보장이 아니다.**
+  `verification_warning=true` = "게이트 미통과/불일치" 주의 표시(리포트가 틀렸다는 단정 아님).
+
+### 5.2 차트 full — `GET /api/technical/reports/{id}/charts`
+detail 의 `charts` 는 **메타만**(period/candle_unit/display_order/has_chart_data/annotation_count). 실제 렌더용
+full payload 는 이 전용 endpoint 로(응답 경량 유지, 차트 탭 열 때만 호출).
+`TechnicalChartsReadModel`: `report_id`·`stock`·`available_periods[]`·`charts[]`(`ChartItemFull`:
+period·candle_unit?·display_order·has_chart_data·annotation_count·**`chart_data`(AI ChartData: candles/overlays/
+subcharts/annotations)**·`annotations[]`(편의 승격)). `chart_data` 는 raw internal 이 아니라 **AI 차트 렌더 계약**이다.
+> **운영 노트(payload 크기):** 현재는 3m/1y/5y **전 기간을 한 번에** 반환한다. candles 가 많아 응답이 커지면
+> 향후 `?period=` 필터로 **기간별 lazy-load** 로 쪼갤 수 있다(계약 shape 는 그대로, additive). 프론트가 처음부터
+> period 파라미터를 옵션으로 감안해두면 전환이 매끄럽다.
+
+### 5.3 trace drawer — `GET /api/technical/reports/{id}/trace`
+단계별 처리 타임라인 UI 용. **⚠️ 단계별 `duration_ms` 는 현재 저장 구조에 없어 `null`**(측정/영속화 전까지). steps 는
+저장된 결과값(source/interpretation/verification)에서 **truthful 재구성**이며 지어낸 값이 아니다.
+`TechnicalTraceDetailReadModel`: `overall`(total_steps·total_duration_ms(=null)·llm_used·data_source_summary) +
+`steps[]`(`TraceStepItem`: step_order·step_key·title·source?·duration_ms(=null)·status(ok/degraded/skipped/fallback)·
+short_description?·llm_involved). step_key: data_collect→regime_classify→signal_aggregate→interpret_report→verify.
+> **프론트 라벨링 주의:** 이건 **저장값 기반 "처리 단계 요약(reconstruction)"** 이지 **실측 처리시간/실시간 실행
+> 로그가 아니다.** UI 라벨을 "처리 단계"/"생성 경로"처럼 쓰고, "실행 시간 Xms"/"실시간 trace"로 오해하게 표기하지
+> 말 것(duration 은 항상 null). 실측 타임라인은 AI측 trace 영속화가 생긴 뒤 별도로 채운다.
 
 ## 6. Follow-up API
 ### 6.1 read — `GET /api/technical/reports/{id}/followups`
@@ -171,7 +210,31 @@ directional_bias?·final_regime?·as_of? — 스레드 헤더 연결감)·`follo
     "stability": { "confidence": 0.42, "confidence_basis": "...", "verification_consistent": true },
     "flags": { "used_fallback": false, "had_regeneration": false, "limited_data": false, "verification_warning": false,
                "has_intraday_context": false, "has_daily_chart": true, "has_weekly_chart": true, "has_monthly_chart": false } },
+  "trust_summary": {
+    "signal_quality": { "signal_score": 0.3, "signal_label": "약한 긍정", "consensus": "weak_positive", "confidence": 0.42, "confidence_basis": "..." },
+    "data_quality": { "data_status": "normal", "available_periods": ["3m","1y","5y"], "intraday_available": false, "chart_count": 3, "limited": false },
+    "verification_gate": { "outcome": "passed", "calc_passed": true, "regime_passed": true, "label_matched": true, "verification_warning": false },
+    "source_linkage": { "total_signal_items": 3, "sourced_signal_items": 3, "source_coverage_ratio": 1.0 } },
   "followup_count": 2 }
+```
+
+**차트 full** (`GET /api/technical/reports/{id}/charts`)
+```json
+{ "report_id": "e2b1...", "stock": { "stock_code": "373220", "stock_name": "LG에너지솔루션", "market": "KOSPI" },
+  "available_periods": ["3m","1y","5y"],
+  "charts": [ { "period": "3m", "candle_unit": "D", "display_order": 0, "has_chart_data": true, "annotation_count": 3,
+                "chart_data": { "candle_unit": "D", "candles": [/*...*/], "overlays": [/*...*/], "annotations": [/*...*/] },
+                "annotations": [/*...*/] } ] }
+```
+
+**trace drawer** (`GET /api/technical/reports/{id}/trace`) — `duration_ms` 는 미측정이라 `null`
+```json
+{ "report_id": "e2b1...",
+  "overall": { "total_steps": 5, "total_duration_ms": null, "llm_used": true, "data_source_summary": "KIS" },
+  "steps": [
+    { "step_order": 1, "step_key": "data_collect", "title": "시세 수집", "source": "KIS", "duration_ms": null, "status": "ok", "short_description": "data_status=normal", "llm_involved": false },
+    { "step_order": 4, "step_key": "interpret_report", "title": "해석 생성", "source": "llm", "duration_ms": null, "status": "ok", "short_description": "interpretation_source=llm", "llm_involved": true }
+  ] }
 ```
 
 **follow-up POST** (`POST /api/technical/reports/{id}/followups`)

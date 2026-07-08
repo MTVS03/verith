@@ -16,10 +16,12 @@ from src.api.deps import get_technical_report_service
 from src.api.schemas.technical_report import (
     FollowupCreateRequest,
     FollowupItem,
+    TechnicalChartsReadModel,
     TechnicalReportCreateRequest,
     TechnicalReportFollowupsReadModel,
     TechnicalReportListResponse,
     TechnicalReportReadModel,
+    TechnicalTraceDetailReadModel,
 )
 from src.api.services.technical_report_service import TechnicalReportService
 
@@ -68,6 +70,30 @@ async def get_technical_report(
     if read_model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
     return read_model
+
+
+@router.get("/{report_id}/charts", response_model=TechnicalChartsReadModel)
+async def get_technical_report_charts(
+    report_id: UUID,
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> TechnicalChartsReadModel:
+    """차트 탭 렌더용 full payload(period 별 chart_data/annotations). detail 은 메타만."""
+    charts = await service.get_report_charts(report_id)
+    if charts is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return charts
+
+
+@router.get("/{report_id}/trace", response_model=TechnicalTraceDetailReadModel)
+async def get_technical_report_trace(
+    report_id: UUID,
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> TechnicalTraceDetailReadModel:
+    """trace drawer 용 단계 재구성(저장값 기반, 단계별 duration 은 미측정 → null)."""
+    trace = await service.get_report_trace(report_id)
+    if trace is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return trace
 
 
 @router.post(

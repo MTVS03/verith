@@ -27,7 +27,8 @@ _REQ = {"ticker": TICKER, "query": "373220 기술적 흐름 분석", "client_ses
 
 _READ_MODEL_KEYS = {
     "report_id", "stock", "meta", "summary", "interpretation",
-    "drivers", "signals", "risks", "charts", "verification", "trace_summary", "followup_count",
+    "drivers", "signals", "risks", "charts", "verification", "trace_summary",
+    "trust_summary", "followup_count",
 }
 
 
@@ -130,6 +131,55 @@ async def test_get_report_read_model(client):
     assert set(ts.keys()) == {
         "trace_id", "generation_path", "data_quality", "verification_summary", "stability", "flags"
     }
+
+
+# 4a-2) 상세에 trust_summary 카드 집계 포함
+async def test_detail_has_trust_summary(client):
+    rid = await _create(client)
+    body = (await client.get(f"{_POST}/{rid}")).json()
+    tsum = body["trust_summary"]
+    assert set(tsum.keys()) == {
+        "signal_quality", "data_quality", "verification_gate", "source_linkage"}
+    assert "signal_score" in tsum["signal_quality"] and "signal_label" in tsum["signal_quality"]
+    assert "source_coverage_ratio" in tsum["source_linkage"]
+    assert tsum["verification_gate"]["outcome"] == "passed"
+
+
+# 4f) 차트 full payload 전용 endpoint
+async def test_charts_endpoint_full_payload(client):
+    rid = await _create(client)
+    resp = await client.get(f"{_POST}/{rid}/charts")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"report_id", "stock", "available_periods", "charts"}
+    assert body["stock"]["stock_code"] == TICKER
+    if body["charts"]:
+        c = body["charts"][0]
+        assert set(c.keys()) == {
+            "period", "candle_unit", "display_order", "has_chart_data",
+            "annotation_count", "chart_data", "annotations"}
+
+
+async def test_charts_endpoint_404(client):
+    from uuid import uuid4
+    assert (await client.get(f"{_POST}/{uuid4()}/charts")).status_code == 404
+
+
+# 4g) trace drawer 전용 endpoint (truthful, duration null)
+async def test_trace_endpoint_steps_null_duration(client):
+    rid = await _create(client)
+    body = (await client.get(f"{_POST}/{rid}/trace")).json()
+    assert set(body.keys()) == {"report_id", "overall", "steps"}
+    assert body["overall"]["total_duration_ms"] is None          # 미측정 → null(정직)
+    assert body["overall"]["total_steps"] == len(body["steps"]) == 5
+    assert [s["step_key"] for s in body["steps"]] == [
+        "data_collect", "regime_classify", "signal_aggregate", "interpret_report", "verify"]
+    assert all(s["duration_ms"] is None for s in body["steps"])
+
+
+async def test_trace_endpoint_404(client):
+    from uuid import uuid4
+    assert (await client.get(f"{_POST}/{uuid4()}/trace")).status_code == 404
 
 
 # 4b) POST 직후 응답 == GET 단건 응답 (정본 계약 잠금 — 두 진입점 shape·값 완전 동일)

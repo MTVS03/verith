@@ -33,6 +33,7 @@ from src.api.schemas.agent_report import AgentReportListItem
 from src.api.schemas.ai_technical_output import TechnicalAgentOutputMirror
 from src.api.schemas.technical_report import (
     ChartItem,
+    ChartItemFull,
     ChartsBlock,
     DataQualityBlock,
     DriversBlock,
@@ -50,18 +51,26 @@ from src.api.schemas.technical_report import (
     RiskItemBlock,
     RisksBlock,
     SignalItem,
+    SignalQualityBlock,
     SignalsBlock,
+    SourceLinkageBlock,
     StabilityBlock,
     StockBlock,
     SummaryBlock,
+    TechnicalChartsReadModel,
     TechnicalReportCreateRequest,
     TechnicalReportFollowupsReadModel,
     TechnicalReportListItem,
     TechnicalReportListResponse,
     TechnicalReportReadModel,
+    TechnicalTraceDetailReadModel,
     TraceFlagsBlock,
+    TraceOverallBlock,
+    TraceStepItem,
     TraceSummaryBlock,
+    TrustSummaryBlock,
     VerificationBlock,
+    VerificationGateBlock,
     VerificationSummaryBlock,
 )
 
@@ -145,6 +154,13 @@ def build_read_model(
     v_warning = bool(outcome and outcome != "passed") or (v_consistent is False)
     failed_count = len(_list(verification.get("failed_indicators")))
 
+    data_quality = DataQualityBlock(
+        data_status=data_status,
+        available_periods=periods,
+        intraday_available=has_intraday,
+        chart_count=len(chart_items),
+        limited=limited,
+    )
     trace_summary = TraceSummaryBlock(
         trace_id=raw.get("trace_id"),
         generation_path=GenerationPathBlock(
@@ -154,13 +170,7 @@ def build_read_model(
             regen_count=regen if isinstance(regen, int) else None,
             path_label=path_label,
         ),
-        data_quality=DataQualityBlock(
-            data_status=data_status,
-            available_periods=periods,
-            intraday_available=has_intraday,
-            chart_count=len(chart_items),
-            limited=limited,
-        ),
+        data_quality=data_quality,
         verification_summary=VerificationSummaryBlock(
             outcome=outcome,
             calc_passed=calc,
@@ -182,6 +192,33 @@ def build_read_model(
             has_daily_chart="D" in candle_units,
             has_weekly_chart="W" in candle_units,
             has_monthly_chart="M" in candle_units,
+        ),
+    )
+
+    # ── trust/quality 집계(상단 카드) — 저장값 projection, 프론트 재계산 불필요 ──
+    sig_items = _list(raw.get("technical_signals"))
+    total_sig = len(sig_items)
+    sourced_sig = sum(
+        1 for s in sig_items if _d(s).get("detail_source") in ("llm", "llm_regenerated")
+    )
+    consensus = signal.get("consensus")
+    trust_summary = TrustSummaryBlock(
+        signal_quality=SignalQualityBlock(
+            signal_score=signal.get("signal_score"),
+            signal_label=_CONSENSUS_LABELS.get(consensus) if consensus else None,
+            consensus=consensus,
+            confidence=signal.get("confidence"),
+            confidence_basis=signal.get("confidence_basis"),
+        ),
+        data_quality=data_quality,   # trace_summary 와 동일 블록 재사용(일관)
+        verification_gate=VerificationGateBlock(
+            outcome=outcome, calc_passed=calc, regime_passed=rgm,
+            label_matched=lbl, verification_warning=v_warning,
+        ),
+        source_linkage=SourceLinkageBlock(
+            total_signal_items=total_sig,
+            sourced_signal_items=sourced_sig,
+            source_coverage_ratio=(round(sourced_sig / total_sig, 3) if total_sig else 0.0),
         ),
     )
 
@@ -261,6 +298,7 @@ def build_read_model(
             summary=None,
         ),
         trace_summary=trace_summary,
+        trust_summary=trust_summary,
         followup_count=followup_count,
     )
 
@@ -366,6 +404,95 @@ def build_followups_read_model(
         ),
         followup_count=len(followups),
         followups=[_followup_item(f) for f in followups],
+    )
+
+
+# consensus enum → 표시 라벨(signal_label). 저장값 파생, 재계산 아님.
+_CONSENSUS_LABELS = {
+    "strong_positive": "강한 긍정", "weak_positive": "약한 긍정", "neutral": "중립",
+    "weak_negative": "약한 부정", "strong_negative": "강한 부정",
+}
+
+
+def build_charts_read_model(
+    *, report: TechnicalReport, stock: Stock | None
+) -> TechnicalChartsReadModel:
+    """차트 탭 렌더용 full payload(전용 endpoint). output_payload.charts 를 period 별로 노출(계산 없음)."""
+    raw = report.output_payload if isinstance(report.output_payload, dict) else {}
+    charts = _list(raw.get("charts"))
+    items: list[ChartItemFull] = []
+    periods: list[str] = []
+    for i, c in enumerate(charts):
+        cd = _d(_d(c).get("chart_data"))
+        period = str(_d(c).get("period") or "")
+        if period:
+            periods.append(period)
+        items.append(ChartItemFull(
+            period=period,
+            candle_unit=cd.get("candle_unit"),
+            display_order=i,
+            has_chart_data=bool(cd),
+            annotation_count=len(_list(cd.get("annotations"))),
+            chart_data=(cd or None),
+            annotations=_list(cd.get("annotations")),
+        ))
+    return TechnicalChartsReadModel(
+        report_id=report.id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else report.stock_code),
+            stock_name=(stock.stock_name if stock else report.stock_name),
+            market=(stock.market if stock else None),
+        ),
+        available_periods=periods,
+        charts=items,
+    )
+
+
+def build_trace_detail(*, report: TechnicalReport) -> TechnicalTraceDetailReadModel:
+    """trace drawer 용 단계 재구성 — **저장된 결과값 기반**. duration_ms 는 미측정이라 null(지어내지 않음)."""
+    raw = report.output_payload if isinstance(report.output_payload, dict) else {}
+    regime = _d(raw.get("regime"))
+    signal = _d(raw.get("signal"))
+    interp = _d(raw.get("interpretation"))
+    verification = _d(raw.get("verification"))
+    src = raw.get("source")
+    data_status = raw.get("data_status")
+    interp_source = interp.get("source")
+    llm_involved = interp_source in ("llm", "llm_regenerated")
+    regime_ok = bool(regime.get("final_regime")) and regime.get("final_regime") != "unavailable"
+
+    def _step(order, key, title, source, status, desc, llm=False) -> TraceStepItem:
+        return TraceStepItem(
+            step_order=order, step_key=key, title=title, source=source,
+            duration_ms=None, status=status, short_description=desc, llm_involved=llm,
+        )
+
+    steps = [
+        _step(1, "data_collect", "시세 수집", src,
+              "degraded" if data_status in ("stale_cache", "data_limited") else "ok",
+              f"data_status={data_status}"),
+        _step(2, "regime_classify", "국면 판정", "computed",
+              "ok" if regime_ok else "skipped",
+              f"final_regime={regime.get('final_regime')}"),
+        _step(3, "signal_aggregate", "신호 종합", "computed",
+              "ok" if signal.get("consensus") else "skipped",
+              f"consensus={signal.get('consensus')}"),
+        _step(4, "interpret_report", "해석 생성", interp_source,
+              "fallback" if interp_source == "template_fallback" else "ok",
+              f"interpretation_source={interp_source}", llm=llm_involved),
+        _step(5, "verify", "검증", "computed",
+              "ok" if verification.get("outcome") == "passed" else "fallback",
+              f"outcome={verification.get('outcome')}, regen={verification.get('regen_count')}"),
+    ]
+    return TechnicalTraceDetailReadModel(
+        report_id=report.id,
+        overall=TraceOverallBlock(
+            total_steps=len(steps),
+            total_duration_ms=None,   # 단계별 시간 미측정
+            llm_used=llm_involved,
+            data_source_summary=src,
+        ),
+        steps=steps,
     )
 
 
@@ -652,6 +779,21 @@ class TechnicalReportService:
         stock = await tr_repo.get_stock(self._session, report.stock_code)
         followups = await tr_repo.list_followups(self._session, report_id)
         return build_followups_read_model(report=report, stock=stock, followups=followups)
+
+    async def get_report_charts(self, report_id: UUID) -> TechnicalChartsReadModel | None:
+        """차트 탭 렌더용 full payload(report 없으면 None → 404)."""
+        report = await tr_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        return build_charts_read_model(report=report, stock=stock)
+
+    async def get_report_trace(self, report_id: UUID) -> TechnicalTraceDetailReadModel | None:
+        """trace drawer 용 단계 재구성(report 없으면 None → 404). duration 은 미측정이라 null."""
+        report = await tr_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        return build_trace_detail(report=report)
 
     async def create_followup(
         self, report_id: UUID, req: FollowupCreateRequest

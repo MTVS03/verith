@@ -78,7 +78,7 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 ### Technical (기술적)
 | 테이블 | 요약 |
 |---|---|
-| `technical_reports` | 기술적 분석 리포트 root. 목록 index: `GET /api/technical/reports`(created_at DESC, 경량 summary/status/engagement) / 상세: `GET .../{id}`(full read model) |
+| `technical_reports` | 기술적 분석 리포트 root. 목록 `GET /api/technical/reports` / 상세 `GET .../{id}`(read model + trust_summary) / 차트 `GET .../{id}/charts`(full payload) / trace `GET .../{id}/trace`(단계 재구성, duration null) — 계약 [`technical_frontend_api_contract.md`](technical_frontend_api_contract.md) |
 | `technical_report_signals` | 지표 신호 |
 | `technical_report_charts` | 차트 페이로드 |
 | `technical_report_risk_notes` | 리스크 노트 |
