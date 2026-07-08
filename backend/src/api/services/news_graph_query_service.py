@@ -24,8 +24,10 @@ from src.api.schemas.news import (
     SubjectQueryResponse,
 )
 
-# 이벤트별 화면 노출 대표 기사 소수(전체 아님 — 깊은 근거는 /events/{id}/articles on-demand).
-_REP_ARTICLE_LIMIT = 3
+# 이벤트별로 붙여줄 기사 상한. 리포트가 관련 기사를 '전부' 노출하도록 넉넉히 잡는다(실제 이벤트당
+# 기사는 대개 수 건~수십 건). 초대형 이벤트 방어용 안전 상한이며, 이를 넘는 깊은 근거는 여전히
+# /events/{id}/articles on-demand 로 조회 가능. (LLM 답변 근거는 별도로 소수만 사용 — 토큰 보호.)
+_REP_ARTICLE_LIMIT = 100
 
 
 def _centroid(embeddings: list[list[float]]) -> list[float] | None:
@@ -86,7 +88,51 @@ class NewsGraphQueryService:
             eid = _as_uuid(e.get("canonical_id"))
             if eid is not None:
                 by_uuid[eid] = e
+        return await self._build_candidates(by_uuid, within_days)
 
+    async def get_merge_candidates(
+        self,
+        companies: list[str],
+        within_days: int,
+        embedding: list[float] | None,
+        top_k: int,
+    ) -> list[CandidateEvent]:
+        """병합 후보(A2): 회사 참여 이벤트 ∪ 임베딩 최근접 이벤트. 회사 없는 기사도 내용으로 후보를 얻는다.
+
+        - 회사 경로: get_events_by_companies(기존).
+        - 벡터 경로: get_events_near_embedding(pgvector 최근접) 로 event_id 를 얻고, 회사 목록은
+          graph 에서 보강(get_events_by_ids). 두 경로 event 를 합집합해 centroid·event_time 을 계산.
+        """
+        by_uuid: dict[uuid.UUID, dict] = {}
+        events_raw = await graph_repo.get_events_by_companies(self._graph, companies)
+        for e in events_raw:
+            eid = _as_uuid(e.get("canonical_id"))
+            if eid is not None:
+                by_uuid[eid] = e
+
+        if embedding:
+            near_ids = await news_repo.get_events_near_embedding(
+                self._session, embedding, within_days, top_k
+            )
+            missing = [eid for eid in near_ids if eid is not None and eid not in by_uuid]
+            if missing:
+                vec_raw = await graph_repo.get_events_by_ids(
+                    self._graph, [str(x) for x in missing]
+                )
+                for e in vec_raw:
+                    eid = _as_uuid(e.get("canonical_id"))
+                    if eid is not None:
+                        by_uuid[eid] = e
+
+        return await self._build_candidates(by_uuid, within_days)
+
+    async def _build_candidates(
+        self, by_uuid: dict[uuid.UUID, dict], within_days: int
+    ) -> list[CandidateEvent]:
+        """event(uuid→raw) 집합에 대해 centroid(임베딩 평균)·event_time 을 계산해 CandidateEvent[] 로.
+
+        within_days 내 기사가 없거나 임베딩이 하나도 없는 이벤트는 유사도 후보가 될 수 없어 제외한다.
+        """
         inputs = await news_repo.get_event_centroid_inputs(self._session, list(by_uuid))
         cutoff = datetime.now(UTC) - timedelta(days=within_days)
 
@@ -171,7 +217,14 @@ class NewsGraphQueryService:
                     ),
                     article_count=agg.article_count,
                     articles=[
-                        ArticleRef(news_id=r.id, summary=r.summary or "", url=r.url)
+                        ArticleRef(
+                            news_id=r.id,
+                            summary=r.summary or "",
+                            url=r.url,
+                            title=r.title or "",
+                            publisher=r.publisher,
+                            published_at=r.published_at,
+                        )
                         for r in rows
                     ],
                     gauge=gauge,

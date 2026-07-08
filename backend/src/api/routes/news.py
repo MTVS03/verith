@@ -24,6 +24,7 @@ from src.api.schemas.news import (
     EventArticleStats,
     ExistingUrlsRequest,
     ExistingUrlsResponse,
+    MergeCandidateQuery,
     NewsBatchSaveRequest,
     SaveResponse,
     SubjectQueryResponse,
@@ -115,6 +116,20 @@ async def events_recent(
 ) -> list[CandidateEvent]:
     """병합 후보 이벤트 + centroid(임베딩 평균)·event_time. ai 병합(TASK 05)이 유사도 채점에 사용."""
     return await service.get_recent_candidate_events(companies, within_days)
+
+
+@router.post("/events/merge-candidates", response_model=list[CandidateEvent])
+async def events_merge_candidates(
+    body: MergeCandidateQuery,
+    service: NewsGraphQueryService = Depends(get_news_graph_query_service),
+) -> list[CandidateEvent]:
+    """병합 후보(A2): 회사 참여 이벤트 ∪ 임베딩 최근접 이벤트. 회사 없는 기사도 내용으로 후보를 얻는다.
+
+    embedding 이 벡터라 GET 이 아니라 POST 로 받는다(회사 없는 기사의 과분할 방지). ai 병합이 채점에 사용.
+    """
+    return await service.get_merge_candidates(
+        body.companies, body.within_days, body.embedding, body.top_k
+    )
 
 
 # ── 리포트 저장/조회/삭제 (질의 결과 persistence) ─────────────────────────────

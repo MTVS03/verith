@@ -123,11 +123,17 @@ class CleanupResponse(BaseModel):
 
 # ── 조회 응답 (ai schemas/report.py·event.py 미러) ───────────────────────────
 class ArticleRef(BaseModel):
-    """근거 기사 한 건(ai `ArticleRef`). news_id+summary+url 를 묶어 근거 추적 사슬의 원천."""
+    """근거 기사 한 건(ai `ArticleRef`). news_id+summary+url + 표시용 제목·언론사·발행일.
+
+    제목·언론사·발행일은 리포트가 근거 기사를 사람이 읽을 수 있게 표시하기 위한 원자료(News 행 그대로).
+    """
 
     news_id: int
     summary: str
     url: str
+    title: str = ""
+    publisher: str | None = None
+    published_at: datetime | None = None
 
 
 class EventArticleStats(BaseModel):
@@ -154,6 +160,18 @@ class CandidateEvent(BaseModel):
     companies: list[str] = Field(default_factory=list)
     embedding: list[float]
     event_time: datetime | None = None
+
+
+class MergeCandidateQuery(BaseModel):
+    """POST /news/events/merge-candidates 요청. 회사 경로 + 임베딩 최근접(A2)로 병합 후보를 찾는다.
+
+    embedding 은 벡터라 GET 쿼리로 못 실어 POST 로 받는다(회사 없는 기사도 내용으로 후보를 얻게).
+    """
+
+    companies: list[str] = Field(default_factory=list)
+    within_days: int = Field(7, ge=1, le=90)
+    embedding: list[float] = Field(default_factory=list)
+    top_k: int = Field(20, ge=1, le=200)
 
 
 # ── 질의(subject/shared) 응답 (ai schemas/report.py·event.py·response.py 미러) ──
