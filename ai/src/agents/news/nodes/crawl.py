@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+import services.backend.dedup_client as dedup_client
 import services.rss as rss
-from config import CRAWL_MAX_ARTICLES
+from config import CRAWL_MAX_ARTICLES, DEDUP_SKIP_EXISTING
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,15 @@ def crawl_node(state: dict) -> dict:
 
     state["articles"]에 메타데이터 Article 리스트를 실어 넘긴다. 수집 0건이어도
     예외 없이 빈 리스트를 넘긴다(환각 금지, CLAUDE.md §2-5).
+
+    cap(CRAWL_MAX_ARTICLES) 전에 **이미 저장된 url을 걸러낸다**(DEDUP_SKIP_EXISTING): 매시간
+    피드 전체를 재처리하지 않고 신규만 처리해, cap이 '유실 방지선'이 아니라 '회차당 처리량 상한'이
+    되게 한다(밀린 신규는 다음 회차에 이어 처리). backend 미연결 시엔 걸러내지 않고 전부 처리(degrade).
     """
     articles = rss.collect_articles()
+
+    if DEDUP_SKIP_EXISTING and articles:
+        articles = _drop_existing(articles)
 
     if CRAWL_MAX_ARTICLES:
         # 발행시각 최신순(published_at desc)으로 상한 적용. 미상(None)은 뒤로 민다.
@@ -34,6 +42,23 @@ def crawl_node(state: dict) -> dict:
     logger.info("crawl_node: 분석 대상 %d건 확정", len(articles))
     state["articles"] = articles
     return state
+
+
+def _drop_existing(articles: list) -> list:
+    """이미 backend 에 저장된 url 기사를 제외(신규만 남김). backend 실패 시 원본 그대로(degrade).
+
+    dedup_client 가 None(=조회 실패)이면 걸러내지 않는다 — 새 기사를 놓치느니 중복 재처리(멱등)를 택한다.
+    """
+    urls = [str(a.url) for a in articles]
+    existing = dedup_client.get_existing_urls(urls)
+    if existing is None:  # 조회 실패 → 필터 미적용
+        return articles
+    filtered = [a for a in articles if str(a.url) not in existing]
+    logger.info(
+        "crawl_node: dedup — 수집 %d건 중 신규 %d건(이미 저장 %d건 제외)",
+        len(articles), len(filtered), len(articles) - len(filtered),
+    )
+    return filtered
 
 
 def _published_sort_key(article) -> tuple[int, float]:

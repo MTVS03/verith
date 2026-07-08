@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 
 from src.api.deps import (
     get_news_cleanup_service,
     get_news_graph_query_service,
     get_news_query_service,
+    get_news_report_service,
     get_news_service,
 )
 from src.api.schemas.news import (
@@ -21,13 +22,20 @@ from src.api.schemas.news import (
     CandidateEvent,
     CleanupResponse,
     EventArticleStats,
+    ExistingUrlsRequest,
+    ExistingUrlsResponse,
     NewsBatchSaveRequest,
     SaveResponse,
     SubjectQueryResponse,
 )
+from src.api.schemas.news_report import (
+    NewsReportCreateRequest,
+    NewsReportEnvelope,
+)
 from src.api.services.news_cleanup_service import NewsCleanupService
 from src.api.services.news_graph_query_service import NewsGraphQueryService
 from src.api.services.news_query_service import NewsQueryService
+from src.api.services.news_report_service import NewsReportService
 from src.api.services.news_service import NewsService
 
 router = APIRouter(prefix="/news", tags=["news"])
@@ -40,6 +48,15 @@ async def save_batch(
 ) -> SaveResponse:
     """기사(PostgreSQL) + GraphBatch(Neo4j MERGE)를 한 배치로 저장."""
     return await service.save_batch(req)
+
+
+@router.post("/exists", response_model=ExistingUrlsResponse)
+async def existing_urls(
+    req: ExistingUrlsRequest,
+    service: NewsQueryService = Depends(get_news_query_service),
+) -> ExistingUrlsResponse:
+    """수집한 url 중 이미 저장된 것을 돌려준다. ai 배치가 신규 기사만 처리하도록(중복 재처리 방지)."""
+    return ExistingUrlsResponse(existing=await service.get_existing_urls(req.urls))
 
 
 @router.post("/cleanup", response_model=CleanupResponse)
@@ -98,3 +115,35 @@ async def events_recent(
 ) -> list[CandidateEvent]:
     """병합 후보 이벤트 + centroid(임베딩 평균)·event_time. ai 병합(TASK 05)이 유사도 채점에 사용."""
     return await service.get_recent_candidate_events(companies, within_days)
+
+
+# ── 리포트 저장/조회/삭제 (질의 결과 persistence) ─────────────────────────────
+@router.post("/reports", response_model=NewsReportEnvelope, status_code=status.HTTP_201_CREATED)
+async def create_report(
+    req: NewsReportCreateRequest,
+    service: NewsReportService = Depends(get_news_report_service),
+) -> NewsReportEnvelope:
+    """뉴스 질의 결과(ReportModel JSON)를 저장 → { report_id, report } 반환."""
+    return await service.create_report(req)
+
+
+@router.get("/reports/{report_id}", response_model=NewsReportEnvelope)
+async def get_report(
+    report_id: uuid.UUID,
+    service: NewsReportService = Depends(get_news_report_service),
+) -> NewsReportEnvelope:
+    envelope = await service.get_report(report_id)
+    if envelope is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return envelope
+
+
+@router.delete("/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_report(
+    report_id: uuid.UUID,
+    service: NewsReportService = Depends(get_news_report_service),
+) -> Response:
+    deleted = await service.delete_report(report_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
