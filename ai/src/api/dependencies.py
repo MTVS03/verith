@@ -16,6 +16,8 @@ from src.agents.technical.services.cache_service import OhlcvCache, default_cach
 from src.agents.technical.services.openai_llm_client import default_openai_client
 from src.agents.technical.supervisor.technical_supervisor import OhlcvFetcher
 from src.api.errors import ai_unavailable
+from src.supervisor.agent_adapters import AgentAdapter, default_adapters
+from src.supervisor.resolve_client import ResolverProtocol, StockResolverClient
 
 # endpoint가 deadline을 만든 뒤 client를 생성해야 하므로(요청 timeout을 client에 주입) client를 바로
 # 반환하지 않고 **팩토리**를 반환한다. 테스트는 이 팩토리를 override해 fake LLM을 주입한다.
@@ -53,3 +55,17 @@ def get_trace_sink() -> TraceSink | None:
 
     테스트는 InMemoryTraceSink로 override해 이벤트를 검증한다."""
     return None
+
+
+def get_resolver() -> ResolverProtocol:
+    """상위 supervisor 종목 정본 경계 client(backend HTTP). import 시점에 네트워크 없음.
+
+    테스트는 이 의존성을 override해 fake resolver를 주입한다(실 backend 호출 방지)."""
+    return StockResolverClient()
+
+
+def get_adapters() -> dict[str, AgentAdapter]:
+    """상위 supervisor execution 계층의 agent adapter 레지스트리(실사용 5개).
+
+    테스트는 이 의존성을 override해 fake adapter를 주입한다(실 agent/네트워크 방지)."""
+    return default_adapters()
