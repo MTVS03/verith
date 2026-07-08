@@ -65,6 +65,37 @@ def test_interpretation_follows_gate3_rule():
     assert p["verification"]["gate3"] is None
 
 
+def test_trace_id_defaults_to_report_id():
+    """trace_id 기본값 = report_id(상관관계 ID). 명시하면 그 값을 쓴다."""
+    rid = uuid4()
+    p = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_PASS, "해석", rid)
+    assert p["trace_id"] == str(rid) == p["report_id"]
+
+    tid = uuid4()
+    p2 = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_PASS, "해석", rid, trace_id=tid)
+    assert p2["trace_id"] == str(tid) and p2["report_id"] == str(rid)
+
+
+def test_storage_fields_follow_gate3_rule():
+    """저장 계약 필드(outcome·source·provider·model)가 gate3 규칙과 정합.
+
+    통과 → explained/llm + 모델 식별. 미통과 → fact_only/fallback + 식별 null
+    (interpretation null 과 provider/model null 이 함께 움직인다 — 출처 정합)."""
+    p = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_PASS, "해석", uuid4(),
+                      regen_count=1, provider="openai", model="gpt-4o-mini")
+    assert p["verification"]["outcome"] == "explained"
+    assert p["verification"]["regen_count"] == 1
+    assert p["interpretation_meta"] == {
+        "source": "llm", "provider": "openai", "model": "gpt-4o-mini"}
+
+    p = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_FAIL, "탈락", uuid4(),
+                      regen_count=2, provider="openai", model="gpt-4o-mini")
+    assert p["verification"]["outcome"] == "fact_only"
+    assert p["verification"]["regen_count"] == 2
+    assert p["interpretation_meta"] == {
+        "source": "fallback", "provider": None, "model": None}
+
+
 def test_payload_round_trips_through_json():
     """전 필드가 JSON 왕복 가능 + 한글 키가 이스케이프 없이 그대로."""
     p = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_PASS, "해석", uuid4())
@@ -105,4 +136,10 @@ def test_run_wires_payload_into_agent_output(monkeypatch):
     assert p["verification"]["gate2"]["passed"] is False     # 실패도 정직하게
     assert p["interpretation"] is None                       # 해석 없던 경로
     assert p["signals"]["alignment"] in ("동반매수", "동반매도", "엇갈림")
+    # 저장 계약 필드도 실배선으로 채워진다(게이트2 실패 경로 = fact_only).
+    assert p["trace_id"] == p["report_id"]                   # 기본 = report_id
+    assert p["verification"]["outcome"] == "fact_only"
+    assert p["verification"]["regen_count"] == 0             # explain 미진입
+    assert p["interpretation_meta"]["source"] == "fallback"
+    assert p["interpretation_meta"]["provider"] is None      # 해석 없으니 식별도 null
     json.loads(to_json(p))                                   # 실배선 산출물도 왕복 가능
