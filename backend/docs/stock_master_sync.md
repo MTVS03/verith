@@ -71,13 +71,22 @@ uv run python -m scripts.sync_stocks --apply       # 실제 반영(commit)
 - ⚠️ 실행 전 외부 네트워크 호출·URL·DB 변경 여부(dry-run/`--apply`)를 확인하고 승인 후 실행한다.
 - 앱 startup·pytest 에서 실행하지 않는다. 테스트는 fake downloader/fixture bytes 사용.
 
-## 7. bootstrap seed 와의 구분
-- `scripts/seed_stocks`(10종, `ON CONFLICT DO NOTHING`) = **개발 bootstrap**(기존 값 보호).
-- `scripts/sync_stocks`(전체 마스터, insert/update) = **마스터 최신화**.
-- `stocks`(공통 마스터)와 Technical 10종 지원 정책(`BATTERY_TICKERS`)은 **별개** — sync 로 stocks 가
-  커져도 Technical 지원 범위는 자동 확대되지 않는다.
+## 7. canonical 정본 / bootstrap seed 관계 (승격)
+- **canonical stock master 정본 = `scripts/sync_stocks`(KIS 종목마스터 전체 주권)**. 실효 universe 는
+  이 sync 결과다(2,607 주권 = KOSPI 893 + KOSDAQ 1,714, `--inspect` 검산·`--apply` 검증 완료).
+- `scripts/seed_stocks`(battery 10종) + `scripts/seed_representative_stocks`(대표 3종) = **bootstrap/보조**.
+  master 가 이들을 포함하므로 `--apply` 시 unchanged 로 안정(충돌 없음). seed 는 제거 대상이 아니라
+  fresh/오프라인 dev 편의용으로 남는다(정본 아님).
+- **alias 는 수동/운영 큐레이션 경계** — sync 는 `stocks` 만 갱신하고 `stock_aliases` 는 손대지 않는다
+  (자동 대량 생성 없음). 공식명 정본은 `stocks.stock_name`.
+- **질문 처리 경로는 read-only** — resolver/supervisor/agents 는 canonical stocks 를 읽기만 하고, 질문
+  처리 중 자동 insert/update 하지 않는다. sync 는 **별도 관리 명령**(`--inspect`/dry-run/`--apply`)으로만.
+- `stocks`(공통 마스터)와 Technical 지원 정책은 **별개** — Technical 은 이제 형식 유효 ticker 전체 지원
+  (`is_supported_ticker`, allowlist 아님). stocks 확장이 곧 특정 agent 지원 확대를 의미하지 않는다.
 
 ## 8. 현재 한계 / 후속
-- 이번 브랜치는 **schema/migration 변경 없음**(`is_active`/`status`/`last_synced_at`/`listed_at`/
-  `delisted_at` 추가 안 함). 상장폐지·sync 이력은 데이터·정책 확정 후 별도(예: `stock_master_sync_runs`).
-- 실데이터 `--apply` 는 아직 수행 전 — dry-run/`--inspect` 검산 후 승인받아 실행한다.
+- **shared dev=test DB(`verith`) 에는 아직 --apply 안 함** — 별도 canonical DB(`verith_canonical`)에
+  적용·검증했다(resolver broader 검증 + 테스트 ripple 격리 측정). 공유 DB 반영은 별도 결정.
+- schema/migration 변경 없음(`is_active`/`status`/`last_synced_at`/`delisted_at` 없음). 삭제·비활성화·
+  상장폐지 lifecycle·sync 이력은 데이터·정책 확정 후 별도(예: `stock_master_sync_runs`).
+- min_count 하한: 실측(KOSPI 893/KOSDAQ 1,714) 확보 → 기본 500 에서 상향 권장(후속).

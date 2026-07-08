@@ -3,12 +3,43 @@
 from __future__ import annotations
 
 import pytest_asyncio
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from db.models.common.stock import Stock
+from db.models.common.stock_alias import StockAlias
 from scripts.seed_stock_aliases import seed as seed_aliases
 from scripts.seed_stocks import seed as seed_stocks
 from src.api.services.stock_resolver_service import StockResolverService
+from src.api.text_normalize import normalize_stock_text
 
 _NONEXISTENT = "존재하지않는테스트종목zzz"  # 실존 종목 가정에 의존하지 않는 not_found 입력
+
+# synthetic 종목/별칭(실존 아님 · KIS master universe 와 절대 충돌 없음). 실존 "LG" 등은 전체 master
+# 반영 시 (주)LG(003550) 같은 동명 종목이 생겨 모호성이 달라지므로, ambiguous/ordering/구두점 **메커니즘**
+# 은 synthetic 으로 검증한다(universe 가 커져도 의미 유지 · self-contained).
+_SYN_STOCKS = [
+    {"stock_code": "990001", "stock_name": "씬알파종목", "market": "KOSPI"},
+    {"stock_code": "990002", "stock_name": "씬베타종목", "market": "KOSPI"},
+    {"stock_code": "990003", "stock_name": "씬펀치종목", "market": "KOSPI"},
+]
+_SYN_ALIASES = [
+    {"stock_code": "990001", "alias": "QZ", "alias_type": "ambiguous_group"},   # 짧은(len2) 모호 그룹
+    {"stock_code": "990002", "alias": "QZ", "alias_type": "ambiguous_group"},
+    {"stock_code": "990003", "alias": "P&Q", "alias_type": "english"},          # 구두점 정규화 검증용
+]
+
+
+async def _seed_synthetic(db_session) -> None:
+    """synthetic 종목+별칭을 in-tx 로 추가(멱등). resolver 는 같은 세션이라 즉시 본다."""
+    await db_session.execute(
+        pg_insert(Stock).values(_SYN_STOCKS).on_conflict_do_nothing(index_elements=[Stock.stock_code])
+    )
+    rows = [{**a, "normalized_alias": normalize_stock_text(a["alias"])} for a in _SYN_ALIASES]
+    await db_session.execute(
+        pg_insert(StockAlias).values(rows)
+        .on_conflict_do_nothing(index_elements=[StockAlias.normalized_alias, StockAlias.stock_code])
+    )
+    await db_session.flush()
 
 
 @pytest_asyncio.fixture
@@ -51,11 +82,12 @@ async def test_abbreviation(resolver):
     assert r.status == "resolved" and r.stock.stock_code == "361610"
 
 
-# 6. ambiguous_group: LG → 2종
-async def test_ambiguous_group(resolver):
-    r = await resolver.resolve("LG 리포트 보여줘")
+# 6. ambiguous_group: synthetic QZ → 2종 (실존 "LG"는 전체 master 에서 (주)LG 로 모호성 달라짐)
+async def test_ambiguous_group(resolver, db_session):
+    await _seed_synthetic(db_session)
+    r = await resolver.resolve("QZ 리포트 보여줘")
     assert r.status == "ambiguous" and r.reason == "ambiguous_alias"
-    assert {c.stock_code for c in r.candidates} == {"051910", "373220"}
+    assert {c.stock_code for c in r.candidates} == {"990001", "990002"}
     assert all(c.match_type == "ambiguous_group" for c in r.candidates)
 
 
@@ -90,11 +122,12 @@ async def test_duplicate_dedup(resolver):
     assert r.status == "resolved" and r.stock.stock_code == "051910"
 
 
-# 12. deterministic ordering (ambiguous_group → stock_code asc)
-async def test_deterministic_ordering(resolver):
-    # "뉴스"는 승인된 종목 문맥 키워드 → 짧은 그룹명 "LG" 후보 인정.
-    r = await resolver.resolve("LG 뉴스")
-    assert [c.stock_code for c in r.candidates] == ["051910", "373220"]
+# 12. deterministic ordering (ambiguous_group → stock_code asc) — synthetic QZ
+async def test_deterministic_ordering(resolver, db_session):
+    await _seed_synthetic(db_session)
+    # "뉴스"는 승인된 종목 문맥 키워드 → 짧은 그룹명(len2) "QZ" 후보 인정.
+    r = await resolver.resolve("QZ 뉴스")
+    assert [c.stock_code for c in r.candidates] == ["990001", "990002"]
 
 
 # 13. not_found
@@ -110,7 +143,8 @@ async def test_unknown_code_not_silently_ignored(resolver):
     assert r.status == "ambiguous" and r.reason == "unknown_identifier"
 
 
-# 17. punctuation 정규화가 실제 매칭까지 이어진다
-async def test_punctuation_resolves(resolver):
-    r = await resolver.resolve("L&F 리포트")
-    assert r.status == "resolved" and r.stock.stock_code == "066970"
+# 17. punctuation 정규화가 실제 매칭까지 이어진다 — synthetic P&Q(→pq)
+async def test_punctuation_resolves(resolver, db_session):
+    await _seed_synthetic(db_session)
+    r = await resolver.resolve("P&Q 리포트")
+    assert r.status == "resolved" and r.stock.stock_code == "990003"
