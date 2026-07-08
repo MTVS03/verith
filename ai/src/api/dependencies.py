@@ -17,6 +17,7 @@ from src.agents.technical.services.openai_llm_client import default_openai_clien
 from src.agents.technical.supervisor.technical_supervisor import OhlcvFetcher
 from src.api.errors import ai_unavailable
 from src.supervisor.execution.adapters import AgentAdapter, default_adapters
+from src.supervisor.planning.fallback_lookup import FallbackLookupProtocol, StaticFallbackLookup
 from src.supervisor.planning.resolve_client import ResolverProtocol, StockResolverClient
 
 # endpoint가 deadline을 만든 뒤 client를 생성해야 하므로(요청 timeout을 client에 주입) client를 바로
@@ -62,6 +63,15 @@ def get_resolver() -> ResolverProtocol:
 
     테스트는 이 의존성을 override해 fake resolver를 주입한다(실 backend 호출 방지)."""
     return StockResolverClient()
+
+
+def get_fallback() -> FallbackLookupProtocol:
+    """canonical resolver not_found 일 때만 planner 가 쓰는 보조 lookup(ephemeral, 정본 write 없음).
+
+    기본은 `StaticFallbackLookup()`(큐레이션 entries 기본 비어 있음 → 현재는 사실상 no-op, 오늘 동작
+    무변경). 운영에서 KIS/DART/alias 기반 얇은 client 로 교체하려면 이 의존성을 override 해 같은
+    `FallbackLookupProtocol` 을 주입한다. 테스트도 여기에 fake 를 주입한다."""
+    return StaticFallbackLookup()
 
 
 def get_adapters() -> dict[str, AgentAdapter]:

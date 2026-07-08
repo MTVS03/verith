@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 
 from src.agents.technical.services.openai_llm_client import default_openai_client
 from src.supervisor.execution.adapters import ExecutionDeps, default_adapters
+from src.supervisor.planning.fallback_lookup import StaticFallbackLookup
 from src.supervisor.planning.resolve_client import StockResolverClient
 from src.supervisor.runtime import run_analysis
 from src.supervisor.schemas import SupervisorInput
@@ -57,6 +58,9 @@ def main() -> None:
 
     # 실 의존성 주입 — endpoint 가 하는 wiring 을 스크립트에서 재현.
     resolver = StockResolverClient()
+    # canonical not_found 일 때만 쓰는 보조 lookup(ephemeral, 정본 write 없음). 기본 entries 는 비어 있어
+    # 오늘 동작 무변경 — 운영에서 KIS/DART/alias 기반 client 로 교체 주입한다.
+    fallback = StaticFallbackLookup()
     try:
         llm_client = default_openai_client()
     except RuntimeError:
@@ -71,10 +75,13 @@ def main() -> None:
     )
     inp = SupervisorInput(query=query, request_id=deps.request_id, trace_id=deps.trace_id)
 
-    execution = run_analysis(inp, resolver=resolver, adapters=default_adapters(), deps=deps)
+    execution = run_analysis(
+        inp, resolver=resolver, fallback=fallback, adapters=default_adapters(), deps=deps
+    )
 
     res = execution.resolution
-    print(f"[smoke] resolution: used={res.used_stock_resolver} status={res.status} "
+    print(f"[smoke] resolution: used={res.used_stock_resolver} fallback={res.used_fallback_lookup} "
+          f"status={res.status} source={res.source} persisted={res.persisted} "
           f"stock={res.stock.stock_code if res.stock else None}")
     for r in execution.results:
         line = f"  - {r.agent_type:11} {r.status:8} reason={r.reason}"
