@@ -18,6 +18,8 @@
 | GET | `/api/technical/reports` | — (query) | 200 `TechnicalReportListResponse` | — |
 | GET | `/api/technical/reports/{id}` | — | 200 `TechnicalReportReadModel` | 404 |
 | DELETE | `/api/technical/reports/{id}` | — | 204 | 404 |
+| GET | `/api/technical/reports/{id}/charts` | — | 200 `TechnicalChartsReadModel` | 404 |
+| GET | `/api/technical/reports/{id}/trace` | — | 200 `TechnicalTraceDetailReadModel` | 404 |
 | GET | `/api/technical/reports/{id}/followups` | — | 200 `TechnicalReportFollowupsReadModel` | 404 |
 | POST | `/api/technical/reports/{id}/followups` | `FollowupCreateRequest` | 201 `FollowupItem` | 404/422 |
 
@@ -55,7 +57,8 @@
 | `risks` | items[] `{ flag, note?, ref_price? }` | 리스크(현재 확인된 위험) |
 | `charts` | available_periods[]·items[] `{ period, candle_unit?, display_order, has_chart_data, annotation_count }` | 차트 탭·렌더 여부 |
 | `verification` | outcome?·calc_passed?·regime_passed?·label_matched?·regen_count?·failed_indicators[]·summary? | 검증 상세 |
-| `trace_summary` | §6 | 생성/검증/품질 요약 |
+| `trace_summary` | §5 | 생성/검증/품질 요약 |
+| `trust_summary` | §5.1 | 상단 카드 집계(신뢰도/데이터품질/검증게이트/출처연결) |
 | `followup_count` | int | 후속 대화 수(스레드는 §7 별도 호출) |
 
 > `risks`(현재 확인된 위험) ↔ `interpretation.invalidation_or_caution`(해석이 틀어지는 조건)은 **분리**된 개념이다.
@@ -86,6 +89,62 @@
 | `flags.limited_data` | bool | 데이터 부족 경고 |
 | `flags.has_intraday_context` | bool | 장중 컨텍스트 유무 |
 | `flags.has_daily/weekly/monthly_chart` | bool | 타임프레임별 차트 유무 |
+
+### 5.1 trust_summary (상단 카드 — detail 응답 내, 프론트 재계산 불필요)
+**저장값 projection**(계산 재실행 없음).
+| 블록 | 필드 | 용도 |
+|---|---|---|
+| `signal_quality` | signal_score?·signal_label?(consensus 파생)·consensus?·confidence?·confidence_basis? | 신뢰도 카드 |
+| `data_quality` | data_status?·available_periods[]·intraday_available·chart_count·limited | 데이터 품질 카드(= trace_summary.data_quality 동일) |
+| `verification_gate` | outcome?·calc_passed?·regime_passed?·label_matched?·verification_warning | 검증 게이트 카드 |
+| `source_linkage` | total_signal_items·sourced_signal_items·source_coverage_ratio | 출처 연결(신호 중 LLM 근거 비율, 저장 detail_source 기준) |
+
+**값 의미 잠금(QA 드리프트 방지 — 숫자보다 해석을 고정). 전부 저장값 projection, backend 재계산/재판정 없음.**
+
+- **`signal_label`** = `signal.consensus`(strong_positive/weak_positive/neutral/weak_negative/strong_negative)를
+  사용자용 한글 라벨로 매핑한 **표시값**(강한 긍정…강한 부정). **별도 AI 재판정 아님**, **매수/매도 신호 아님**.
+  `signal_score`(−1~1)와 짝. consensus 없으면 `null`.
+
+- **`source_coverage_ratio`** — 신호 설명이 **LLM 근거로 붙은 비율**(≠ 적중률/정확도/수익성). **badge 가능**.
+  - **분모** `total_signal_items` = `technical_signals` 전체 개수.
+  - **분자** `sourced_signal_items` = `detail_source ∈ {llm, llm_regenerated}` 인 개수. **`template_fallback` 은 제외**.
+    (주의: `detail_source` 는 항상 채워지므로 "채워짐 여부"가 아니라 **LLM 근거 여부**가 분자다.)
+  - `ratio = round(분자/분모, 3)`, **분모 0 이면 `0.0`**(0-safe, null 아님).
+
+- **`verification_gate`** = 내부 **검증 게이트** 결과(계산/국면/라벨 정합). **분석의 정답·수익 보장 아님.** FAIL enum 은 없다.
+  | 상태 | 조건 | badge |
+  |---|---|---|
+  | **PASS** | `outcome == "passed"` **AND** `calc_passed ∧ regime_passed ∧ label_matched` (`verification_warning=false`) | 통과 표시(또는 무표시) |
+  | **WARN** | `outcome != "passed"`(예: `template_fallback`) **OR** calc/regime/label 중 하나라도 false (`verification_warning=true`) | 주의 아이콘 |
+  - `verification_warning` = 위 WARN 조건의 boolean. **"리포트가 틀렸다"는 단정이 아니라 "게이트 미통과/불일치 주의".**
+  - 상세 원본은 detail 의 `verification` 블록(regen_count·failed_indicators 등). `trust_summary.verification_gate` 는 그 **요약**.
+
+- **`data_quality`**(= `trace_summary.data_quality` 동일 블록) — 데이터 충분성 요약:
+  `data_status`(normal/stale_cache/data_limited/regime_unavailable) · `limited`(= data_status ∈ {data_limited,
+  regime_unavailable}, `flags.limited_data` 와 동일) · `available_periods[]`(저장된 차트 period 목록) ·
+  `chart_count`(차트 개수) · `intraday_available`(intraday_context 존재 또는 "1d" 차트 유무). **재계산 아님.**
+
+### 5.2 차트 full — `GET /api/technical/reports/{id}/charts`
+**기본 정책(잠금): all-period eager load.** 이 endpoint 는 `available_periods` 전부(3m/1y/5y…)의 full payload 를
+**한 번에** 반환한다. 프론트는 상세 진입 시 이 응답 하나로 **3m/1y/5y 탭 전환까지 즉시 가능**해야 한다(이미 생성된
+리포트를 기다림 없이 읽게 하는 UX 우선). detail 의 `charts` 는 **메타만**(period/candle_unit/display_order/
+has_chart_data/annotation_count)이고, 실제 렌더용 full payload 는 이 전용 endpoint 로 온다.
+> **`?period=` 는 기본 계약이 아니라 향후 최적화 옵션이다.** 지금은 파라미터 없이 전체를 받는 게 정본이며, payload
+> 가 커지면 나중에 `?period=3m` 로 기간별 분리 호출을 **추가**할 수 있다(계약 shape 불변, additive). 프론트는
+> period 필터를 옵션으로만 감안하고, **기본은 all-period eager 를 기대**하면 된다.
+`TechnicalChartsReadModel`: `report_id`·`stock`·`available_periods[]`·`charts[]`(`ChartItemFull`:
+period·candle_unit?·display_order·has_chart_data·annotation_count·**`chart_data`(AI ChartData: candles/overlays/
+subcharts/annotations)**·`annotations[]`(편의 승격)). `chart_data` 는 raw internal 이 아니라 **AI 차트 렌더 계약**이다.
+
+### 5.3 trace drawer — `GET /api/technical/reports/{id}/trace`
+단계별 처리 타임라인 UI 용. **⚠️ 단계별 `duration_ms` 는 현재 저장 구조에 없어 `null`**(측정/영속화 전까지). steps 는
+저장된 결과값(source/interpretation/verification)에서 **truthful 재구성**이며 지어낸 값이 아니다.
+`TechnicalTraceDetailReadModel`: `overall`(total_steps·total_duration_ms(=null)·llm_used·data_source_summary) +
+`steps[]`(`TraceStepItem`: step_order·step_key·title·source?·duration_ms(=null)·status(ok/degraded/skipped/fallback)·
+short_description?·llm_involved). step_key: data_collect→regime_classify→signal_aggregate→interpret_report→verify.
+> **프론트 라벨링 주의:** 이건 **저장값 기반 "처리 단계 요약(reconstruction)"** 이지 **실측 처리시간/실시간 실행
+> 로그가 아니다.** UI 라벨을 "처리 단계"/"생성 경로"처럼 쓰고, "실행 시간 Xms"/"실시간 trace"로 오해하게 표기하지
+> 말 것(duration 은 항상 null). 실측 타임라인은 AI측 trace 영속화가 생긴 뒤 별도로 채운다.
 
 ## 6. Follow-up API
 ### 6.1 read — `GET /api/technical/reports/{id}/followups`
@@ -171,7 +230,31 @@ directional_bias?·final_regime?·as_of? — 스레드 헤더 연결감)·`follo
     "stability": { "confidence": 0.42, "confidence_basis": "...", "verification_consistent": true },
     "flags": { "used_fallback": false, "had_regeneration": false, "limited_data": false, "verification_warning": false,
                "has_intraday_context": false, "has_daily_chart": true, "has_weekly_chart": true, "has_monthly_chart": false } },
+  "trust_summary": {
+    "signal_quality": { "signal_score": 0.3, "signal_label": "약한 긍정", "consensus": "weak_positive", "confidence": 0.42, "confidence_basis": "..." },
+    "data_quality": { "data_status": "normal", "available_periods": ["3m","1y","5y"], "intraday_available": false, "chart_count": 3, "limited": false },
+    "verification_gate": { "outcome": "passed", "calc_passed": true, "regime_passed": true, "label_matched": true, "verification_warning": false },
+    "source_linkage": { "total_signal_items": 3, "sourced_signal_items": 3, "source_coverage_ratio": 1.0 } },
   "followup_count": 2 }
+```
+
+**차트 full** (`GET /api/technical/reports/{id}/charts`)
+```json
+{ "report_id": "e2b1...", "stock": { "stock_code": "373220", "stock_name": "LG에너지솔루션", "market": "KOSPI" },
+  "available_periods": ["3m","1y","5y"],
+  "charts": [ { "period": "3m", "candle_unit": "D", "display_order": 0, "has_chart_data": true, "annotation_count": 3,
+                "chart_data": { "candle_unit": "D", "candles": [/*...*/], "overlays": [/*...*/], "annotations": [/*...*/] },
+                "annotations": [/*...*/] } ] }
+```
+
+**trace drawer** (`GET /api/technical/reports/{id}/trace`) — `duration_ms` 는 미측정이라 `null`
+```json
+{ "report_id": "e2b1...",
+  "overall": { "total_steps": 5, "total_duration_ms": null, "llm_used": true, "data_source_summary": "KIS" },
+  "steps": [
+    { "step_order": 1, "step_key": "data_collect", "title": "시세 수집", "source": "KIS", "duration_ms": null, "status": "ok", "short_description": "data_status=normal", "llm_involved": false },
+    { "step_order": 4, "step_key": "interpret_report", "title": "해석 생성", "source": "llm", "duration_ms": null, "status": "ok", "short_description": "interpretation_source=llm", "llm_involved": true }
+  ] }
 ```
 
 **follow-up POST** (`POST /api/technical/reports/{id}/followups`)

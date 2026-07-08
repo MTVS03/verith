@@ -185,6 +185,40 @@ class TraceSummaryBlock(BaseModel):
     flags: TraceFlagsBlock
 
 
+# ── trust/quality summary (상단 카드용 집계 — 저장값 projection, 프론트 재계산 불필요) ──
+class SignalQualityBlock(BaseModel):
+    signal_score: float | None = None
+    signal_label: str | None = None       # consensus 파생 라벨
+    consensus: str | None = None
+    confidence: float | None = None
+    confidence_basis: str | None = None
+
+
+class VerificationGateBlock(BaseModel):
+    outcome: str | None = None
+    calc_passed: bool | None = None
+    regime_passed: bool | None = None
+    label_matched: bool | None = None
+    verification_warning: bool = False
+
+
+class SourceLinkageBlock(BaseModel):
+    """signal item 의 detail_source 기준 출처 연결 집계(truthful — 없으면 0)."""
+
+    total_signal_items: int = 0
+    sourced_signal_items: int = 0          # detail_source ∈ {llm, llm_regenerated}
+    source_coverage_ratio: float = 0.0     # sourced/total (total=0 이면 0.0)
+
+
+class TrustSummaryBlock(BaseModel):
+    """상단 신뢰도/데이터품질/검증게이트/출처연결 카드용 집계."""
+
+    signal_quality: SignalQualityBlock
+    data_quality: DataQualityBlock         # trace_summary 와 동일 블록 재사용(data_status·limited·periods 등)
+    verification_gate: VerificationGateBlock
+    source_linkage: SourceLinkageBlock
+
+
 class TechnicalReportReadModel(BaseModel):
     """POST/GET 단건 응답 — 프론트가 섹션별로 바로 렌더할 수 있는 read model.
 
@@ -203,7 +237,62 @@ class TechnicalReportReadModel(BaseModel):
     charts: ChartsBlock
     verification: VerificationBlock
     trace_summary: TraceSummaryBlock
+    trust_summary: TrustSummaryBlock                   # 상단 카드용 집계(신뢰도/데이터품질/검증게이트/출처연결)
     followup_count: int = 0                            # 이 리포트에 이어진 후속 질문 수(스레드는 별도 endpoint)
+
+
+# ── full chart read model (전용 endpoint GET /{id}/charts — 차트 렌더용) ──────
+class ChartItemFull(BaseModel):
+    """period 별 차트 full payload. chart_data 는 AI ChartData 계약(candles/overlays/subcharts/annotations)."""
+
+    period: str
+    candle_unit: str | None = None
+    display_order: int
+    has_chart_data: bool = False
+    annotation_count: int = 0
+    chart_data: dict | None = None         # 렌더용 full 구조(raw internal 아님 — AI chart 계약)
+    annotations: list = Field(default_factory=list)   # 편의상 chart_data.annotations 를 승격
+
+
+class TechnicalChartsReadModel(BaseModel):
+    """GET /api/technical/reports/{id}/charts — 차트 탭 렌더용 full payload(detail 은 메타만 유지)."""
+
+    report_id: UUID
+    stock: StockBlock
+    available_periods: list[str] = Field(default_factory=list)
+    charts: list[ChartItemFull] = Field(default_factory=list)
+
+
+# ── detailed trace read model (전용 endpoint GET /{id}/trace — trace drawer) ──
+class TraceStepItem(BaseModel):
+    """파이프라인 단계 — **저장된 결과값에서 재구성**. duration_ms 는 미측정이라 null(지어내지 않음)."""
+
+    step_order: int
+    step_key: str
+    title: str
+    source: str | None = None              # KIS / computed / llm / template_fallback 등
+    duration_ms: int | None = None         # 현재 저장 구조상 단계별 시간 미측정 → 항상 null
+    status: str                            # ok / degraded / skipped / fallback
+    short_description: str | None = None
+    llm_involved: bool = False
+
+
+class TraceOverallBlock(BaseModel):
+    total_steps: int = 0
+    total_duration_ms: int | None = None   # 미측정 → null
+    llm_used: bool = False
+    data_source_summary: str | None = None
+
+
+class TechnicalTraceDetailReadModel(BaseModel):
+    """GET /api/technical/reports/{id}/trace — trace drawer 용. raw internal log dump 아님.
+
+    steps 는 저장된 단계별 결과(source/interpretation/verification)로부터 **truthful 재구성**이며, 단계별
+    duration_ms 는 현재 저장 구조에 없어 null 이다(측정/영속화되면 채운다)."""
+
+    report_id: UUID
+    overall: TraceOverallBlock
+    steps: list[TraceStepItem] = Field(default_factory=list)
 
 
 # ── follow-up read flow (parent report 기준 대화 흐름) ──────────────────────
