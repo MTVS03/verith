@@ -79,6 +79,12 @@ async def list_followups(
     return list(result)
 
 
+async def add_followup(session: AsyncSession, followup: TechnicalReportFollowup) -> None:
+    """follow-up row 추가(같은 트랜잭션). commit 은 호출자(service)가 한다."""
+    session.add(followup)
+    await session.flush()
+
+
 async def count_followups(session: AsyncSession, report_id: UUID) -> int:
     """report 에 연결된 follow-up 수(report detail 의 followup_count 신호용)."""
     n = await session.scalar(

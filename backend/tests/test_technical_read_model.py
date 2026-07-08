@@ -239,3 +239,17 @@ def test_followup_context_tolerates_unknown_snapshot_shape():
 def test_read_model_has_followup_count_default_zero():
     rm = build_read_model(report_id=_RID, raw=_raw(), stock=None)
     assert rm.followup_count == 0
+
+
+def test_parent_snapshot_roundtrips_through_read_context():
+    # writer 가 저장한 snapshot 을 read `_followup_context` 가 그대로 요약으로 복원한다(키 정합).
+    from src.api.services.technical_report_service import _followup_context, _parent_context_snapshot
+    from db.models.common.stock import Stock
+    stock = Stock(stock_code="373220", stock_name="LG에너지솔루션", market="KOSPI")
+    snap = _parent_context_snapshot(report=_report(), stock=stock)
+    assert snap["snapshot_version"] == 1 and snap["base_report_id"] == str(_RID)
+    assert snap["base_report_regime"] == "uptrend_intact" and snap["base_report_bias"] == "bullish"
+    ctx = _followup_context(snap)                               # write→read 정합
+    assert ctx.has_context_snapshot is True
+    assert ctx.base_report_regime == "uptrend_intact" and ctx.base_report_bias == "bullish"
+    assert ctx.base_report_signal_score == 0.3

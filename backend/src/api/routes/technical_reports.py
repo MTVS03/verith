@@ -14,6 +14,8 @@ from src.api.clients.ai_client import (
 )
 from src.api.deps import get_technical_report_service
 from src.api.schemas.technical_report import (
+    FollowupCreateRequest,
+    FollowupItem,
     TechnicalReportCreateRequest,
     TechnicalReportFollowupsReadModel,
     TechnicalReportReadModel,
@@ -51,6 +53,21 @@ async def get_technical_report(
     if read_model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
     return read_model
+
+
+@router.post(
+    "/{report_id}/followups", response_model=FollowupItem, status_code=status.HTTP_201_CREATED
+)
+async def create_technical_report_followup(
+    report_id: UUID,
+    req: FollowupCreateRequest,
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> FollowupItem:
+    """parent report 기준 후속 질문/답변 저장(answer 는 caller 제공). 응답 = FollowupItem(GET list item 동일)."""
+    item = await service.create_followup(report_id, req)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return item
 
 
 @router.get("/{report_id}/followups", response_model=TechnicalReportFollowupsReadModel)

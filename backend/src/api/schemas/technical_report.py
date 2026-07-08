@@ -220,8 +220,22 @@ class FollowupContextBlock(BaseModel):
     base_report_as_of: str | None = None
 
 
+class FollowupCreateRequest(BaseModel):
+    """POST /api/technical/reports/{id}/followups 요청.
+
+    answer 는 **caller(상위/프론트)가 생성**해 전달한다 — backend 는 검증·저장·parent context snapshot 만
+    한다(본문 재생성 아님). request_id/trace_id/model_name 은 caller 우선, 없으면 backend fallback/None."""
+
+    question: str = Field(min_length=1, max_length=1000)
+    answer: str = Field(min_length=1, max_length=50000)
+    client_session_id: str | None = None
+    request_id: str | None = None
+    trace_id: str | None = None
+    model_name: str | None = None
+
+
 class FollowupItem(BaseModel):
-    """단일 후속 질문/답변 — 제품용 메타(raw trace 아님)."""
+    """단일 후속 질문/답변 — 제품용 메타(raw trace 아님). POST 응답 == GET list item 동일 shape."""
 
     followup_id: UUID
     request_id: str | None = None

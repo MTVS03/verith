@@ -98,8 +98,25 @@ thread 는 이 endpoint 로 받는다(스레드가 길어져도 detail payload �
   (`base_report_regime`/`bias`/`data_status`/`signal_score`/`as_of`)만 projection — snapshot 이 그 키를 담으면
   채워지고, 아니면 `has_context_snapshot` 만 true 로 두고 나머지는 `null`(tolerant). **미래 follow-up writer 는 위
   키로 snapshot 을 채우면 프론트가 base 맥락을 바로 읽는다.**
-- follow-up **생성(write)은 이번 범위 밖** — 이 endpoint 는 read flow 만. write 경로가 붙기 전엔 `followups=[]`.
 - **trace**: `trace_id`·`model_name`·`created_at` 만 제품용으로 노출(raw trace dump 아님).
+
+### Follow-up 생성 (write)
+`POST /api/technical/reports/{id}/followups` — parent report 기준 후속 질문/답변 저장. **answer 는 caller(상위/
+프론트)가 생성**해 보낸다(backend 는 검증·저장·parent snapshot 만 — 본문 재생성/AI 재호출 아님).
+```jsonc
+// 요청
+{ "question": "왜 과열인가요?", "answer": "단기 과열 신호가 관찰됩니다.",
+  "client_session_id": "sess-9", "request_id": "...?", "trace_id": "...?", "model_name": "...?" }
+// 응답 201 = FollowupItem (GET list item 과 동일 shape → 프론트가 thread 에 그대로 append)
+```
+- **404**: parent report 없음. **422**: 빈/과길이 question·answer(answer 필수).
+- **메타 정책(caller 우선 + backend fallback)**: `request_id` 없으면 backend 생성(`fu-...`), `trace_id`/`model_name`
+  은 caller 미제공 시 `null`(caller-provided answer 라 정직하게 null 허용).
+- **context_snapshot(v1 canonical shape)**: 저장 시 parent report projection 으로 future-proof 하게 채운다 —
+  `snapshot_version`·`base_report_id`·`stock_code/name/market`·`base_report_regime`·`base_report_bias`·
+  `base_report_data_status`·`base_report_signal_score`·`one_line_summary`·`base_report_as_of`·`trace_path_label`·
+  `verification_outcome`. **read 계약은 raw 미노출** — `_followup_context` 가 `base_report_*` 키만 요약으로 복원.
+- **read-after-write**: POST 로 만든 row 는 즉시 `GET .../{id}/followups`(created_at 오름차순)에 나타난다.
 
 ## 목록 (별도 경량 인덱스)
 `GET /api/reports?agent_type=technical` 은 full read model 이 아니라 **인덱스 요약**(`AgentReportListItem`:

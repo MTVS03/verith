@@ -37,6 +37,7 @@ from src.api.schemas.technical_report import (
     DataQualityBlock,
     DriversBlock,
     FollowupContextBlock,
+    FollowupCreateRequest,
     FollowupItem,
     FollowupReportSummary,
     GenerationPathBlock,
@@ -306,6 +307,37 @@ def _followup_item(row: TechnicalReportFollowup) -> FollowupItem:
     )
 
 
+# context_snapshot canonical shape(v1) — writer 가 채우는 정본. read `_followup_context` 가 base_report_*
+# 키를 직접 소비하므로 그 키명으로 저장한다(별도 매핑 불필요). raw 저장이지만 read 계약은 요약 projection.
+_SNAPSHOT_VERSION = 1
+
+
+def _parent_context_snapshot(*, report: TechnicalReport, stock: Stock | None) -> dict:
+    """parent report → follow-up context_snapshot(future-proof). build_read_model projection 재사용(DRY)."""
+    rm = build_read_model(
+        report_id=report.id,
+        raw=(report.output_payload if isinstance(report.output_payload, dict) else {}),
+        stock=stock,
+    )
+    return {
+        "snapshot_version": _SNAPSHOT_VERSION,
+        "base_report_id": str(report.id),
+        "stock_code": rm.stock.stock_code,
+        "stock_name": rm.stock.stock_name,
+        "market": rm.stock.market,
+        # read `_followup_context` 가 직접 소비하는 키들(base_report_*).
+        "base_report_regime": rm.summary.final_regime,
+        "base_report_bias": rm.summary.directional_bias,
+        "base_report_data_status": rm.meta.data_status,
+        "base_report_signal_score": rm.signals.signal_score,
+        "base_report_as_of": rm.meta.as_of.isoformat() if rm.meta.as_of else None,
+        "one_line_summary": rm.summary.one_line_summary,
+        # 추가 맥락(read 요약엔 아직 안 쓰지만 future-proof 보존).
+        "trace_path_label": rm.trace_summary.generation_path.path_label,
+        "verification_outcome": rm.trace_summary.verification_summary.outcome,
+    }
+
+
 def build_followups_read_model(
     *, report: TechnicalReport, stock: Stock | None, followups: list[TechnicalReportFollowup]
 ) -> TechnicalReportFollowupsReadModel:
@@ -553,6 +585,36 @@ class TechnicalReportService:
         stock = await tr_repo.get_stock(self._session, report.stock_code)
         followups = await tr_repo.list_followups(self._session, report_id)
         return build_followups_read_model(report=report, stock=stock, followups=followups)
+
+    async def create_followup(
+        self, report_id: UUID, req: FollowupCreateRequest
+    ) -> FollowupItem | None:
+        """parent report 기준 follow-up 생성/저장. answer 는 caller 제공(본문 재생성 아님).
+
+        report 없으면 None(route 404). context_snapshot 은 parent report projection 으로 future-proof 저장하되,
+        read model 은 요약 projection(raw 미노출)을 유지한다. 저장 직후 응답 == GET list item(FollowupItem)."""
+        report = await tr_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        snapshot = _parent_context_snapshot(report=report, stock=stock)
+
+        now = datetime.now(UTC)
+        row = TechnicalReportFollowup(
+            id=uuid4(),
+            report_id=report_id,
+            request_id=(req.request_id or f"fu-{uuid4().hex}"),   # caller 우선, 없으면 backend fallback
+            client_session_id=req.client_session_id,
+            question=req.question,
+            answer=req.answer,
+            model_name=req.model_name,                            # caller-provided answer 이므로 없으면 None
+            trace_id=req.trace_id,
+            context_snapshot=snapshot,
+            created_at=now,                                       # 즉시 응답·read-after-write 위해 명시
+        )
+        await tr_repo.add_followup(self._session, row)
+        await self._session.commit()
+        return _followup_item(row)
 
     async def list_reports(
         self,

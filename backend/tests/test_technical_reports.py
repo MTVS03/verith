@@ -196,6 +196,68 @@ async def test_followups_404_for_missing_report(client):
     assert resp.status_code == 404
 
 
+# 4d) follow-up write path (POST)
+async def test_create_followup_persists_and_returns_item(client, db_session):
+    from db.models.technical.report_followup import TechnicalReportFollowup
+    rid = await _create(client)
+    body_in = {"question": "왜 과열인가요?", "answer": "단기 과열 신호가 관찰됩니다.",
+               "model_name": "gpt-x", "trace_id": "tr-fu-1", "client_session_id": "sess-9"}
+    resp = await client.post(f"{_POST}/{rid}/followups", json=body_in)
+    assert resp.status_code == 201, resp.text
+    item = resp.json()
+    # 응답 = FollowupItem shape
+    assert set(item.keys()) == {
+        "followup_id", "request_id", "question", "answer", "model_name",
+        "trace_id", "created_at", "answer_length", "context",
+    }
+    assert item["question"] == "왜 과열인가요?" and item["answer_length"] == len(body_in["answer"])
+    assert item["model_name"] == "gpt-x" and item["trace_id"] == "tr-fu-1"
+    assert item["request_id"]                                   # caller 미제공 → backend fallback(fu-...)
+    # context_snapshot 이 parent 맥락으로 채워지고 read 는 요약 projection 으로 노출
+    assert item["context"]["has_context_snapshot"] is True
+    assert item["context"]["base_report_regime"] == "uptrend_intact"
+    # DB row 저장 확인(raw snapshot 은 base_report_* 키 보존)
+    row = await db_session.scalar(
+        select(TechnicalReportFollowup).where(
+            TechnicalReportFollowup.id == UUID(item["followup_id"]))
+    )
+    assert row.answer == body_in["answer"] and row.context_snapshot["base_report_id"] == str(rid)
+    assert row.context_snapshot["snapshot_version"] == 1
+
+
+async def test_create_followup_404_missing_report(client):
+    from uuid import uuid4
+    resp = await client.post(f"{_POST}/{uuid4()}/followups",
+                             json={"question": "q", "answer": "a"})
+    assert resp.status_code == 404
+
+
+async def test_create_followup_validation(client):
+    rid = await _create(client)
+    # 빈 question / 빈 answer → 422
+    assert (await client.post(f"{_POST}/{rid}/followups",
+            json={"question": "", "answer": "a"})).status_code == 422
+    assert (await client.post(f"{_POST}/{rid}/followups",
+            json={"question": "q"})).status_code == 422        # answer 필수
+
+
+async def test_create_followup_read_after_write(client):
+    rid = await _create(client)
+    await client.post(f"{_POST}/{rid}/followups", json={"question": "첫?", "answer": "첫 답"})
+    await client.post(f"{_POST}/{rid}/followups", json={"question": "둘?", "answer": "둘 답"})
+    flow = (await client.get(f"{_POST}/{rid}/followups")).json()
+    assert flow["followup_count"] == 2
+    assert [f["question"] for f in flow["followups"]] == ["첫?", "둘?"]   # created_at asc
+    # POST item 과 GET list item 의 shape 가 동일(키 집합)
+    post_item = (await client.post(f"{_POST}/{rid}/followups",
+                 json={"question": "셋?", "answer": "셋 답"})).json()
+    get_item = (await client.get(f"{_POST}/{rid}/followups")).json()["followups"][-1]
+    assert set(post_item.keys()) == set(get_item.keys())
+    assert get_item["question"] == "셋?"
+    # detail followup_count 반영
+    assert (await client.get(f"{_POST}/{rid}")).json()["followup_count"] == 3
+
+
 # 5) GET /api/reports 목록
 async def test_list_reports(client):
     rid = await _create(client)
