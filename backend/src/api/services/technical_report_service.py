@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models.common.agent_report import AgentReport
 from db.models.common.stock import Stock
 from db.models.technical.report_chart import TechnicalReportChart
+from db.models.technical.report_followup import TechnicalReportFollowup
 from db.models.technical.report_interpretation import TechnicalReportInterpretation
 from db.models.technical.report_risk_note import TechnicalReportRiskNote
 from db.models.technical.report_signal import TechnicalReportSignal
@@ -31,8 +32,37 @@ from src.api.repositories import technical_report_repository as tr_repo
 from src.api.schemas.agent_report import AgentReportListItem
 from src.api.schemas.ai_technical_output import TechnicalAgentOutputMirror
 from src.api.schemas.technical_report import (
+    ChartItem,
+    ChartsBlock,
+    DataQualityBlock,
+    DriversBlock,
+    FollowupContextBlock,
+    FollowupCreateRequest,
+    FollowupItem,
+    FollowupReportSummary,
+    GenerationPathBlock,
+    InterpretationBlock,
+    ListEngagementBlock,
+    ListMetaBlock,
+    ListStatusBlock,
+    ListSummaryBlock,
+    MetaBlock,
+    RiskItemBlock,
+    RisksBlock,
+    SignalItem,
+    SignalsBlock,
+    StabilityBlock,
+    StockBlock,
+    SummaryBlock,
     TechnicalReportCreateRequest,
-    TechnicalReportEnvelope,
+    TechnicalReportFollowupsReadModel,
+    TechnicalReportListItem,
+    TechnicalReportListResponse,
+    TechnicalReportReadModel,
+    TraceFlagsBlock,
+    TraceSummaryBlock,
+    VerificationBlock,
+    VerificationSummaryBlock,
 )
 
 
@@ -44,6 +74,362 @@ def _parse_dt(value: object) -> datetime | None:
     return None
 
 
+def _d(node: object) -> dict:
+    """dict 이면 그대로, 아니면 빈 dict(방어적 projection — 구버전/부분 payload 안정)."""
+    return node if isinstance(node, dict) else {}
+
+
+def _list(node: object) -> list:
+    return node if isinstance(node, list) else []
+
+
+def build_read_model(
+    *, report_id: UUID, raw: dict, stock: Stock | None, model_name: str | None = None,
+    followup_count: int = 0,
+) -> TechnicalReportReadModel:
+    """저장된 raw output_payload + canonical stock → 프론트 친화 read model(projection, 재해석 없음).
+
+    모든 접근은 방어적(.get)이라 구버전/부분 payload(구조화 섹션 없음)에서도 shape 가 안정적이다.
+    `stock` 블록은 **canonical stocks 우선**(없으면 payload/ticker fallback)."""
+    interp = _d(raw.get("interpretation"))
+    regime = _d(raw.get("regime"))
+    signal = _d(raw.get("signal"))
+    verification = _d(raw.get("verification"))
+    ticker = str(raw.get("ticker") or (stock.stock_code if stock else "") or "")
+
+    charts = _list(raw.get("charts"))
+    chart_items: list[ChartItem] = []
+    periods: list[str] = []
+    candle_units: set[str] = set()
+    for i, c in enumerate(charts):
+        cd = _d(_d(c).get("chart_data"))
+        period = str(_d(c).get("period") or "")
+        unit = cd.get("candle_unit")
+        if period:
+            periods.append(period)
+        if isinstance(unit, str):
+            candle_units.add(unit)
+        chart_items.append(ChartItem(
+            period=period,
+            candle_unit=unit,
+            display_order=i,
+            has_chart_data=bool(cd),
+            annotation_count=len(_list(cd.get("annotations"))),
+        ))
+
+    # ── trace summary(생성/검증/품질 요약) — 모두 저장값 파생, 재해석 없음 ──
+    interp_source = interp.get("source")
+    template_fallback_used = interp_source == "template_fallback"
+    regen = verification.get("regen_count")
+    had_regeneration = bool(regen) if isinstance(regen, int) else False
+    if had_regeneration and regen:
+        had_regeneration = regen > 0
+    if template_fallback_used:
+        path_label = "template_fallback"
+    elif had_regeneration or interp_source == "llm_regenerated":
+        path_label = "regenerated"
+    else:
+        path_label = "normal"
+
+    data_status = raw.get("data_status")
+    limited = data_status in ("data_limited", "regime_unavailable")
+    has_intraday = raw.get("intraday_context") is not None or "1d" in periods
+
+    calc, rgm, lbl = (
+        verification.get("calc_passed"),
+        verification.get("regime_passed"),
+        verification.get("label_matched"),
+    )
+    outcome = verification.get("outcome")
+    v_consistent = bool(calc) and bool(rgm) and bool(lbl) if verification else None
+    v_warning = bool(outcome and outcome != "passed") or (v_consistent is False)
+    failed_count = len(_list(verification.get("failed_indicators")))
+
+    trace_summary = TraceSummaryBlock(
+        trace_id=raw.get("trace_id"),
+        generation_path=GenerationPathBlock(
+            source=raw.get("source"),
+            interpretation_source=interp_source,
+            template_fallback_used=template_fallback_used,
+            regen_count=regen if isinstance(regen, int) else None,
+            path_label=path_label,
+        ),
+        data_quality=DataQualityBlock(
+            data_status=data_status,
+            available_periods=periods,
+            intraday_available=has_intraday,
+            chart_count=len(chart_items),
+            limited=limited,
+        ),
+        verification_summary=VerificationSummaryBlock(
+            outcome=outcome,
+            calc_passed=calc,
+            regime_passed=rgm,
+            label_matched=lbl,
+            failed_indicators_count=failed_count,
+        ),
+        stability=StabilityBlock(
+            confidence=signal.get("confidence"),
+            confidence_basis=signal.get("confidence_basis"),
+            verification_consistent=v_consistent,
+        ),
+        flags=TraceFlagsBlock(
+            used_fallback=template_fallback_used,
+            had_regeneration=had_regeneration,
+            limited_data=limited,
+            verification_warning=v_warning,
+            has_intraday_context=has_intraday,
+            has_daily_chart="D" in candle_units,
+            has_weekly_chart="W" in candle_units,
+            has_monthly_chart="M" in candle_units,
+        ),
+    )
+
+    return TechnicalReportReadModel(
+        report_id=report_id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else ticker),
+            stock_name=(stock.stock_name if stock else raw.get("stock_name")),
+            market=(stock.market if stock else None),
+        ),
+        meta=MetaBlock(
+            request_id=raw.get("request_id"),
+            trace_id=raw.get("trace_id"),
+            as_of=_parse_dt(raw.get("as_of")),
+            source=raw.get("source"),
+            data_status=raw.get("data_status"),
+            model_name=model_name,
+        ),
+        summary=SummaryBlock(
+            one_line_summary=interp.get("one_line_summary"),
+            directional_bias=interp.get("directional_bias"),
+            final_regime=regime.get("final_regime"),
+            daily_regime=regime.get("daily_regime"),
+            weekly_trend=regime.get("weekly_trend"),
+            monthly_trend=regime.get("monthly_trend"),
+            alignment_flag=regime.get("alignment_flag"),
+            timeframe_alignment=interp.get("timeframe_alignment"),
+        ),
+        interpretation=InterpretationBlock(
+            text=interp.get("text"),
+            source=interp.get("source"),
+            trend_interpretation=interp.get("trend_interpretation"),
+            signal_interpretation=interp.get("signal_interpretation"),
+            risk_interpretation=interp.get("risk_interpretation"),
+            what_to_watch_next=interp.get("what_to_watch_next"),
+            invalidation_or_caution=interp.get("invalidation_or_caution"),
+        ),
+        drivers=DriversBlock(
+            key_drivers=[str(x) for x in _list(interp.get("key_drivers"))],
+            warning_points=[str(x) for x in _list(interp.get("warning_points"))],
+        ),
+        signals=SignalsBlock(
+            signal_score=signal.get("signal_score"),
+            consensus=signal.get("consensus"),
+            confidence=signal.get("confidence"),
+            confidence_basis=signal.get("confidence_basis"),
+            items=[
+                SignalItem(
+                    indicator=str(_d(s).get("indicator") or ""),
+                    signal=_d(s).get("signal"),
+                    value=_d(s).get("value"),
+                    metrics=[str(m) for m in _list(_d(s).get("metrics"))],
+                    detail=_d(s).get("detail"),
+                    detail_source=_d(s).get("detail_source"),
+                )
+                for s in _list(raw.get("technical_signals"))
+            ],
+        ),
+        risks=RisksBlock(
+            items=[
+                RiskItemBlock(
+                    flag=str(_d(r).get("flag") or ""),
+                    note=_d(r).get("note"),
+                    ref_price=_d(r).get("ref_price"),
+                )
+                for r in _list(_d(raw.get("risk")).get("items"))
+            ],
+        ),
+        charts=ChartsBlock(available_periods=periods, items=chart_items),
+        verification=VerificationBlock(
+            outcome=verification.get("outcome"),
+            calc_passed=verification.get("calc_passed"),
+            regime_passed=verification.get("regime_passed"),
+            label_matched=verification.get("label_matched"),
+            regen_count=verification.get("regen_count"),
+            failed_indicators=[str(x) for x in _list(verification.get("failed_indicators"))],
+            summary=None,
+        ),
+        trace_summary=trace_summary,
+        followup_count=followup_count,
+    )
+
+
+# ── follow-up read flow projection (parent report 기준) ──────────────────────
+_SNAPSHOT_REGIME_KEYS = ("base_report_regime", "final_regime", "regime")
+_SNAPSHOT_BIAS_KEYS = ("base_report_bias", "directional_bias", "bias")
+_SNAPSHOT_STATUS_KEYS = ("base_report_data_status", "data_status")
+_SNAPSHOT_SCORE_KEYS = ("base_report_signal_score", "signal_score")
+_SNAPSHOT_ASOF_KEYS = ("base_report_as_of", "as_of")
+
+
+def _first(snapshot: dict, keys: tuple[str, ...]) -> object:
+    for k in keys:
+        if snapshot.get(k) is not None:
+            return snapshot.get(k)
+    return None
+
+
+def _followup_context(snapshot: object) -> FollowupContextBlock:
+    """raw context_snapshot(writer 미정의) → 요약 context. 알려진 키만 방어적으로 뽑는다."""
+    if not isinstance(snapshot, dict) or not snapshot:
+        return FollowupContextBlock(has_context_snapshot=False)
+    score = _first(snapshot, _SNAPSHOT_SCORE_KEYS)
+    as_of = _first(snapshot, _SNAPSHOT_ASOF_KEYS)
+    regime = _first(snapshot, _SNAPSHOT_REGIME_KEYS)
+    bias = _first(snapshot, _SNAPSHOT_BIAS_KEYS)
+    status = _first(snapshot, _SNAPSHOT_STATUS_KEYS)
+    return FollowupContextBlock(
+        has_context_snapshot=True,
+        base_report_regime=str(regime) if regime is not None else None,
+        base_report_bias=str(bias) if bias is not None else None,
+        base_report_data_status=str(status) if status is not None else None,
+        base_report_signal_score=float(score) if isinstance(score, (int, float)) else None,
+        base_report_as_of=str(as_of) if as_of is not None else None,
+    )
+
+
+def _followup_item(row: TechnicalReportFollowup) -> FollowupItem:
+    return FollowupItem(
+        followup_id=row.id,
+        request_id=row.request_id,
+        question=row.question,
+        answer=row.answer,
+        model_name=row.model_name,
+        trace_id=row.trace_id,
+        created_at=row.created_at,
+        answer_length=len(row.answer or ""),
+        context=_followup_context(row.context_snapshot),
+    )
+
+
+# context_snapshot canonical shape(v1) — writer 가 채우는 정본. read `_followup_context` 가 base_report_*
+# 키를 직접 소비하므로 그 키명으로 저장한다(별도 매핑 불필요). raw 저장이지만 read 계약은 요약 projection.
+_SNAPSHOT_VERSION = 1
+
+
+def _parent_context_snapshot(*, report: TechnicalReport, stock: Stock | None) -> dict:
+    """parent report → follow-up context_snapshot(future-proof). build_read_model projection 재사용(DRY)."""
+    rm = build_read_model(
+        report_id=report.id,
+        raw=(report.output_payload if isinstance(report.output_payload, dict) else {}),
+        stock=stock,
+    )
+    return {
+        "snapshot_version": _SNAPSHOT_VERSION,
+        "base_report_id": str(report.id),
+        "stock_code": rm.stock.stock_code,
+        "stock_name": rm.stock.stock_name,
+        "market": rm.stock.market,
+        # read `_followup_context` 가 직접 소비하는 키들(base_report_*).
+        "base_report_regime": rm.summary.final_regime,
+        "base_report_bias": rm.summary.directional_bias,
+        "base_report_data_status": rm.meta.data_status,
+        "base_report_signal_score": rm.signals.signal_score,
+        "base_report_as_of": rm.meta.as_of.isoformat() if rm.meta.as_of else None,
+        "one_line_summary": rm.summary.one_line_summary,
+        # 추가 맥락(read 요약엔 아직 안 쓰지만 future-proof 보존).
+        "trace_path_label": rm.trace_summary.generation_path.path_label,
+        "verification_outcome": rm.trace_summary.verification_summary.outcome,
+    }
+
+
+def build_followups_read_model(
+    *, report: TechnicalReport, stock: Stock | None, followups: list[TechnicalReportFollowup]
+) -> TechnicalReportFollowupsReadModel:
+    """parent report + follow-up rows → 대화 흐름 read model. report 요약은 output_payload projection."""
+    raw = report.output_payload if isinstance(report.output_payload, dict) else {}
+    interp = _d(raw.get("interpretation"))
+    regime = _d(raw.get("regime"))
+    return TechnicalReportFollowupsReadModel(
+        report_id=report.id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else report.stock_code),
+            stock_name=(stock.stock_name if stock else report.stock_name),
+            market=(stock.market if stock else None),
+        ),
+        report_summary=FollowupReportSummary(
+            one_line_summary=interp.get("one_line_summary"),
+            directional_bias=interp.get("directional_bias"),
+            final_regime=regime.get("final_regime") or report.final_regime,
+            as_of=_parse_dt(raw.get("as_of")),
+        ),
+        followup_count=len(followups),
+        followups=[_followup_item(f) for f in followups],
+    )
+
+
+def _derive_status(raw: dict) -> tuple[str, bool, bool]:
+    """(path_label, limited, verification_warning) — trace_summary 와 **동일 규칙**의 경량 파생(목록용)."""
+    interp = _d(raw.get("interpretation"))
+    verification = _d(raw.get("verification"))
+    interp_source = interp.get("source")
+    template_fallback_used = interp_source == "template_fallback"
+    regen = verification.get("regen_count")
+    had_regeneration = isinstance(regen, int) and regen > 0
+    if template_fallback_used:
+        path_label = "template_fallback"
+    elif had_regeneration or interp_source == "llm_regenerated":
+        path_label = "regenerated"
+    else:
+        path_label = "normal"
+    limited = raw.get("data_status") in ("data_limited", "regime_unavailable")
+    calc, rgm, lbl = (
+        verification.get("calc_passed"),
+        verification.get("regime_passed"),
+        verification.get("label_matched"),
+    )
+    outcome = verification.get("outcome")
+    v_consistent = bool(calc) and bool(rgm) and bool(lbl) if verification else None
+    v_warning = bool(outcome and outcome != "passed") or (v_consistent is False)
+    return path_label, limited, v_warning
+
+
+def build_list_item(
+    *, report: TechnicalReport, stock: Stock | None, followup_count: int
+) -> TechnicalReportListItem:
+    """technical report row → 목록 item(projection only, raw 미노출, detail read model 재사용 아님)."""
+    raw = report.output_payload if isinstance(report.output_payload, dict) else {}
+    interp = _d(raw.get("interpretation"))
+    regime = _d(raw.get("regime"))
+    path_label, limited, v_warning = _derive_status(raw)
+    return TechnicalReportListItem(
+        report_id=report.id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else report.stock_code),
+            stock_name=(stock.stock_name if stock else report.stock_name),
+            market=(stock.market if stock else None),
+        ),
+        summary=ListSummaryBlock(
+            one_line_summary=interp.get("one_line_summary"),
+            directional_bias=interp.get("directional_bias"),
+            final_regime=regime.get("final_regime") or report.final_regime,
+        ),
+        status=ListStatusBlock(
+            data_status=raw.get("data_status") or report.data_status,
+            path_label=path_label,
+            verification_warning=v_warning,
+            limited_data=limited,
+        ),
+        engagement=ListEngagementBlock(followup_count=followup_count),
+        meta=ListMetaBlock(
+            as_of=_parse_dt(raw.get("as_of")) or report.as_of,
+            created_at=report.created_at,
+            trace_id=raw.get("trace_id") or report.trace_id,
+        ),
+    )
+
+
 class TechnicalReportService:
     def __init__(self, session: AsyncSession, ai_client: AIClient) -> None:
         self._session = session
@@ -52,7 +438,7 @@ class TechnicalReportService:
     # ── 저장 ──────────────────────────────────────────────────────────────────
     async def create_report(
         self, req: TechnicalReportCreateRequest
-    ) -> TechnicalReportEnvelope:
+    ) -> TechnicalReportReadModel:
         request_id = f"req-{uuid4().hex}"
         as_of = req.as_of or datetime.now(UTC)
         ai_input = {
@@ -168,7 +554,8 @@ class TechnicalReportService:
             model_name=None,
             template_fallback_used=(output.interpretation.source == "template_fallback"),
             detail_source_count=None,
-            sections=None,
+            # AI 구조화 섹션(additive)을 JSONB 로 보존 — 구버전 output 이면 None.
+            sections=output.interpretation.sections_dict(),
         )
         verification = TechnicalReportVerification(
             id=uuid4(),
@@ -223,7 +610,13 @@ class TechnicalReportService:
         await agent_repo.add(self._session, agent_report)
         await self._session.commit()
 
-        return TechnicalReportEnvelope(report_id=report_id, report=raw)
+        # 저장 직후 응답 == GET 단건 응답이 되도록 **동일 경로**로 조립한다(canonical stock·model_name 소스 일치).
+        # 신규 리포트라 follow-up 은 아직 0(작성은 별도 경로) — GET 도 fresh report 면 동일하게 0.
+        stock = await tr_repo.get_stock(self._session, req.ticker)
+        return build_read_model(
+            report_id=report_id, raw=raw, stock=stock,
+            model_name=interpretation.model_name, followup_count=0,
+        )
 
     async def _resolve_stock_name(self, ticker: str, requested: str | None) -> str:
         """마스터 우선: 기존 stocks > allowlist > 요청값(미지 종목) > ticker."""
@@ -234,11 +627,87 @@ class TechnicalReportService:
         return allowlist_name(ticker) or req_name or ticker
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
-    async def get_report(self, report_id: UUID) -> TechnicalReportEnvelope | None:
+    async def get_report(self, report_id: UUID) -> TechnicalReportReadModel | None:
         report = await tr_repo.get_report(self._session, report_id)
         if report is None:
             return None
-        return TechnicalReportEnvelope(report_id=report.id, report=report.output_payload)
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        interp = await tr_repo.get_interpretation(self._session, report_id)
+        followup_count = await tr_repo.count_followups(self._session, report_id)
+        return build_read_model(
+            report_id=report.id,
+            raw=report.output_payload,
+            stock=stock,
+            model_name=(interp.model_name if interp else None),
+            followup_count=followup_count,
+        )
+
+    async def get_report_followups(
+        self, report_id: UUID
+    ) -> TechnicalReportFollowupsReadModel | None:
+        """parent report 기준 follow-up 대화 흐름(report 없으면 None, follow-up 0이면 빈 배열)."""
+        report = await tr_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        followups = await tr_repo.list_followups(self._session, report_id)
+        return build_followups_read_model(report=report, stock=stock, followups=followups)
+
+    async def create_followup(
+        self, report_id: UUID, req: FollowupCreateRequest
+    ) -> FollowupItem | None:
+        """parent report 기준 follow-up 생성/저장. answer 는 caller 제공(본문 재생성 아님).
+
+        report 없으면 None(route 404). context_snapshot 은 parent report projection 으로 future-proof 저장하되,
+        read model 은 요약 projection(raw 미노출)을 유지한다. 저장 직후 응답 == GET list item(FollowupItem)."""
+        report = await tr_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        snapshot = _parent_context_snapshot(report=report, stock=stock)
+
+        now = datetime.now(UTC)
+        row = TechnicalReportFollowup(
+            id=uuid4(),
+            report_id=report_id,
+            request_id=(req.request_id or f"fu-{uuid4().hex}"),   # caller 우선, 없으면 backend fallback
+            client_session_id=req.client_session_id,
+            question=req.question,
+            answer=req.answer,
+            model_name=req.model_name,                            # caller-provided answer 이므로 없으면 None
+            trace_id=req.trace_id,
+            context_snapshot=snapshot,
+            created_at=now,                                       # 즉시 응답·read-after-write 위해 명시
+        )
+        await tr_repo.add_followup(self._session, row)
+        await self._session.commit()
+        return _followup_item(row)
+
+    async def list_technical_reports(
+        self,
+        *,
+        stock_code: str | None = None,
+        client_session_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> TechnicalReportListResponse:
+        """technical 목록 index(created_at DESC). followup_count·canonical stock 은 batch 조회(N+1 방지)."""
+        rows = await tr_repo.list_technical_reports(
+            self._session, stock_code=stock_code, client_session_id=client_session_id,
+            limit=limit, offset=offset,
+        )
+        total = await tr_repo.count_technical_reports(
+            self._session, stock_code=stock_code, client_session_id=client_session_id
+        )
+        counts = await tr_repo.followup_counts_for(self._session, [r.id for r in rows])
+        stocks = await tr_repo.get_stocks(self._session, list({r.stock_code for r in rows}))
+        items = [
+            build_list_item(
+                report=r, stock=stocks.get(r.stock_code), followup_count=counts.get(r.id, 0)
+            )
+            for r in rows
+        ]
+        return TechnicalReportListResponse(items=items, total=total, limit=limit, offset=offset)
 
     async def list_reports(
         self,

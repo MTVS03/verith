@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.api.clients.ai_client import (
     AIContractError,
@@ -14,20 +14,24 @@ from src.api.clients.ai_client import (
 )
 from src.api.deps import get_technical_report_service
 from src.api.schemas.technical_report import (
+    FollowupCreateRequest,
+    FollowupItem,
     TechnicalReportCreateRequest,
-    TechnicalReportEnvelope,
+    TechnicalReportFollowupsReadModel,
+    TechnicalReportListResponse,
+    TechnicalReportReadModel,
 )
 from src.api.services.technical_report_service import TechnicalReportService
 
 router = APIRouter(prefix="/api/technical/reports", tags=["technical-reports"])
 
 
-@router.post("", response_model=TechnicalReportEnvelope, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TechnicalReportReadModel, status_code=status.HTTP_201_CREATED)
 async def create_technical_report(
     req: TechnicalReportCreateRequest,
     service: TechnicalReportService = Depends(get_technical_report_service),
-) -> TechnicalReportEnvelope:
-    """AI 분석 호출 → 응답 검증 → 저장 → { report_id, report } 반환(api_spec §6.1)."""
+) -> TechnicalReportReadModel:
+    """AI 분석 호출 → 응답 검증 → 저장 → **read model** 반환(프론트 친화, api_spec §6.1)."""
     try:
         return await service.create_report(req)
     except AIValidationError as exc:
@@ -40,15 +44,57 @@ async def create_technical_report(
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
 
 
-@router.get("/{report_id}", response_model=TechnicalReportEnvelope)
+@router.get("", response_model=TechnicalReportListResponse)
+async def list_technical_reports(
+    stock_code: str | None = None,
+    client_session_id: str | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> TechnicalReportListResponse:
+    """technical report 목록 index(created_at DESC) — 상세 진입 전 탐색/비교용 경량 read model."""
+    return await service.list_technical_reports(
+        stock_code=stock_code, client_session_id=client_session_id, limit=limit, offset=offset
+    )
+
+
+@router.get("/{report_id}", response_model=TechnicalReportReadModel)
 async def get_technical_report(
     report_id: UUID,
     service: TechnicalReportService = Depends(get_technical_report_service),
-) -> TechnicalReportEnvelope:
-    envelope = await service.get_report(report_id)
-    if envelope is None:
+) -> TechnicalReportReadModel:
+    """단건 조회 — 프론트 친화 read model(raw payload 는 DB 에 보존, 응답엔 구조화만)."""
+    read_model = await service.get_report(report_id)
+    if read_model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
-    return envelope
+    return read_model
+
+
+@router.post(
+    "/{report_id}/followups", response_model=FollowupItem, status_code=status.HTTP_201_CREATED
+)
+async def create_technical_report_followup(
+    report_id: UUID,
+    req: FollowupCreateRequest,
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> FollowupItem:
+    """parent report 기준 후속 질문/답변 저장(answer 는 caller 제공). 응답 = FollowupItem(GET list item 동일)."""
+    item = await service.create_followup(report_id, req)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return item
+
+
+@router.get("/{report_id}/followups", response_model=TechnicalReportFollowupsReadModel)
+async def get_technical_report_followups(
+    report_id: UUID,
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> TechnicalReportFollowupsReadModel:
+    """parent report 기준 후속 질문 대화 흐름(read flow). report 없으면 404, follow-up 0이면 빈 배열."""
+    flow = await service.get_report_followups(report_id)
+    if flow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return flow
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

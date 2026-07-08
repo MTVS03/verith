@@ -78,13 +78,22 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 ### Technical (기술적)
 | 테이블 | 요약 |
 |---|---|
-| `technical_reports` | 기술적 분석 리포트 root |
+| `technical_reports` | 기술적 분석 리포트 root. 목록 index: `GET /api/technical/reports`(created_at DESC, 경량 summary/status/engagement) / 상세: `GET .../{id}`(full read model) |
 | `technical_report_signals` | 지표 신호 |
 | `technical_report_charts` | 차트 페이로드 |
 | `technical_report_risk_notes` | 리스크 노트 |
 | `technical_report_interpretations` | 해석 (1:1) |
 | `technical_report_verifications` | 검증 (1:1) |
-| `technical_report_followups` | 후속 질의 |
+| `technical_report_followups` | 후속 질의. write: `POST .../{id}/followups`(answer=caller 제공, parent snapshot 저장) / read: `GET .../{id}/followups` |
+
+> **Technical read model(조회 계약 ≠ 저장 형식).** `technical_reports.output_payload` 에 AI output 원본(raw)을
+> 계속 보존하되, **API 응답(`POST`·`GET /api/technical/reports/{id}`)은 프론트 친화 read model**로 정리해
+> 반환한다(`stock`(canonical)·`meta`·`summary`·`interpretation`·`drivers`·`signals`·`risks`·`charts`·
+> `verification` 블록). `stock` 은 **canonical `stocks` 우선**. AI 구조화 해석(one_line_summary·directional_bias·
+> timeframe_alignment·key_drivers 등)은 `technical_report_interpretations.sections`(JSONB)에 저장되며, read model
+> 은 projection 이라 구버전 payload(섹션 없음)에서도 shape 가 안정적이다. backend 는 값을 재해석하지 않는다.
+> 응답에는 **`trace_summary`**(생성 경로·데이터 품질·검증 요약·flag) 블록도 포함된다 — "어떻게 생성/검증됐는지"의
+> 제품용 요약(raw trace 미노출). 저장값 projection 이라 신규 저장 없음. 계약 정본: [`technical_backend_handoff.md`](technical_backend_handoff.md).
 
 ### News (뉴스, PostgreSQL 부분만)
 | 테이블 | 요약 |
