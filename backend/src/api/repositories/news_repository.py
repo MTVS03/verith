@@ -149,3 +149,21 @@ async def get_articles_for_importance(
     for r in (await session.execute(stmt)).all():
         grouped.setdefault(r.event_id, []).append(r)
     return grouped
+
+
+async def get_event_centroid_inputs(
+    session: AsyncSession, event_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, Sequence[Row]]:
+    """이벤트별 (embedding, published_at) 행. centroid 평균·event_time 계산 입력.
+
+    embedding 이 NULL 인 행도 published_at(event_time)에는 기여하므로 함께 가져온다.
+    """
+    if not event_ids:
+        return {}
+    stmt = select(News.event_id, News.embedding, News.published_at).where(
+        News.event_id.in_(event_ids)
+    )
+    grouped: dict[uuid.UUID, list[Row]] = {}
+    for r in (await session.execute(stmt)).all():
+        grouped.setdefault(r.event_id, []).append(r)
+    return grouped

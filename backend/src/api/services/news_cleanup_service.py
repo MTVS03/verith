@@ -10,7 +10,6 @@ published_at 이 168h 경과한 기사 삭제(PostgreSQL) → 대응 NewsRef 삭
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
 
 from neo4j import AsyncSession as GraphSession

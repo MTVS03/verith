@@ -131,6 +131,19 @@ class EventArticleStats(BaseModel):
     updated_at: datetime | None = None
 
 
+class CandidateEvent(BaseModel):
+    """병합 후보 이벤트(ai `CandidateEvent`). ai 병합(TASK 05)이 유사도 채점에 쓴다.
+
+    embedding = 소속 기사 임베딩의 centroid(평균) — backend 가 계산해 제공(ai 는 읽기만).
+    event_time = 소속 기사 published_at 최댓값(없으면 None).
+    """
+
+    canonical_id: str
+    companies: list[str] = Field(default_factory=list)
+    embedding: list[float]
+    event_time: datetime | None = None
+
+
 # ── 질의(subject/shared) 응답 (ai schemas/report.py·event.py·response.py 미러) ──
 class SentimentGauge(BaseModel):
     """긍/중/부 분포(backend 실시간 집계) + 표시용 파생값(비율·순점수·라벨). ai `SentimentGauge` 동일.

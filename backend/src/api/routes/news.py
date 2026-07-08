@@ -18,6 +18,7 @@ from src.api.deps import (
 )
 from src.api.schemas.news import (
     ArticleRef,
+    CandidateEvent,
     CleanupResponse,
     EventArticleStats,
     NewsBatchSaveRequest,
@@ -87,3 +88,13 @@ async def query_shared(
 ) -> SubjectQueryResponse:
     """multi-hop: 두 회사가 함께 참여한 공유 이벤트를 importance순으로."""
     return await service.get_shared_events(company_a, company_b, within_days)
+
+
+@router.get("/events/recent", response_model=list[CandidateEvent])
+async def events_recent(
+    companies: list[str] = Query(..., description="회사명(정규화)"),
+    within_days: int = Query(7, ge=1, le=90, description="최근 N일 기사 있는 이벤트만"),
+    service: NewsGraphQueryService = Depends(get_news_graph_query_service),
+) -> list[CandidateEvent]:
+    """병합 후보 이벤트 + centroid(임베딩 평균)·event_time. ai 병합(TASK 05)이 유사도 채점에 사용."""
+    return await service.get_recent_candidate_events(companies, within_days)
