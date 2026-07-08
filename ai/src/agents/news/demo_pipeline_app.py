@@ -17,33 +17,34 @@ import sys
 import time
 from collections import Counter
 
-# --- import 루트(conftest 규약: `from config import`, `from schemas...`) ---
-_ROOT = os.path.dirname(os.path.abspath(__file__))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+# --- import 루트: ai/ (= src 패키지 위치)를 넣어 `src.agents.news.*` 패키지 경로로 import ---
+# (news 4단계 상위 = news→agents→src→ai). streamlit 단독 실행에서도 패키지가 풀리게 shim.
+_AI_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+if _AI_ROOT not in sys.path:
+    sys.path.insert(0, _AI_ROOT)
 
 os.environ.setdefault("BACKEND_BASE_URL", "http://127.0.0.1:8001")
 
 import streamlit as st  # noqa: E402
 
 # 노드(배치) — graph.py 와 동일한 함수들을 직접 부른다
-import nodes.crawl as crawl_mod  # noqa: E402
-from nodes.crawl import crawl_node  # noqa: E402
-from nodes.embedding import embedding_node  # noqa: E402
-from nodes.extract import extract_node  # noqa: E402
-from nodes.graph_builder import graph_node  # noqa: E402
-from nodes.importance import importance_node  # noqa: E402
-from nodes.merge_event import merge_event_node  # noqa: E402
-from nodes.save import save_node  # noqa: E402
-from nodes.sentiment import sentiment_node  # noqa: E402
+import src.agents.news.nodes.crawl as crawl_mod  # noqa: E402
+from src.agents.news.nodes.crawl import crawl_node  # noqa: E402
+from src.agents.news.nodes.embedding import embedding_node  # noqa: E402
+from src.agents.news.nodes.extract import extract_node  # noqa: E402
+from src.agents.news.nodes.graph_builder import graph_node  # noqa: E402
+from src.agents.news.nodes.importance import importance_node  # noqa: E402
+from src.agents.news.nodes.merge_event import merge_event_node  # noqa: E402
+from src.agents.news.nodes.save import save_node  # noqa: E402
+from src.agents.news.nodes.sentiment import sentiment_node  # noqa: E402
 
 # 질의 서비스(리포트) — 직접 조합(배선 우회로 subject 프리셋도 사용)
-import services.answer_generator as ag  # noqa: E402
-import services.graph_query as gq  # noqa: E402
-import services.query_understanding as qu  # noqa: E402
-import services.report_renderer as rr  # noqa: E402
-import services.rss as rss_mod  # noqa: E402
-from services.backend.providers import (  # noqa: E402
+import src.agents.news.services.answer_generator as ag  # noqa: E402
+import src.agents.news.services.graph_query as gq  # noqa: E402
+import src.agents.news.services.query_understanding as qu  # noqa: E402
+import src.agents.news.services.report_renderer as rr  # noqa: E402
+import src.agents.news.services.rss as rss_mod  # noqa: E402
+from src.agents.news.services.backend.providers import (  # noqa: E402
     BackendEventArticleStatsProvider,
     BackendRecentEventProvider,
 )
