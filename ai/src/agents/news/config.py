@@ -120,7 +120,7 @@ FINBERT_LABEL_MAP: dict[str, str] = {
 # 기사끼리 대칭 비교라 query/document 프리픽스를 두지 않는다(model_choice §3). 임베딩 차원은 모델
 # 스펙을 따르며 config에 하드코딩하지 않는다. 값 중 배치·상한은 튜닝 대상(주석 표기, CLAUDE.md §7).
 # ---------------------------------------------------------------------------
-EMBED_MODEL: str = "arctic-embed-l-v2.0-ko"   # 한국어 검색 SOTA급(model_choice §3). 차원은 모델 스펙 따름
+EMBED_MODEL: str = "dragonkue/snowflake-arctic-embed-l-v2.0-ko"   # 한국어 검색 SOTA급(model_choice §3). HF 레포 ID(=arctic-embed-l-v2.0-ko 한국어 파인튜닝). 차원은 모델 스펙 따름
 EMBED_DEVICE: str = "cpu"                       # 가능 시 "cuda"
 EMBED_BATCH_SIZE: int = 32                      # 배치 임베딩 크기(처리량) — 튜닝 대상
 EMBED_MAX_INPUT_CHARS: int = 8000              # 입력 상한(8K 컨텍스트 고려). 초과분 잘라 입력 — 튜닝 대상
