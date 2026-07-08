@@ -36,7 +36,15 @@ from ..observability.keyword_rules import (
     SIGNAL_LABELS,
 )
 from ..schemas.contracts import InterpretationResult, RegimeResult, RiskItem, SignalSummary
-from ..schemas.enums import GenerationSource, IndicatorType, Signal
+from ..schemas.enums import (
+    AlignmentFlag,
+    Consensus,
+    DirectionalBias,
+    GenerationSource,
+    IndicatorType,
+    Signal,
+    Trend,
+)
 from ..synthesis.signal_score import IndicatorSignalResult
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -45,8 +53,30 @@ REGENERATE_PROMPT = "regenerate_report.md"
 _PAYLOAD_PLACEHOLDER = "{payload_json}"
 
 # LLM 출력 스키마(contracts §2·prompts §4). 이 밖의 key는 파싱 단계에서 거부한다(extra 유입 차단).
-_ALLOWED_TOP_KEYS = frozenset({"interpretation_text", "details"})
+# 구조화 섹션(additive): 문자열 필드 + 배열 필드(key_drivers/warning_points). directional_bias 는 LLM 이
+# 아니라 코드가 consensus 에서 파생하므로 출력 스키마에 넣지 않는다(넣어도 무시).
+_STR_SECTION_KEYS = frozenset({
+    "one_line_summary", "trend_interpretation", "signal_interpretation", "risk_interpretation",
+    "timeframe_alignment", "what_to_watch_next", "invalidation_or_caution",
+})
+_LIST_SECTION_KEYS = frozenset({"key_drivers", "warning_points"})
+_ALLOWED_TOP_KEYS = frozenset({"interpretation_text", "details"}) | _STR_SECTION_KEYS | _LIST_SECTION_KEYS
 _ALLOWED_DETAIL_KEYS = frozenset({"indicator", "detail"})
+
+# 결정론 파생용 라벨(fallback·기본 섹션 문구). regime/consensus/confidence/risk 라벨은 keyword_rules 재사용.
+_TREND_LABELS: dict[Trend, str] = {
+    Trend.UP: "상승", Trend.DOWN: "하락", Trend.SIDEWAYS: "횡보", Trend.UNAVAILABLE: "판정 불가",
+}
+_ALIGNMENT_LABELS: dict[AlignmentFlag, str] = {
+    AlignmentFlag.ALIGNED: "정합", AlignmentFlag.COUNTER_TREND: "역행", AlignmentFlag.NEUTRAL: "중립",
+}
+_BIAS_FROM_CONSENSUS: dict[Consensus, DirectionalBias] = {
+    Consensus.STRONG_POSITIVE: DirectionalBias.BULLISH,
+    Consensus.WEAK_POSITIVE: DirectionalBias.BULLISH,
+    Consensus.NEUTRAL: DirectionalBias.NEUTRAL,
+    Consensus.WEAK_NEGATIVE: DirectionalBias.BEARISH,
+    Consensus.STRONG_NEGATIVE: DirectionalBias.BEARISH,
+}
 
 
 class LlmClient(Protocol):
@@ -83,12 +113,14 @@ def build_payload(
     risks: Sequence[RiskItem],
     analysis_focus: Sequence[str] | None = None,
     focus_summary: str | None = None,
+    data_status: str | None = None,
 ) -> dict:
     """코드 확정값 → 프롬프트 입력 payload(prompts.md §4). LLM은 이 값을 읽기만 한다.
 
     `weight`는 넣지 않는다(LLM 서술에 불필요). `value`는 None이면 그대로 null로 흘린다(확정 4).
     `analysis_focus`·`focus_summary`(노드 2 산출)는 **설명 강조 힌트**로만 넣는다 — LLM은 이 힌트로
     어떤 관점을 더 풀지 정할 뿐, 확정 라벨·수치는 바꾸지 않는다(prompts.md §3·§4).
+    `data_status`(있으면)는 limited/unavailable 일 때 LLM 이 단정하지 않도록 하는 **hedge 힌트**다.
     """
     payload: dict = {
         "daily_regime": regime.daily_regime.value,
@@ -117,6 +149,8 @@ def build_payload(
         payload["analysis_focus"] = list(analysis_focus)
     if focus_summary:
         payload["focus_summary"] = focus_summary
+    if data_status:
+        payload["data_status"] = data_status
     return payload
 
 
@@ -145,6 +179,16 @@ def parse_llm_output(raw: str) -> dict:
     extra_top = set(parsed) - _ALLOWED_TOP_KEYS
     if extra_top:
         raise LlmOutputParseError(f"허용되지 않은 최상위 key: {sorted(extra_top)}")
+
+    # 구조화 섹션 타입 검증: 문자열 섹션은 str, 배열 섹션은 str 리스트여야 한다.
+    for key in _STR_SECTION_KEYS:
+        if key in parsed and not isinstance(parsed[key], str):
+            raise LlmOutputParseError(f"{key}는 문자열이어야 합니다")
+    for key in _LIST_SECTION_KEYS:
+        if key in parsed:
+            val = parsed[key]
+            if not isinstance(val, list) or not all(isinstance(x, str) for x in val):
+                raise LlmOutputParseError(f"{key}는 문자열 배열이어야 합니다")
 
     details = parsed.get("details")
     if details is not None:
@@ -193,12 +237,117 @@ def verify(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 결정론 섹션 파생 (확정값만으로 구조화 섹션 생성 — fallback·LLM 누락 필드 기본값 공용)
+# ─────────────────────────────────────────────────────────────────────────────
+def bias_from_consensus(consensus: Consensus) -> DirectionalBias:
+    """directional_bias 를 consensus 에서 결정론 파생(LLM 재판정 아님)."""
+    return _BIAS_FROM_CONSENSUS.get(consensus, DirectionalBias.NEUTRAL)
+
+
+def _one_line(regime: RegimeResult, signal: SignalSummary) -> str:
+    return (
+        f"{REGIME_LABELS[regime.final_regime]} · 종합신호 {CONSENSUS_LABELS[signal.consensus]}"
+        f"({CONFIDENCE_LABELS[signal.confidence_level]} 신뢰도)"
+    )
+
+
+def _trend_text(regime: RegimeResult) -> str:
+    return (
+        f"현재 국면은 {REGIME_LABELS[regime.final_regime]}로 분류됩니다"
+        f"(일봉 {REGIME_LABELS[regime.daily_regime]})."
+    )
+
+
+def _signal_text(signal: SignalSummary) -> str:
+    return (
+        f"종합 신호는 {CONSENSUS_LABELS[signal.consensus]}이며 신뢰도는 "
+        f"{CONFIDENCE_LABELS[signal.confidence_level]} 수준입니다."
+    )
+
+
+def _risk_text(risks: Sequence[RiskItem]) -> str:
+    if not risks:
+        return "특이 위험 요인은 확인되지 않았습니다."
+    return "위험 요인으로 " + "·".join(RISK_LABELS[r.flag] for r in risks) + "이(가) 확인됩니다."
+
+
+def _timeframe_text(regime: RegimeResult) -> str:
+    wk, mo = _TREND_LABELS[regime.weekly_trend], _TREND_LABELS[regime.monthly_trend]
+    if regime.alignment_flag == AlignmentFlag.ALIGNED:
+        return f"상위 추세(주봉 {wk}·월봉 {mo})와 단기 흐름이 대체로 정합합니다."
+    if regime.alignment_flag == AlignmentFlag.COUNTER_TREND:
+        return f"단기 흐름이 상위 추세(주봉 {wk}·월봉 {mo})와 엇갈립니다(역행)."
+    return f"주봉 {wk}·월봉 {mo}로 타임프레임 간 방향 신호가 뚜렷하지 않습니다."
+
+
+def _key_drivers(
+    regime: RegimeResult, signal: SignalSummary, signals: Sequence[IndicatorSignalResult] = ()
+) -> list[str]:
+    drivers = [
+        f"{INDICATOR_LABELS[s.indicator]} {SIGNAL_LABELS[s.signal]}"
+        for s in signals if s.signal != Signal.NEUTRAL
+    ]
+    if not drivers:
+        drivers.append(f"{REGIME_LABELS[regime.final_regime]} 국면·종합신호 {CONSENSUS_LABELS[signal.consensus]}")
+    return drivers[:4]
+
+
+def _what_to_watch(regime: RegimeResult, risks: Sequence[RiskItem]) -> str:
+    if regime.alignment_flag == AlignmentFlag.COUNTER_TREND:
+        return "상위 추세와 단기 흐름의 정합 회복 여부"
+    if risks:
+        return f"확인된 위험({RISK_LABELS[risks[0].flag]})의 해소 여부와 거래량 동반"
+    return "현재 국면 유지 여부와 거래량 동반"
+
+
+def _invalidation() -> str:
+    return (
+        "상위 추세가 반대로 전환되거나 분석 데이터가 부족해지면 현재 해석은 유효하지 않을 수 있습니다"
+        "(위험 요인과는 별개의 무효화 조건)."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 병합 (LLM 문장을 확정값 옆에 얹음 — 확정값은 건드리지 않음)
 # ─────────────────────────────────────────────────────────────────────────────
-def interpretation_from_llm(llm_output: dict, *, source: GenerationSource) -> InterpretationResult:
-    """검증을 통과한 종합 해석 문장을 InterpretationResult로. source는 호출자(supervisor)가 결정."""
+def interpretation_from_llm(
+    llm_output: dict,
+    *,
+    source: GenerationSource,
+    regime: RegimeResult,
+    signal: SignalSummary,
+    signals: Sequence[IndicatorSignalResult] = (),
+    risks: Sequence[RiskItem] = (),
+) -> InterpretationResult:
+    """검증 통과 LLM 해석을 구조화 InterpretationResult로. 섹션은 LLM 값 우선, 누락 시 결정론 기본값으로 채운다.
+
+    `text`(하위호환)·문자열 섹션은 LLM 출력에서 가져오되 비면 확정값 파생으로 대체한다. `directional_bias`는
+    **항상 코드가 consensus에서 파생**한다(LLM이 방향을 뒤집지 못하게). source는 호출자(supervisor)가 결정."""
     text = str(llm_output.get("interpretation_text", "")).strip()
-    return InterpretationResult(text=text, source=source)
+
+    def _s(key: str, default: str) -> str:
+        v = str(llm_output.get(key, "")).strip()
+        return v or default
+
+    def _l(key: str, default: list[str]) -> list[str]:
+        v = llm_output.get(key)
+        items = [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+        return items or default
+
+    return InterpretationResult(
+        text=text or _one_line(regime, signal),
+        source=source,
+        one_line_summary=_s("one_line_summary", _one_line(regime, signal)),
+        directional_bias=bias_from_consensus(signal.consensus),
+        trend_interpretation=_s("trend_interpretation", _trend_text(regime)),
+        signal_interpretation=_s("signal_interpretation", _signal_text(signal)),
+        risk_interpretation=_s("risk_interpretation", _risk_text(risks)),
+        timeframe_alignment=_s("timeframe_alignment", _timeframe_text(regime)),
+        key_drivers=_l("key_drivers", _key_drivers(regime, signal, signals)),
+        warning_points=_l("warning_points", [RISK_LABELS[r.flag] for r in risks]),
+        what_to_watch_next=_s("what_to_watch_next", _what_to_watch(regime, risks)),
+        invalidation_or_caution=_s("invalidation_or_caution", _invalidation()),
+    )
 
 
 def details_from_llm(
@@ -236,28 +385,52 @@ def fallback_interpretation(
     regime: RegimeResult,
     signal: SignalSummary,
     risks: Sequence[RiskItem],
+    signals: Sequence[IndicatorSignalResult] = (),
 ) -> InterpretationResult:
-    """검증·재생성 실패 시 종합 해석 폴백. final_regime·consensus·confidence_level·risk flags만 사용."""
-    regime_label = REGIME_LABELS[regime.final_regime]
-    consensus_label = CONSENSUS_LABELS[signal.consensus]
-    confidence_label = CONFIDENCE_LABELS[signal.confidence_level]
+    """검증·재생성 실패 시 종합 해석 폴백 — **구조화 섹션을 deterministic 하게 전부 채운다**(빈약 착지 방지).
 
+    확정값(final_regime·consensus·confidence_level·risk flags·timeframe·signals)만 문장화한다. 새 판단 없음.
+    LLM 이 죽어도 프론트가 같은 섹션 구조로 렌더할 수 있게 한다(확정 5)."""
     parts = [
-        f"현재 기술적 상태는 {regime_label}로 분류됩니다.",
-        f"종합 신호는 {consensus_label}이며, 신뢰도는 {confidence_label} 수준입니다.",
+        f"현재 기술적 상태는 {REGIME_LABELS[regime.final_regime]}로 분류됩니다.",
+        _signal_text(signal),
+        _timeframe_text(regime),
     ]
     if risks:
-        risk_str = "·".join(RISK_LABELS[r.flag] for r in risks)
-        parts.append(f"주요 위험 요인으로 {risk_str}이(가) 함께 확인됩니다.")
+        parts.append(_risk_text(risks))
     parts.append("이 내용은 투자 판단을 대신하지 않으며, 기술적 지표 기반 참고 정보입니다.")
-    return InterpretationResult(text=" ".join(parts), source=GenerationSource.TEMPLATE_FALLBACK)
+    return InterpretationResult(
+        text=" ".join(parts),
+        source=GenerationSource.TEMPLATE_FALLBACK,
+        one_line_summary=_one_line(regime, signal),
+        directional_bias=bias_from_consensus(signal.consensus),
+        trend_interpretation=_trend_text(regime),
+        signal_interpretation=_signal_text(signal),
+        risk_interpretation=_risk_text(risks),
+        timeframe_alignment=_timeframe_text(regime),
+        key_drivers=_key_drivers(regime, signal, signals),
+        warning_points=[RISK_LABELS[r.flag] for r in risks],
+        what_to_watch_next=_what_to_watch(regime, risks),
+        invalidation_or_caution=_invalidation(),
+    )
 
 
 def unavailable_interpretation() -> InterpretationResult:
-    """regime 판단 불가(데이터 부족) 시 고정 폴백 문장(contracts.md §4). 종합·신뢰도가 없을 때 사용."""
+    """regime 판단 불가(데이터 부족) 시 고정 폴백(contracts.md §4). 종합·신뢰도가 없을 때 — 과장 없이 착지."""
+    limited = "분석 가능한 데이터가 부족해 국면을 판정하지 않습니다."
     return InterpretationResult(
-        text="분석 가능한 데이터가 부족해 국면을 판정하지 않으며, 기술적 지표 기반 참고 정보입니다.",
+        text=f"{limited} 기술적 지표 기반 참고 정보입니다.",
         source=GenerationSource.TEMPLATE_FALLBACK,
+        one_line_summary="데이터 부족 — 국면 판정 보류",
+        directional_bias=DirectionalBias.NEUTRAL,
+        trend_interpretation=limited,
+        signal_interpretation="신호를 종합할 만큼 데이터가 확보되지 않았습니다.",
+        risk_interpretation="데이터 부족으로 위험 요인도 신뢰 있게 판정하기 어렵습니다.",
+        timeframe_alignment="타임프레임 정합 여부를 판정할 데이터가 부족합니다.",
+        key_drivers=[],
+        warning_points=["데이터 부족"],
+        what_to_watch_next="데이터 확보 후 재분석 필요",
+        invalidation_or_caution="데이터가 제한적이므로 어떤 방향도 단정하지 않습니다.",
     )
 
 

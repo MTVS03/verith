@@ -11,12 +11,61 @@ endpoint)이 살아있는지 사람이 수동으로 확인한다. 단위 테스�
 - 스크립트: `src/agents/technical/scripts/smoke_technical_integration.py`
 - pytest에 포함되지 않는다(파일명이 `test_` 아님, opt-in 테스트도 만들지 않음).
 
-> **상위 Supervisor 연계 실증(잠금):** **현재는 `BATTERY_TICKERS`(2차전지 10종) 기준으로
-> supervisor+technical real smoke 실증 완료.** 상위 Supervisor 경유 e2e(`resolver → planning →
-> execution → technical success`)는 `src/supervisor/scripts/smoke_supervisor.py` 로 확인하며,
-> **범위 내 종목만** 사용한다(373220 LG에너지솔루션·051910 LG화학 확인: `source=KIS·data_status=normal·
-> final_regime 산출`). 범위 밖 ticker 는 `technical_supervisor.run()` 시작부에서 `OutOfScopeTickerError`
-> 로 거절된다(KIS/OpenAI 이전). 전체 종목 확장은 이 실증 이후 별도 단계. 경계·정책: `src/supervisor/README.md`.
+> **전체 종목 확장(현재 구조):** technical 은 `BATTERY_TICKERS` membership gate 로 종목을 막지 **않는다**.
+> **형식상 유효한(6자리) ticker 를 기본 지원**하고(`config.is_supported_ticker`, §config.md 11), 종목명 정본은
+> 내부 상수가 아니라 backend canonical(`TechnicalAgentInput.stock_name`) 이 담당한다. 데이터 부족·미상장은
+> gate 가 아니라 `data_status` 로 표현한다. **`BATTERY_TICKERS` 는 지원 범위가 아니라 dev/smoke 표시명
+> fallback** 일 뿐이다.
+>
+> **초기 실증 기준선(historical):** supervisor+technical real smoke 를 처음 통과시킨 종목은 2차전지 대표주
+> — 373220 LG에너지솔루션·051910 LG화학(`source=KIS·data_status=normal·final_regime 산출`). 이는 "지원
+> 범위가 10종"이라는 뜻이 아니라 **최초 회귀 기준선**이다. 아래 §계층별 real smoke 참고.
+>
+> **실효 universe:** 실제로 resolve 되는 종목은 backend `stocks`(resolver) 데이터에 종속한다. backend
+> canonical stocks 가 전체 주권 universe 로 승격된 뒤에는 대표/확장 종목(예: 005930·005935)도 resolve 되며,
+> smoke 도 그 종목으로 확장한다. 상위 Supervisor 경유 e2e(`resolver → planning → execution → technical`)는
+> `src/supervisor/scripts/smoke_supervisor.py` 로 확인한다. 경계·정책: `src/supervisor/README.md`.
+
+## 상위 Supervisor 경유 real smoke — 계층별 기준선 (운영 정본)
+
+이 문서가 **real smoke 운영 정본**이다(무엇을 돌리고, 무엇을 성공으로 보고, 실패가 어느 계층인지). 두 도구를
+구분한다: **① 계층 e2e** = `src/supervisor/scripts/smoke_supervisor.py`(resolve→planning→execution→technical,
+아래 표 기준선) / **② technical 단독 의존성 smoke** = `smoke_technical_integration.py`(KIS·Redis·OpenAI 배선,
+이 문서 나머지 절). 종목 지원은 allowlist reject 가 아니라 **형식검증 + resolver universe + `data_status`** 의
+합이다 — 세 계층을 뭉뚱그리지 않는다.
+
+```bash
+cd ai
+# backend(:8000 /api/stocks/resolve)·OpenAI·KIS 가 준비된 상태에서만(실 비용).
+uv run python -m src.supervisor.scripts.smoke_supervisor "LG에너지솔루션 차트 어때?"
+```
+
+**계층별 smoke 기준선** (resolve 되려면 backend `stocks` 에 해당 종목이 있어야 함):
+
+| 단계 | ticker | query | 기대 resolved | 성격 |
+|---|---|---|---|---|
+| 1차 회귀 | 373220 | `LG에너지솔루션 차트 어때?` | 373220 | 최초 기준선(대표주) |
+| 2차 확장 | 005930 | `삼성전자 차트 어때?` | 005930 | canonical universe 확장 |
+| 3차 확장/우선주 | 005935 | `삼성전자우 분석해줘` | 005935 | 우선주/애매 케이스 |
+
+**성공 기준(계층 e2e):**
+- resolver 가 **기대 stock_code 로 `resolved`**(status=resolved, stock.stock_code 일치).
+- supervisor 가 **5 task 생성**(fundamental/technical/news/flow/industry fan-out).
+- technical 이 **그 stock_code 로 진입**(`output.ticker` 일치).
+- KIS data collect 성공(`data_status=normal`, `source=KIS`).
+- `output` 구조 정상(`data_status`·`regime.final_regime`·`source` 유효 enum).
+- raw secret/prompt/response·API key **미노출**(요약 필드만 출력).
+
+**정상 실패 = 계층 분리(뭉개지 말 것).** 어느 계층이 죽었는지 아래로 읽는다:
+
+| 증상 | 계층 | 해석 |
+|---|---|---|
+| resolver `not_found` | 종목 universe | backend `stocks` 에 종목 없음(seed/승격 문제). technical 문제 아님 |
+| supervisor task `skipped` | planning/policy | can_run/planning 정책이 막음(종목 미해결 등) |
+| technical `failed` — KIS token/fetch | 데이터 계층 | KIS 자격·시장시간·상장/거래 여부. `is_supported_ticker` reject 와 혼동 금지 |
+| technical `failed` — OpenAI complete | LLM 계층 | `OPENAI_API_KEY`/모델 ID·rate limit |
+| technical `failed` — `OUT_OF_SCOPE_TICKER` | 형식/정책 | 6자리 형식 위반·빈 값(allowlist 아님). resolver 를 거친 종목은 여기서 안 걸림 |
+| news/flow/industry `failed` | 각 agent 환경 | Neo4j/뉴스/수급 등 **각 agent 의존성** 문제 — technical 결함이 아님 |
 
 ## 필요한 env (값이 아니라 존재만 확인)
 
@@ -73,7 +122,7 @@ uv run python src/agents/technical/scripts/smoke_technical_integration.py \
 `--clear-cache-for-ticker`(+`--yes`, 없으면 네트워크 호출 전 실패)·`--require-{redis,openai,kis}`(기본 true,
 `--no-require-*`로 해제)·`--timeout-seconds`(기본 55).
 
-**입력 검증(fail-fast)**: allowlist(BATTERY_TICKERS) 밖 ticker·미래 as_of는 **어떤 네트워크/비용 호출
+**입력 검증(fail-fast)**: 형식 오류(6자리 아님) ticker·미래 as_of는 **어떤 네트워크/비용 호출
 전에** 명확한 메시지로 중단한다.
 
 ## ⚠️ 네트워크/비용 주의
@@ -114,7 +163,7 @@ response·interpretation 전문·raw candles. 대신 `present`/`missing`·개수
 - `[openai] config error` → `OPENAI_API_KEY`/`OPENAI_MODEL` 누락. `[openai] call failed=…Error` → 모델
   ID·네트워크·rate limit 확인(`smoke_openai_llm.py`로 격리 확인).
 - `[redis] connected=false` → `REDIS_URL`·Redis 서버 상태.
-- `[kis] fetch failed=…` → allowlist(BATTERY_TICKERS) 내 ticker인지, KIS 자격·시장 시간 확인.
+- `[kis] fetch failed=…` → ticker 형식(6자리)·KIS 자격·시장 시간·해당 종목 상장/거래 여부 확인.
 - `[agent] run failed=DeadlineExceeded` → `--timeout-seconds` 상향 또는 LLM/KIS 지연 확인.
 
 ## 기본 pytest에는 포함되지 않는다

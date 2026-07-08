@@ -38,6 +38,15 @@ class Signal(str, Enum):
     NEGATIVE = "negative"
 
 
+class DirectionalBias(str, Enum):
+    """해석 방향성 표시값 — `interpretation.directional_bias`. **consensus 에서 결정론 파생**(재판정 아님).
+
+    프론트 카드가 상승/중립/하락을 한눈에 뿌리기 위한 표시 필드다. LLM 이 만들지 않는다(코드 파생)."""
+    BULLISH = "bullish"
+    NEUTRAL = "neutral"
+    BEARISH = "bearish"
+
+
 class Trend(str, Enum):
     """타임프레임 추세 — `weekly_trend` · `monthly_trend` (enums.md §4)."""
     UP = "up"

@@ -22,7 +22,7 @@ from datetime import date, datetime, timezone
 
 # INTRADAY_FETCH_ENABLED는 이 모듈 코드가 직접 쓰진 않지만 technical_graph가 `steps.`로 조회하고
 # 테스트가 이 모듈에 monkeypatch하므로 유지한다(fetch_minute_ohlcv도 동일).
-from ..config import BATTERY_TICKERS, KIS_PERIOD_DAILY, KIS_PERIOD_MONTHLY, KIS_PERIOD_WEEKLY, REGEN_MAX_COUNT
+from ..config import KIS_PERIOD_DAILY, KIS_PERIOD_MONTHLY, KIS_PERIOD_WEEKLY, REGEN_MAX_COUNT, dev_stock_name
 from ..config import INTRADAY_FETCH_ENABLED  # noqa: F401 - technical_graph가 steps로 참조·테스트 monkeypatch
 from ..charts.intraday_chart_builder import build_intraday_chart_payload
 from ..charts.intraday_context_builder import build_intraday_context
@@ -132,9 +132,11 @@ def normalize_step(
                     input_summary={"original_query_hash": hash_query(agent_input.query)}) as span:
         try:
             normalized = run_normalize_question(
-                client, ticker=agent_input.ticker, query=agent_input.query, as_of=agent_input.as_of)
+                client, ticker=agent_input.ticker, query=agent_input.query,
+                as_of=agent_input.as_of, stock_name=agent_input.stock_name)
         except LlmCallError:
-            name = BATTERY_TICKERS.get(agent_input.ticker, agent_input.ticker)
+            # 종목명 정본 우선순위: 주입 stock_name → dev 표시명 → ticker 코드 (normalize._fallback 과 동일 정책).
+            name = agent_input.stock_name or dev_stock_name(agent_input.ticker) or agent_input.ticker
             normalized = NormalizeResult(
                 f"{name}의 최근 시세와 기술적 신호를 중심으로 현재 차트 국면과 리스크 관찰점을 분석합니다.",
                 GenerationSource.TEMPLATE_FALLBACK,
@@ -361,13 +363,14 @@ def _interpret(
     client: interp.LlmClient, *,
     regime: RegimeResult, signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult], risks: Sequence[RiskItem], focus: FocusResult,
-    trace: TraceLogger, deadline: Deadline | None = None,
+    trace: TraceLogger, deadline: Deadline | None = None, data_status: str | None = None,
 ) -> _Interpretation:
     # LLM prompt/response 원문은 trace에 남기지 않는다 — 재생성/폴백은 retry/fallback 이벤트로만 관측(§12).
     with trace.node("interpret_report") as span:
         payload = interp.build_payload(
             regime=regime, signal=signal, signals=signals, risks=risks,
             analysis_focus=focus.analysis_focus, focus_summary=focus.focus_summary,
+            data_status=data_status,
         )
         # 1차(interpret) + REGEN_MAX_COUNT회 재생성(config.md §9).
         prompt_seq = [interp.INTERPRET_PROMPT] + [interp.REGENERATE_PROMPT] * REGEN_MAX_COUNT
@@ -389,7 +392,8 @@ def _interpret(
             last = attempt
             if attempt.passed:
                 source = GenerationSource.LLM if i == 0 else GenerationSource.LLM_REGENERATED
-                result = _success(attempt, source, signals, regen_count=i)
+                result = _success(attempt, source, signals,
+                                  regime=regime, signal=signal, risks=risks, regen_count=i)
                 break
         else:
             # 재생성까지 소진 → 마지막 출력 기준 granular(부분) fallback (H2/REGEN-04).
@@ -434,10 +438,12 @@ def _interpret_summary(result: _Interpretation) -> dict[str, object]:
 
 def _success(
     attempt: _Attempt, source: GenerationSource,
-    signals: Sequence[IndicatorSignalResult], *, regen_count: int,
+    signals: Sequence[IndicatorSignalResult], *,
+    regime: RegimeResult, signal: SignalSummary, risks: Sequence[RiskItem], regen_count: int,
 ) -> _Interpretation:
     assert attempt.parsed is not None and attempt.result is not None
-    interpretation = interp.interpretation_from_llm(attempt.parsed, source=source)
+    interpretation = interp.interpretation_from_llm(
+        attempt.parsed, source=source, regime=regime, signal=signal, signals=signals, risks=risks)
     details = interp.details_from_llm(
         attempt.parsed, signals=signals, source=source,
         failed_indicators=attempt.result.failed_indicators)
@@ -464,9 +470,11 @@ def _granular_fallback(
     ev = last.result
     kept_source = GenerationSource.LLM if regen_count == 0 else GenerationSource.LLM_REGENERATED
     if ev.interpretation_failed:
-        interpretation = interp.fallback_interpretation(regime=regime, signal=signal, risks=risks)
+        interpretation = interp.fallback_interpretation(
+            regime=regime, signal=signal, risks=risks, signals=signals)
     else:
-        interpretation = interp.interpretation_from_llm(last.parsed, source=kept_source)
+        interpretation = interp.interpretation_from_llm(
+            last.parsed, source=kept_source, regime=regime, signal=signal, signals=signals, risks=risks)
     # 실패한 indicator의 detail만 template_fallback, 나머지는 LLM 유지(REGEN-04).
     details = interp.details_from_llm(
         last.parsed, signals=signals, source=kept_source,
@@ -483,7 +491,8 @@ def _full_fallback(
     regime: RegimeResult, signal: SignalSummary,
     signals: Sequence[IndicatorSignalResult], risks: Sequence[RiskItem], *, regen_count: int,
 ) -> _Interpretation:
-    interpretation = interp.fallback_interpretation(regime=regime, signal=signal, risks=risks)
+    interpretation = interp.fallback_interpretation(
+        regime=regime, signal=signal, risks=risks, signals=signals)
     details = [interp.fallback_detail(s.indicator, s.signal, s.metrics) for s in signals]
     verification = VerificationResult(
         calc_passed=True, regime_passed=True, label_matched=False,

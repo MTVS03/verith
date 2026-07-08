@@ -8,10 +8,11 @@ resolve → planning → execution → technical adapter → technical output �
     # backend(:8000, /api/stocks/resolve)·OpenAI·KIS 접속이 준비돼 있어야 한다.
     uv run python -m src.supervisor.scripts.smoke_supervisor "LG에너지솔루션 차트 어때?"
 
-**종목 범위 주의:** technical 은 현재 `BATTERY_TICKERS`(2차전지 10종) MVP 범위만 실행 가능하다.
-resolve 는 전체 stocks 기준이라 삼성전자(005930) 도 resolved 되지만, technical 은 범위 밖이라
-`OutOfScopeTickerError` 로 실패(격리)한다 — 버그가 아니라 현재 정책이다. smoke 는 **범위 내 종목**
-(예: 373220 LG에너지솔루션 · 051910 LG화학 · 006400 삼성SDI · 247540 에코프로비엠)만 쓴다.
+**종목 범위:** technical 은 전체 종목 확장 구조로, 형식상 유효한(6자리) ticker 를 기본 지원한다
+(`config.is_supported_ticker`, allowlist 아님). 종목명 정본은 backend canonical stock context 가 담당한다.
+실효 universe 는 backend `stocks`(resolver) 데이터에 종속 — 현재 dev stocks 에 seed 된 종목만 resolved 되므로
+smoke 는 seed 된 종목을 쓴다. **실증 완료 기준선은 BATTERY_TICKERS 대표주**(예: 373220 LG에너지솔루션 ·
+051910 LG화학)이고, 확장 종목(예: 005930)은 backend stocks 에 seed 된 뒤 검증한다.
 
 출력은 **secret-safe** — request_id/trace_id/as_of 와 technical 요약(status·source·final_regime 등)만
 찍고, raw prompt/response·API key 는 절대 출력하지 않는다.
@@ -24,6 +25,8 @@ from datetime import UTC, datetime
 
 from src.agents.technical.services.openai_llm_client import default_openai_client
 from src.supervisor.execution.adapters import ExecutionDeps, default_adapters
+from src.supervisor.planning.fallback_observer import RecordingFallbackObserver
+from src.supervisor.planning.fallback_source import default_fallback_lookup
 from src.supervisor.planning.resolve_client import StockResolverClient
 from src.supervisor.runtime import run_analysis
 from src.supervisor.schemas import SupervisorInput
@@ -56,6 +59,10 @@ def main() -> None:
 
     # 실 의존성 주입 — endpoint 가 하는 wiring 을 스크립트에서 재현.
     resolver = StockResolverClient()
+    # canonical not_found 일 때만 쓰는 보조 lookup(ephemeral, 정본 write 없음). 운영형 curated + DART 공시명
+    # 스냅샷 기반(결정론, 네트워크 없음). observer 로 fallback 사용을 관측(secret-safe).
+    fallback = default_fallback_lookup()
+    observer = RecordingFallbackObserver()
     try:
         llm_client = default_openai_client()
     except RuntimeError:
@@ -70,11 +77,18 @@ def main() -> None:
     )
     inp = SupervisorInput(query=query, request_id=deps.request_id, trace_id=deps.trace_id)
 
-    execution = run_analysis(inp, resolver=resolver, adapters=default_adapters(), deps=deps)
+    execution = run_analysis(
+        inp, resolver=resolver, fallback=fallback, observer=observer,
+        adapters=default_adapters(), deps=deps,
+    )
 
     res = execution.resolution
-    print(f"[smoke] resolution: used={res.used_stock_resolver} status={res.status} "
+    print(f"[smoke] resolution: used={res.used_stock_resolver} fallback={res.used_fallback_lookup} "
+          f"status={res.status} source={res.source} persisted={res.persisted} "
           f"stock={res.stock.stock_code if res.stock else None}")
+    for ev in observer.events:   # fallback 이 실제로 탄 경우만(secret-safe 요약)
+        print(f"[smoke] fallback_event: status={ev.final_status} final_source={ev.final_source} "
+              f"source_hits={ev.source_hits} match_types={ev.match_types} candidates={ev.candidate_count}")
     for r in execution.results:
         line = f"  - {r.agent_type:11} {r.status:8} reason={r.reason}"
         if r.status == "success" and r.agent_type == "technical":

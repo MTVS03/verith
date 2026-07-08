@@ -10,14 +10,19 @@
 
 1. MVP에서 사용하는 KIS API와 요청/응답 구조를 정의한다.
 2. KIS 원본 필드를 내부 표준 OHLCV 필드로 매핑한다.
-3. 종목 allowlist·호출 제한·구간 분할 등 실무 제약을 정리한다.
+3. 종목 지원 정책·호출 제한·구간 분할 등 실무 제약을 정리한다.
 4. `services/kis_client.py` 구현의 기준 문서가 된다.
 
 ---
 
-## 2. MVP 종목 범위
+## 2. 종목 범위 (전체 종목 확장)
 
-MVP 조사 범위는 **2차전지 10종목**으로 제한한다. KIS API는 섹터 단위 조회가 아니라 종목코드 단위 조회이므로, 10종목을 allowlist 순회하며 각 종목마다 D/W/M을 개별 호출한다(§3).
+**"2차전지 10종 allowlist 제한"은 폐기됐다.** technical 은 형식상 유효한(6자리) ticker 를 기본 지원하며
+(`config.md §11` `is_supported_ticker`, allowlist membership 아님), 종목 지원 여부는 gate 가 아니라 데이터/
+결과 상태로 표현한다. KIS API 는 종목코드 단위 조회이므로, 확장 종목도 종목당 D/W/M 을 개별 호출한다(§3).
+
+아래 10종은 초기 검증(§9)에 쓴 **2차전지 대표주(dev/smoke 표시명 fallback 예시)** 이며, 지원 범위를 정의하지
+않는다. 종목명 정본은 이 표가 아니라 **backend canonical stock context**(supervisor 가 `stock_name` 주입).
 
 | 종목명 | 종목코드 |
 | --- | --- |
@@ -32,23 +37,28 @@ MVP 조사 범위는 **2차전지 10종목**으로 제한한다. KIS API는 섹�
 | 엔켐 | 348370 |
 | SK아이이테크놀로지 | 361610 |
 
-allowlist 정본은 `config.md` §11 `BATTERY_TICKERS`다. allowlist 밖 종목은 조회하지 않고 범위 밖(`OUT_OF_SCOPE_TICKER`)으로 처리한다. 최종 종목코드는 KIS 종목정보파일(`stocks_info/`) 또는 KRX 기준으로 한 번 검증하는 것을 권장한다.
+`config.md §11` `BATTERY_TICKERS` 는 더 이상 allowlist 정본이 아니라 **dev/smoke/test 표시명 fallback**
+전용이다(`config.dev_stock_name`). 확장 종목의 종목코드는 backend canonical stocks(KRX/KIS 종목마스터)로
+검증된 값을 supervisor 가 넘겨준다.
 
 ---
 
 ## 3. KIS 호출 방식
 
-KIS 기간별시세 API는 **종목코드 1개 × 타임프레임 1개** 단위로 호출한다. "한 번에 10종목"이 아니라, 10종목을 D/W/M으로 각각 조회하면 최소 30회 호출한다.
+KIS 기간별시세 API는 **종목코드 1개 × 타임프레임 1개** 단위로 호출한다. runtime 에서 technical 은 요청당
+**supervisor 가 주입한 stock_code 1종목**만 처리하므로, 한 요청은 그 종목의 D/W/M = **3회 호출**이다("한 번에
+여러 종목"이 아니다). 여러 종목을 미리 채우는 건 dev warmup 같은 배치 시나리오이며, 그때만 N종목 × 3회다.
 
 ```
-for ticker in BATTERY_TICKERS:
-    for period in [D, W, M]:              # 일봉·주봉·월봉 각각
-        → KIS 기간별시세 API 호출 (FID_PERIOD_DIV_CODE=period)
-        → output2를 내부 표준 OHLCV로 변환
-        → Redis 캐시 저장 (daily / weekly / monthly)
+# runtime: 요청당 1종목(supervisor 주입 stock_code) — BATTERY_TICKERS 순회 아님
+for period in [D, W, M]:                   # 일봉·주봉·월봉 각각
+    → KIS 기간별시세 API 호출 (FID_PERIOD_DIV_CODE=period)
+    → output2를 내부 표준 OHLCV로 변환
+    → Redis 캐시 저장 (daily / weekly / monthly)
+# 배치(dev warmup 등)일 때만 위를 N종목 반복 → N×3 호출
 ```
 
-**일봉·주봉·월봉을 모두 KIS 원본으로 각각 호출한다.** 같은 `inquire-daily-itemchartprice` API에 `FID_PERIOD_DIV_CODE`만 `D`/`W`/`M`으로 바꿔 부른다. 리샘플로 파생하지 않는다 — 타임프레임별로 KIS 실제 시세를 정본으로 쓴다. 종목당 3개 타임프레임 호출이므로 10종목이면 최소 30호출(구간 분할 시 더 늘 수 있음, §8).
+**일봉·주봉·월봉을 모두 KIS 원본으로 각각 호출한다.** 같은 `inquire-daily-itemchartprice` API에 `FID_PERIOD_DIV_CODE`만 `D`/`W`/`M`으로 바꿔 부른다. 리샘플로 파생하지 않는다 — 타임프레임별로 KIS 실제 시세를 정본으로 쓴다. 종목당 3개 타임프레임 호출이므로 N종목이면 최소 N×3호출(구간 분할 시 더 늘 수 있음, §8).
 
 ---
 
@@ -201,7 +211,7 @@ KIS 호출 실패 시 재시도·폴백은 `config.md` §8·`sequence.md`·`trac
 
 > timeout 계층 구분: 여기 5초는 **KIS 1회 호출** timeout(`config.md` §8)이다. `api_spec.md`의 60초는 백엔드→AI **전체 분석 요청** timeout으로, 층이 다르다(AI 내부에서 KIS 재시도·폴백을 처리하는 시간을 포함).
 
-allowlist 밖 종목은 KIS 호출 자체를 하지 않고 `OUT_OF_SCOPE_TICKER`로 즉시 반환한다(§2).
+지원 정책(`is_supported_ticker`, §2) 밖(형식 오류·빈 값)이면 KIS 호출 없이 `OUT_OF_SCOPE_TICKER`로 즉시 반환한다. allowlist membership 기반 차단은 폐기됐다.
 
 ---
 

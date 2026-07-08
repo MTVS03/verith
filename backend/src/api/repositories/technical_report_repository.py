@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.common.stock import Stock
 from db.models.technical.report_chart import TechnicalReportChart
+from db.models.technical.report_followup import TechnicalReportFollowup
 from db.models.technical.report_interpretation import TechnicalReportInterpretation
 from db.models.technical.report_risk_note import TechnicalReportRiskNote
 from db.models.technical.report_signal import TechnicalReportSignal
@@ -57,8 +58,104 @@ async def add_report(
 
 
 async def get_report(session: AsyncSession, report_id: UUID) -> TechnicalReport | None:
-    """root 조회(없으면 None). API 는 report.output_payload 를 report 로 반환한다."""
+    """root 조회(없으면 None). read model projection 이 output_payload 를 읽는다."""
     return await session.get(TechnicalReport, report_id)
+
+
+async def get_stock(session: AsyncSession, stock_code: str) -> Stock | None:
+    """canonical 종목(stocks) 조회 — read model stock 블록의 정본 source(없으면 None)."""
+    return await session.get(Stock, stock_code)
+
+
+async def list_followups(
+    session: AsyncSession, report_id: UUID
+) -> list[TechnicalReportFollowup]:
+    """parent report 기준 follow-up 목록 — created_at 오름차순(대화 순서). 인덱스(report_id,created_at) 활용."""
+    result = await session.scalars(
+        select(TechnicalReportFollowup)
+        .where(TechnicalReportFollowup.report_id == report_id)
+        .order_by(TechnicalReportFollowup.created_at.asc())
+    )
+    return list(result)
+
+
+async def add_followup(session: AsyncSession, followup: TechnicalReportFollowup) -> None:
+    """follow-up row 추가(같은 트랜잭션). commit 은 호출자(service)가 한다."""
+    session.add(followup)
+    await session.flush()
+
+
+async def count_followups(session: AsyncSession, report_id: UUID) -> int:
+    """report 에 연결된 follow-up 수(report detail 의 followup_count 신호용)."""
+    n = await session.scalar(
+        select(func.count())
+        .select_from(TechnicalReportFollowup)
+        .where(TechnicalReportFollowup.report_id == report_id)
+    )
+    return int(n or 0)
+
+
+async def followup_counts_for(
+    session: AsyncSession, report_ids: list[UUID]
+) -> dict[UUID, int]:
+    """여러 report 의 follow-up 수를 한 번(GROUP BY)에 — 목록 N+1 방지. 없으면 0(호출측 default)."""
+    if not report_ids:
+        return {}
+    rows = await session.execute(
+        select(TechnicalReportFollowup.report_id, func.count())
+        .where(TechnicalReportFollowup.report_id.in_(report_ids))
+        .group_by(TechnicalReportFollowup.report_id)
+    )
+    return {rid: int(n) for rid, n in rows.all()}
+
+
+async def list_technical_reports(
+    session: AsyncSession,
+    *,
+    stock_code: str | None = None,
+    client_session_id: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[TechnicalReport]:
+    """technical report 목록 — created_at DESC(최신순). 필터: stock_code / client_session_id."""
+    stmt = select(TechnicalReport)
+    if stock_code is not None:
+        stmt = stmt.where(TechnicalReport.stock_code == stock_code)
+    if client_session_id is not None:
+        stmt = stmt.where(TechnicalReport.client_session_id == client_session_id)
+    stmt = stmt.order_by(TechnicalReport.created_at.desc()).limit(limit).offset(offset)
+    return list(await session.scalars(stmt))
+
+
+async def count_technical_reports(
+    session: AsyncSession, *, stock_code: str | None = None, client_session_id: str | None = None
+) -> int:
+    """목록 필터 기준 전체 수(pagination total)."""
+    stmt = select(func.count()).select_from(TechnicalReport)
+    if stock_code is not None:
+        stmt = stmt.where(TechnicalReport.stock_code == stock_code)
+    if client_session_id is not None:
+        stmt = stmt.where(TechnicalReport.client_session_id == client_session_id)
+    return int(await session.scalar(stmt) or 0)
+
+
+async def get_stocks(session: AsyncSession, stock_codes: list[str]) -> dict[str, Stock]:
+    """여러 canonical 종목을 한 번에 조회(목록 stock 블록 batch)."""
+    if not stock_codes:
+        return {}
+    rows = await session.scalars(select(Stock).where(Stock.stock_code.in_(stock_codes)))
+    return {s.stock_code: s for s in rows}
+
+
+async def get_interpretation(
+    session: AsyncSession, report_id: UUID
+) -> TechnicalReportInterpretation | None:
+    """정규화 interpretation 행 조회(model_name 등 payload 밖 backend 필드용). report_id 는 unique."""
+    return await session.scalar(
+        select(TechnicalReportInterpretation).where(
+            TechnicalReportInterpretation.report_id == report_id
+        )
+    )
 
 
 async def delete_root(session: AsyncSession, report_id: UUID) -> int:

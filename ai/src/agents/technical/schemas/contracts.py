@@ -26,6 +26,7 @@ from .enums import (
     Consensus,
     ConfidenceLevel,
     DataStatus,
+    DirectionalBias,
     GenerationSource,
     IndicatorType,
     Regime,
@@ -52,9 +53,12 @@ class TechnicalAgentInput(_StrictModel):
     query: str  # 기술적 분석 관점으로 변형된 도메인 질의
     request_id: str  # 요청 추적용 런타임 필드. 출력에 되돌려준다(에이전트는 저장 안 함 — backend가 technical_reports.request_id 에 저장, api_spec §4).
     as_of: datetime  # 분석 기준 시점(ISO8601). 문자열 입력을 Pydantic이 파싱.
+    # backend canonical 종목명(정본). supervisor 가 stock context 에서 주입한다. 없으면(None) technical 은
+    # dev 표시명 fallback(config.dev_stock_name) 또는 ticker 코드를 쓴다 — 하위호환(기존 경로는 None 로 동작).
+    stock_name: str | None = None
 
-    # 의미 검증(형식 오류 = 사용자 요청 오류 → endpoint 422 VALIDATION_ERROR). allowlist 소속 검사는
-    # 여기가 아니라 supervisor 시작부(전 진입 경로 보호)에서 한다(OutOfScopeTickerError).
+    # 의미 검증(형식 오류 = 사용자 요청 오류 → endpoint 422 VALIDATION_ERROR). 종목 지원 정책 검사는
+    # 여기가 아니라 supervisor 시작부(config.is_supported_ticker, 전 진입 경로 보호)에서 한다.
     @field_validator("ticker")
     @classmethod
     def _ticker_is_6_digits(cls, v: str) -> str:
@@ -154,9 +158,25 @@ class ChartPayload(_StrictModel):
 
 
 class InterpretationResult(_StrictModel):
-    """종합 해석 문장. → REPORT_INTERPRETATION. 원칙적으로 항상 존재(검증 실패 시 template_fallback 문장)."""
+    """종합 해석. → REPORT_INTERPRETATION. 원칙적으로 항상 존재(검증 실패 시 template_fallback).
+
+    `text` 는 하위호환·검증용 종합 문장(3~5문장). 아래 구조화 섹션은 **프론트 카드 렌더용 additive 필드**로,
+    계산값을 재산출하지 않고 **이미 확정된 regime/signal/risk 를 설명·파생**한 것이다. LLM 실패 시에도
+    template fallback 이 같은 구조를 deterministic 하게 채운다(빈약 착지 방지). `directional_bias` 는 LLM 이
+    아니라 **consensus 에서 코드가 파생**한다(재판정 아님)."""
     text: str
     source: GenerationSource
+    # ── 구조화 섹션(additive, optional) ──
+    one_line_summary: str | None = None          # 한 줄 요약
+    directional_bias: DirectionalBias | None = None   # consensus 파생(bullish/neutral/bearish)
+    trend_interpretation: str | None = None       # 추세(regime) 해석
+    signal_interpretation: str | None = None      # 신호(consensus/confidence) 해석
+    risk_interpretation: str | None = None         # 리스크 해석
+    timeframe_alignment: str | None = None         # D/W/M 정합·불일치 서술
+    key_drivers: list[str] = Field(default_factory=list)      # 핵심 근거 bullet
+    warning_points: list[str] = Field(default_factory=list)   # 주의/위험 bullet
+    what_to_watch_next: str | None = None          # 다음에 확인할 것
+    invalidation_or_caution: str | None = None     # 무효화/한계 조건(risk 와 분리)
 
 
 class VerificationResult(_StrictModel):

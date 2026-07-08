@@ -32,7 +32,7 @@ if str(_AI_ROOT) not in sys.path:
     sys.path.insert(0, str(_AI_ROOT))
 
 from src.agents.technical.agent import run_technical_agent  # noqa: E402
-from src.agents.technical.config import BATTERY_TICKERS, load_kis_settings  # noqa: E402
+from src.agents.technical.config import dev_stock_name, is_supported_ticker, load_kis_settings  # noqa: E402
 from src.agents.technical.observability.keyword_rules import (  # noqa: E402
     CONFIDENCE_LABELS,
     CONSENSUS_LABELS,
@@ -233,8 +233,10 @@ def _save_output(output: TechnicalAgentOutput, out_dir: Path) -> Path:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Technical agent end-to-end smoke (real KIS + fake LLM)")
-    parser.add_argument("--ticker", default=_DEFAULT_TICKER, help="종목코드(6자리, allowlist 내)")
+    parser.add_argument("--ticker", default=_DEFAULT_TICKER, help="종목코드(6자리). 전체 종목 확장 — allowlist 아님")
     parser.add_argument("--query", default=_DEFAULT_QUERY, help="사용자 질의")
+    parser.add_argument("--stock-name", dest="stock_name", default=None,
+                        help="backend canonical 종목명(주입). 생략 시 dev 표시명 fallback 또는 코드")
     parser.add_argument("--as-of", dest="as_of", default=None,
                         help="분석 기준일 (YYYY-MM-DD 또는 ISO). 생략 시 현재 시각")
     parser.add_argument("--out-dir", dest="out_dir", default=str(_DEFAULT_OUT_DIR),
@@ -257,19 +259,21 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    if args.ticker not in BATTERY_TICKERS:
-        print(f"[smoke] allowlist 밖 종목입니다: {args.ticker}. 허용: {sorted(BATTERY_TICKERS)}",
-              file=sys.stderr)
+    if not is_supported_ticker(args.ticker):
+        print(f"[smoke] 종목코드 형식 오류(6자리 아님): {args.ticker}", file=sys.stderr)
         return 1
 
+    # 종목명 정본 우선순위: 주입 stock_name → dev 표시명 fallback → ticker 코드.
+    stock_name = args.stock_name or dev_stock_name(args.ticker)
     as_of = args.as_of if args.as_of else datetime.now()
     agent_input = TechnicalAgentInput(
         ticker=args.ticker,
         query=args.query,
+        stock_name=stock_name,
         request_id=f"smoke_{uuid.uuid4().hex[:12]}",
         as_of=as_of,
     )
-    fake_llm = SmokeFakeLlm(company_name=BATTERY_TICKERS[args.ticker])
+    fake_llm = SmokeFakeLlm(company_name=stock_name or args.ticker)
 
     print(f"[smoke] run_technical_agent 실행 (ticker={args.ticker}, as_of={agent_input.as_of.isoformat()})")
     print("[smoke] real KIS 호출 중 (D/W/M)...")

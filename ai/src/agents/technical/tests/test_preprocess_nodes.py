@@ -76,6 +76,42 @@ def test_pre05_normalize_fallback_uses_ticker_name():
     assert BATTERY_TICKERS[TICKER] in result.normalized_question  # "LG에너지솔루션"
 
 
+# ── stock_name 외부 주입 우선순위 (전체 종목 확장 핵심) ───────────────────────
+def _norm_named(response: str, stock_name: str | None, *, ticker: str = TICKER) -> NormalizeResult:
+    return run_normalize_question(
+        FakeLlm(response), ticker=ticker, query="지금 어때?", as_of=AS_OF, stock_name=stock_name)
+
+
+def test_injected_stock_name_wins_over_dev_fallback_in_template():
+    # 주입 canonical 종목명이 dev 표시명(BATTERY)과 달라도 fallback 문장은 주입명을 쓴다.
+    result = _norm_named("not json", "커스텀종목")
+    assert result.source == GenerationSource.TEMPLATE_FALLBACK
+    assert "커스텀종목" in result.normalized_question
+    assert BATTERY_TICKERS[TICKER] not in result.normalized_question  # dev명 우선 아님
+
+
+def test_preservation_uses_injected_stock_name():
+    # 보존 검증 기준은 주입 canonical 종목명. 그 이름이 문장에 있으면 LLM 통과.
+    q = "커스텀종목의 최근 시세와 거래량, 기술적 신호를 분석합니다."
+    result = _norm_named(json.dumps({"normalized_question": q}, ensure_ascii=False), "커스텀종목")
+    assert result.source == GenerationSource.LLM and result.normalized_question == q
+
+
+def test_preservation_fails_when_injected_name_absent():
+    # LLM 문장에 dev명만 있고 주입 canonical명이 없으면 보존 실패 → fallback(주입명 사용).
+    q = "LG에너지솔루션의 최근 시세와 거래량, 기술적 신호를 분석합니다."
+    result = _norm_named(json.dumps({"normalized_question": q}, ensure_ascii=False), "커스텀종목")
+    assert result.source == GenerationSource.TEMPLATE_FALLBACK
+    assert "커스텀종목" in result.normalized_question
+
+
+def test_expanded_ticker_without_name_falls_back_to_code():
+    # 이름 모르는 확장 종목(dev map 없음·주입 없음): 보존검증 skip, fallback은 ticker 코드.
+    result = _norm_named("not json", None, ticker="999999")
+    assert result.source == GenerationSource.TEMPLATE_FALLBACK
+    assert "999999" in result.normalized_question
+
+
 def test_normalize_fenced_json_parses():
     fenced = f"```json\n{json.dumps({'normalized_question': SAFE_QUESTION}, ensure_ascii=False)}\n```"
     assert _norm(fenced).source == GenerationSource.LLM

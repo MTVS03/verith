@@ -32,7 +32,7 @@
 
 - KIS 인증키
 - API base URL
-- 종목 allowlist
+- 종목 지원 정책·표시명 map (`is_supported_ticker`·`BATTERY_TICKERS` — allowlist gate 아님, config 소유)
 - KIS period 값 `D`, `W`, `M`
 - timeout, retry, backoff 값
 - RSI, 이동평균, 볼린저밴드 등 분석 상수 (예: `RSI_OVERSOLD = 35` — 문서에서 확정된 값이므로 코드에 `35`를 직접 박지 않는다)
@@ -151,7 +151,7 @@ def classify_regime(indicators):
 
 | 모듈 | 책임 | 하지 말아야 할 것 |
 | --- | --- | --- |
-| `config.py` | 설정값, allowlist, env 로딩 | KIS 호출, 지표 계산 |
+| `config.py` | 설정값, 종목 지원 정책(`is_supported_ticker`)·표시명 fallback, env 로딩 | KIS 호출, 지표 계산 |
 | `services/kis_client.py` | KIS 호출, 재시도, 원본 응답 수신 | regime 판정, LLM 호출 |
 | `schemas/` | 데이터 구조 정의 | 외부 API 호출 |
 | `indicators/` | RSI, MA, Bollinger 등 지표 계산 | KIS 호출, LLM 호출 |
@@ -384,7 +384,7 @@ except TimeoutError as exc:
 아래 경우는 즉시 실패시킨다.
 
 - 필수 환경변수 누락
-- allowlist 밖 종목
+- 지원 정책 밖 종목(`is_supported_ticker`=false, 사실상 형식 오류 — allowlist 아님)
 - 필수 KIS 응답 필드 누락
 - 숫자 변환 불가
 - 지원하지 않는 period 값
@@ -423,8 +423,8 @@ Missing required KIS environment variables: KIS_API_KEY, KIS_API_SECRET
 좋은 예:
 
 ```python
-def is_allowed_ticker(ticker: str) -> bool:
-    return ticker in BATTERY_TICKERS
+def is_supported_ticker(ticker: str) -> bool:
+    return bool(_TICKER_RE.fullmatch(ticker))  # 지원 정책: 형식상 유효한 ticker(allowlist 아님)
 ```
 
 ```python
@@ -674,8 +674,8 @@ from src.agents.technical.config import KIS_PERIOD_DAILY
 
 # 작은 함수
 
-def is_allowed_ticker(ticker: str) -> bool:
-    return ticker in BATTERY_TICKERS
+def is_supported_ticker(ticker: str) -> bool:
+    return bool(_TICKER_RE.fullmatch(ticker))  # 지원 정책(형식). BATTERY_TICKERS membership 아님
 
 # 설정 객체
 @dataclass(frozen=True)

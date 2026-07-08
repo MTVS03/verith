@@ -1012,25 +1012,21 @@ def test_trace_sink_failure_does_not_break_run():
 import time as _time  # noqa: E402
 
 from src.agents.technical.runtime.deadline import Deadline, DeadlineExceeded  # noqa: E402
-from src.agents.technical.services.kis_client import OutOfScopeTickerError  # noqa: E402
-
-
 def _dwm_fetcher(t, *, end_date=None):
     return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
 
 
-def test_allowlist_rejects_before_llm_and_fetcher():
-    # allowlist 밖 ticker(형식은 6자리) → OpenAI/KIS 이전에 OutOfScopeTickerError
-    llm = ScriptedLlm([])  # 호출되면 안 됨(응답 없음)
+def test_expanded_ticker_enters_llm_and_fetcher():
+    # 전체 종목 확장: 구 allowlist 밖 ticker(999999)도 정책상 지원 → OpenAI/KIS로 진입해 정상 output.
+    llm = ScriptedLlm([NORM_OK, FOCUS_OK, INTERP_BAD, INTERP_BAD])
     calls = {"n": 0}
 
     def fetch(t, *, end_date=None):
         calls["n"] += 1
         return {"D": DAILY, "W": WEEKLY, "M": MONTHLY}
-    bad = TechnicalAgentInput(ticker="999999", query="q", request_id="r", as_of=AS_OF)
-    with pytest.raises(OutOfScopeTickerError):
-        sup.run(bad, llm_client=llm, fetcher=fetch, trace_id="t")
-    assert llm.prompts == [] and calls["n"] == 0          # OpenAI·KIS 미호출
+    expanded = TechnicalAgentInput(ticker="999999", query="q", request_id="r", as_of=AS_OF)
+    out = sup.run(expanded, llm_client=llm, fetcher=fetch, trace_id="t")
+    assert out.ticker == "999999" and calls["n"] > 0      # gate 미차단 → KIS 진입
 
 
 def test_expired_deadline_raises_before_preprocess():

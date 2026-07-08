@@ -36,3 +36,17 @@ STOCK_NAMES: dict[str, str] = {s["stock_code"]: s["stock_name"] for s in SUPPORT
 def allowlist_name(ticker: str) -> str | None:
     """allowlist(SUPPORTED_STOCKS)에 있으면 종목명, 없으면 None."""
     return STOCK_NAMES.get(ticker)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 대표 확장 종목 (battery 밖 대형주) — 전체 종목 확장 검증용 canonical seed
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠️ `SUPPORTED_STOCKS`(= AI BATTERY 1:1, `allowlist_name` fallback 정본)와 **별개 목록**이다.
+# stocks 를 battery 밖 대표 종목으로 넓혀 resolver/supervisor/technical 확장 smoke 를 검증하려는 것.
+# `scripts/seed_representative_stocks.py` 가 이 목록을 읽어 seed 한다. 전체 KIS 종목 마스터 승격은 별도
+# 운영 단계(`sync_stocks`)로 미룬다 — 이 목록을 무한정 늘리지 않는다(1차 대표 3종).
+REPRESENTATIVE_STOCKS: list[dict[str, str]] = [
+    {"stock_code": "005930", "stock_name": "삼성전자", "market": "KOSPI"},
+    {"stock_code": "005935", "stock_name": "삼성전자우", "market": "KOSPI"},   # 우선주
+    {"stock_code": "035720", "stock_name": "카카오", "market": "KOSPI"},
+]

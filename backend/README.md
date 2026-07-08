@@ -7,6 +7,11 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 - Stock Resolver 응답 의미·경계: [`docs/stock_resolver.md`](docs/stock_resolver.md)
 - 전체 종목 마스터 동기화(KIS): [`docs/stock_master_sync.md`](docs/stock_master_sync.md)
 - DART 법인코드 동기화(corp_code): [`docs/dart_corp_code_sync.md`](docs/dart_corp_code_sync.md)
+- **DB 역할 경계(canonical/dev/test)**: [`docs/db_boundaries.md`](docs/db_boundaries.md)
+- **Technical Report Frontend API 계약(정본, 프론트 구현 기준)**: [`docs/technical_frontend_api_contract.md`](docs/technical_frontend_api_contract.md)
+- Technical Report backend handoff(구현 노트): [`docs/technical_backend_handoff.md`](docs/technical_backend_handoff.md)
+- Technical Follow-up answer 생성 경계(caller-provided 정책·미래 AI 경로): [`docs/technical_followup_answer_boundary.md`](docs/technical_followup_answer_boundary.md)
+- 리포트 보관함 공통 목록 API(agent_type 필터 카드 리스트): [`docs/report_archive_api_contract.md`](docs/report_archive_api_contract.md)
 
 ## 개발 환경
 
@@ -72,11 +77,55 @@ uv run python -m scripts.sync_corp_codes --apply      # 실제 반영(commit)
 SELECT stock_code, stock_name, market FROM stocks ORDER BY stock_code;
 ```
 
+## Shared verith SQL dump
+
+팀원이 **외부 KIS/DART sync 를 다시 돌리지 않고도** 공용 `verith` canonical 상태를 pull 후 재현할 수 있게,
+repo 에 **SQL dump snapshot** 을 커밋해 둔다([`dumps/README.md`](dumps/README.md)).
+
+권장 순서:
+
+```bash
+docker compose up -d postgres
+
+cd backend
+uv sync
+uv run alembic upgrade head
+docker exec -i verith-postgres psql -U verith -d verith < dumps/shared_verith_snapshot.sql
+```
+
+restore 후 확인:
+
+```bash
+docker exec verith-postgres psql -U verith -d verith -c "SELECT COUNT(*) FROM stocks;"
+docker exec verith-postgres psql -U verith -d verith -c "SELECT COUNT(*) FROM stock_aliases;"
+docker exec verith-postgres psql -U verith -d verith -c "SELECT COUNT(*) FROM stock_corp_codes;"
+```
+
+이 dump 는 다음 canonical 상태를 담는다.
+
+- `stocks` — **2,607**
+- `stock_aliases` — **32**
+- `stock_corp_codes` — **3,976**
+
+주의:
+
+- 이 dump 는 **공용 `verith` 데이터를 snapshot 기준으로 다시 맞춘다**. 즉 `stocks` / `stock_aliases` /
+  `stock_corp_codes` 는 snapshot 상태로 덮어쓴다고 생각하면 된다.
+- 스키마는 dump 가 아니라 **Alembic** 이 관리하므로, 반드시 `uv run alembic upgrade head` 를 먼저 실행한다.
+- backend 가 이미 떠 있으면 restore 후 **재기동**하는 편이 안전하다.
+
 ## 테스트
+
+pytest 는 **전용 test DB(`TEST_DATABASE_URL`, 예: `verith_test`)** 를 써야 한다 — 공유 dev/smoke DB
+(`verith`)에 붙으면 운영 `--apply`/seed 커밋이 테스트 전제를 오염시킨다(conftest 가 미설정/앱DB동일 시
+경고). DB 역할·설정은 [`docs/db_boundaries.md`](docs/db_boundaries.md).
 
 ```bash
 cd backend
-# TEST_DATABASE_URL 우선, 없으면 DATABASE_URL(backend/.env) 사용. PostgreSQL 필요.
+# 최초 1회: 전용 test DB 생성 + 스키마
+docker exec verith-postgres psql -U verith -d postgres -c "CREATE DATABASE verith_test;"
+DATABASE_URL=postgresql+asyncpg://verith:verith1234@localhost:5433/verith_test uv run alembic upgrade head
+# backend/.env 에 TEST_DATABASE_URL=…/verith_test 를 두면 자동 사용.
 uv run pytest
 uv run ruff check db src tests scripts
 uv run alembic check

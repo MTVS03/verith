@@ -1,0 +1,240 @@
+{
+  "_provenance": "verith.stock_corp_codes JOIN stocks — additive corp_name_from_dart (정규화 후 stock_name과 다르고 len>=3). 생성 2026-07. 갱신은 별도 관리 플로우(read-only 조회 전용).",
+  "_generated_query": "SELECT c.corp_name_from_dart, c.stock_code, s.stock_name, s.market FROM stock_corp_codes c JOIN stocks s ON c.stock_code=s.stock_code",
+  "entries": [
+    {
+      "corp_name": "시알홀딩스",
+      "stock_code": "000480",
+      "stock_name": "CR홀딩스",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "삼성화재해상보험",
+      "stock_code": "000810",
+      "stock_name": "삼성화재",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "한국주철관공업",
+      "stock_code": "000970",
+      "stock_name": "한국주철관",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "유진증권",
+      "stock_code": "001200",
+      "stock_name": "유진투자증권",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "디아이동일",
+      "stock_code": "001530",
+      "stock_name": "DI동일",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "삼화콘덴서공업",
+      "stock_code": "001820",
+      "stock_name": "삼화콘덴서",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "한국수출포장공업",
+      "stock_code": "002200",
+      "stock_name": "한국수출포장",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "케이씨씨",
+      "stock_code": "002380",
+      "stock_name": "KCC",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "미창석유공업",
+      "stock_code": "003650",
+      "stock_name": "미창석유",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "한국석유공업",
+      "stock_code": "004090",
+      "stock_name": "한국석유",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "태양금속공업",
+      "stock_code": "004100",
+      "stock_name": "태양금속",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "엔피씨",
+      "stock_code": "004250",
+      "stock_name": "NPC",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "서울식품공업",
+      "stock_code": "004410",
+      "stock_name": "서울식품",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "롯데칠성음료",
+      "stock_code": "005300",
+      "stock_name": "롯데칠성",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "현대자동차",
+      "stock_code": "005380",
+      "stock_name": "현대차",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "삼영전자공업",
+      "stock_code": "005680",
+      "stock_name": "삼영전자",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "휴니드테크놀러지스",
+      "stock_code": "005870",
+      "stock_name": "휴니드",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "화승인더스트리",
+      "stock_code": "006060",
+      "stock_name": "화승인더",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "케이씨티시",
+      "stock_code": "009070",
+      "stock_name": "KCTC",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "엘에스일렉트릭",
+      "stock_code": "010120",
+      "stock_name": "LS ELECTRIC",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "진양폴리우레탄",
+      "stock_code": "010640",
+      "stock_name": "진양폴리",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "삼화전자공업",
+      "stock_code": "011230",
+      "stock_name": "삼화전자",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "한신기계공업",
+      "stock_code": "011700",
+      "stock_name": "한신기계",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "계룡건설산업",
+      "stock_code": "013580",
+      "stock_name": "계룡건설",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "한국전력공사",
+      "stock_code": "015760",
+      "stock_name": "한국전력",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "서울도시가스",
+      "stock_code": "017390",
+      "stock_name": "서울가스",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "에스제이엠홀딩스",
+      "stock_code": "025530",
+      "stock_name": "SJM홀딩스",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "한국단자공업",
+      "stock_code": "025540",
+      "stock_name": "한국단자",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "케이티",
+      "stock_code": "030200",
+      "stock_name": "KT",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "유나이티드",
+      "stock_code": "033270",
+      "stock_name": "유나이티드제약",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "케이티앤지",
+      "stock_code": "033780",
+      "stock_name": "KT&G",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "케이티스카이라이프",
+      "stock_code": "053210",
+      "stock_name": "스카이라이프",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "티케이지휴켐스",
+      "stock_code": "069260",
+      "stock_name": "TKG휴켐스",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "티비에이치글로벌",
+      "stock_code": "084870",
+      "stock_name": "TBH글로벌",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "에스제이엠",
+      "stock_code": "123700",
+      "stock_name": "SJM",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "엔피엑스",
+      "stock_code": "222160",
+      "stock_name": "NPX",
+      "market": "KOSDAQ"
+    },
+    {
+      "corp_name": "아리바이오LAB",
+      "stock_code": "261780",
+      "stock_name": "아리바이오랩",
+      "market": "KOSDAQ"
+    },
+    {
+      "corp_name": "에스케이바이오팜",
+      "stock_code": "326030",
+      "stock_name": "SK바이오팜",
+      "market": "KOSPI"
+    },
+    {
+      "corp_name": "케이씨씨글라스",
+      "stock_code": "344820",
+      "stock_name": "KCC글라스",
+      "market": "KOSPI"
+    }
+  ]
+}

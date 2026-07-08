@@ -78,13 +78,22 @@ CREATE EXTENSION IF NOT EXISTS vector;     -- news.embedding 의 vector 타입
 ### Technical (기술적)
 | 테이블 | 요약 |
 |---|---|
-| `technical_reports` | 기술적 분석 리포트 root |
+| `technical_reports` | 기술적 분석 리포트 root. 목록 `GET /api/technical/reports` / 상세 `GET .../{id}`(read model + trust_summary) / 차트 `GET .../{id}/charts`(full payload) / trace `GET .../{id}/trace`(단계 재구성, duration null) — 계약 [`technical_frontend_api_contract.md`](technical_frontend_api_contract.md) |
 | `technical_report_signals` | 지표 신호 |
 | `technical_report_charts` | 차트 페이로드 |
 | `technical_report_risk_notes` | 리스크 노트 |
 | `technical_report_interpretations` | 해석 (1:1) |
 | `technical_report_verifications` | 검증 (1:1) |
-| `technical_report_followups` | 후속 질의 |
+| `technical_report_followups` | 후속 질의. write: `POST .../{id}/followups`(answer=caller 제공, parent snapshot 저장) / read: `GET .../{id}/followups` |
+
+> **Technical read model(조회 계약 ≠ 저장 형식).** `technical_reports.output_payload` 에 AI output 원본(raw)을
+> 계속 보존하되, **API 응답(`POST`·`GET /api/technical/reports/{id}`)은 프론트 친화 read model**로 정리해
+> 반환한다(`stock`(canonical)·`meta`·`summary`·`interpretation`·`drivers`·`signals`·`risks`·`charts`·
+> `verification` 블록). `stock` 은 **canonical `stocks` 우선**. AI 구조화 해석(one_line_summary·directional_bias·
+> timeframe_alignment·key_drivers 등)은 `technical_report_interpretations.sections`(JSONB)에 저장되며, read model
+> 은 projection 이라 구버전 payload(섹션 없음)에서도 shape 가 안정적이다. backend 는 값을 재해석하지 않는다.
+> 응답에는 **`trace_summary`**(생성 경로·데이터 품질·검증 요약·flag) 블록도 포함된다 — "어떻게 생성/검증됐는지"의
+> 제품용 요약(raw trace 미노출). 저장값 projection 이라 신규 저장 없음. 계약 정본: [`technical_backend_handoff.md`](technical_backend_handoff.md).
 
 ### News (뉴스, PostgreSQL 부분만)
 | 테이블 | 요약 |
@@ -144,11 +153,13 @@ erDiagram
     FLOW_REPORTS ||--|| FLOW_REPORT_VERIFICATIONS : verified_by
 ```
 
-FK 전체 목록 (17개):
+FK 전체 목록 (19개):
 
 ```
 agent_reports.stock_code                        -> stocks.stock_code
 fundamental_reports.stock_code                  -> stocks.stock_code
+technical_reports.stock_code                    -> stocks.stock_code
+flow_reports.stock_code                         -> stocks.stock_code
 report_ratios.report_id                         -> fundamental_reports.id
 report_evidence.report_id                       -> fundamental_reports.id
 report_evidence.ratio_id (nullable)             -> report_ratios.id
@@ -166,7 +177,7 @@ flow_report_interpretations.report_id(UQ)       -> flow_reports.id
 flow_report_verifications.report_id(UQ)         -> flow_reports.id
 ```
 
-**ON DELETE CASCADE** (자식 15개 FK): fundamental 7 + technical 6 + flow 2. report 삭제 시 자식이 함께 삭제된다. **`stocks` 참조 2개(agent_reports·fundamental_reports)는 마스터라 CASCADE 아님(NO ACTION).**
+**ON DELETE CASCADE** (자식 15개 FK): fundamental 7 + technical 6 + flow 2. report 삭제 시 자식이 함께 삭제된다. **`stocks` 참조 4개(agent_reports·fundamental_reports·technical_reports·flow_reports)는 마스터라 CASCADE 아님(NO ACTION).**
 
 **FK 를 걸지 않는 것** (앱 레벨 논리 링크):
 `agent_reports.agent_report_id`, `news.event_id`(Neo4j Event.canonical_id),
@@ -182,14 +193,14 @@ UNIQUE (10): `technical_reports.request_id`, `news.url`, **`technical_report_sig
 agent_reports        (agent_type, created_at DESC) / (client_session_id, created_at DESC)
                      / (stock_code, created_at DESC) / (trace_id)
 fundamental_reports  (request_id) / (stock_code, as_of DESC) / (trace_id)
-technical_reports    (client_session_id, created_at DESC) / (ticker, as_of DESC) / (trace_id)
+technical_reports    (client_session_id, created_at DESC) / (stock_code, as_of DESC) / (ticker, as_of DESC) / (trace_id)
 technical_report_charts     (report_id, period)
 technical_report_signals    UNIQUE(report_id, indicator)
 technical_report_risk_notes (report_id, severity)
 technical_report_followups  (report_id, created_at)
 news                 (event_id) / (published_at)
 news_reports         (created_at DESC)
-flow_reports         (ticker, base_date DESC) / (trace_id)
+flow_reports         (stock_code, base_date DESC) / (ticker, base_date DESC) / (trace_id)
 ```
 
 ---
@@ -228,7 +239,8 @@ PostgreSQL 에는 `news.event_id`(nullable uuid)만 둬서 Neo4j `Event.canonica
 
 ## 8. 저장 계층 주의사항
 
-- **`agent_reports.stock_code` / `fundamental_reports.stock_code` → `stocks.stock_code` FK**:
+- **`agent_reports.stock_code` / `fundamental_reports.stock_code` / `technical_reports.stock_code` / `flow_reports.stock_code`
+  → `stocks.stock_code` FK**:
   리포트를 저장하기 전에 해당 종목이 `stocks` 에 있어야 한다.
   기본 지원 종목은 [`../README.md`](../README.md)의 seed 절차로 구성한다. 런타임 저장에서도
   결측에 대비해 `stocks`를 먼저 확보한 뒤 리포트/index를 저장한다.

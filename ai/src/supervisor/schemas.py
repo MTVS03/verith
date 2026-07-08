@@ -30,6 +30,9 @@ ResolutionStatus = Literal[
 # resolver 호출이 도구 장애로 실패한 종류(도메인 not_found 와 구분).
 ResolverErrorKind = Literal["timeout", "connection", "backend_error", "invalid_response"]
 
+# 종목 context 의 출처. canonical resolver(정본, persisted) vs fallback lookup(이번 요청용 임시, ephemeral).
+ResolutionSource = Literal["canonical_resolver", "fallback_lookup"]
+
 # can_run 판정에 대한 단일 사유 코드(성공/실패 공통). 자유 텍스트가 아니라 코드값으로 표현한다.
 ReasonCode = Literal[
     "stock_resolved",       # 종목 확정 → 실행 가능
@@ -42,13 +45,20 @@ ReasonCode = Literal[
 
 
 class StockContext(BaseModel):
-    """agent 에 내려주는 최소 공통 종목 context. 미해결이면 전부 None."""
+    """agent 에 내려주는 최소 공통 종목 context. 미해결이면 code/name/market 전부 None.
+
+    `source`/`persisted` 는 이 종목이 어디서 왔는지 자기서술한다. canonical resolver 결과는 기본값
+    (canonical_resolver·persisted=True)이고, fallback lookup 으로 이번 요청에 한해 만든 **ephemeral**
+    context 는 `source="fallback_lookup"·persisted=False`. persisted=False 는 **정본(stocks)로 승격 금지**
+    를 뜻한다 — agent 로 전달은 되지만 DB 저장/색인/seed 경로로 이어지지 않는다."""
 
     model_config = ConfigDict(extra="forbid")
 
     stock_code: str | None = None
     stock_name: str | None = None
     market: str | None = None
+    source: ResolutionSource = "canonical_resolver"
+    persisted: bool = True
 
 
 class StockCandidate(BaseModel):
@@ -68,15 +78,30 @@ class ResolverError(BaseModel):
 
 
 class Resolution(BaseModel):
-    """resolver 사용 여부와 결과. status 로 not_found/not_attempted/error 를 구분한다."""
+    """resolver 사용 여부와 결과. status 로 not_found/not_attempted/error 를 구분한다.
+
+    fallback lookup 경계: canonical resolver 가 not_found 일 때만 보조 lookup 을 시도한다(§fallback).
+
+    **세 필드를 함께 읽어야 한다(단독 오독 주의):**
+    - `used_stock_resolver=True` = 1차 canonical resolver 를 **시도**했다(최종 결과가 canonical 에서 나왔다는
+      뜻이 **아니다** — fallback 이 최종일 때도 True 다).
+    - `used_fallback_lookup=True` = 2차 fallback 도 **시도**했다.
+    - `source` = **최종 종목이 어디서 왔는지**(canonical_resolver | fallback_lookup). 최종 출처 판단은 이걸 본다.
+    조합: canonical resolved → (used_stock_resolver=True, used_fallback_lookup=False, source=canonical_resolver,
+    persisted=True). fallback high-confidence 단일 → (True, True, source=fallback_lookup, persisted=False,
+    status=resolved, stock=ephemeral). fallback ambiguous → source=fallback_lookup 이되 stock 없음(자동선택 금지).
+    `source`/`persisted` 는 resolved 일 때 `stock.source`/`stock.persisted` 와 일치한다."""
 
     model_config = ConfigDict(extra="forbid")
 
     used_stock_resolver: bool
+    used_fallback_lookup: bool = False
     status: ResolutionStatus
     stock: StockContext | None = None
     candidates: list[StockCandidate] = Field(default_factory=list)
     error: ResolverError | None = None
+    source: ResolutionSource = "canonical_resolver"
+    persisted: bool = True
 
 
 class TaskEnvelope(BaseModel):

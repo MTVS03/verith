@@ -12,6 +12,7 @@
 | [04_VERIFICATION_POLICY.md](README/04_VERIFICATION_POLICY.md) | 검증 게이트, verdict guard, risk flags |
 | [05_MERGE_GUIDE.md](README/05_MERGE_GUIDE.md) | develop 머지 전 확인 사항과 커밋 포함 대상 |
 | [06_DEV_GUIDE.md](README/06_DEV_GUIDE.md) | 로컬 실행, 테스트, HTML preview 생성법 |
+| [07_SUPERVISOR_CONTRACT.md](README/07_SUPERVISOR_CONTRACT.md) | 공개 입력 계약, Supervisor 연결, insufficient_data 정책, ERD 크로스체크, corp_code 후속 debt |
 
 ## 빠른 시작
 

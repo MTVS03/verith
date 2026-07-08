@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import os
+import warnings
 
 import pytest
 import pytest_asyncio
@@ -28,7 +29,25 @@ from tests.fixtures.ai_output import (
     NORMAL_OUTPUT,
 )
 
-_TEST_DB_URL = os.getenv("TEST_DATABASE_URL") or settings.DATABASE_URL
+# 테스트 전용 DB 경계. pytest 는 **전용 test DB(TEST_DATABASE_URL, 예: verith_test)** 를 써야 한다 —
+# 공유 dev/smoke DB(DATABASE_URL=verith)에 붙으면 운영 --apply/seed(대량 corp_codes·전체 master) 커밋이
+# 테스트 전제를 오염시킨다(DB 역할: docs/db_boundaries.md). TEST_DATABASE_URL 미설정/앱 DB 와 동일하면
+# **경고**해 오염 위험을 드러낸다(하드 fail 은 아님 — 기존 로컬 실행 호환).
+# os 환경변수(CI) 우선, 없으면 backend/.env(settings) — pydantic 이 로드한 .env 값도 반영된다.
+_TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL") or settings.TEST_DATABASE_URL
+_TEST_DB_URL = _TEST_DATABASE_URL or settings.DATABASE_URL
+if not _TEST_DATABASE_URL:
+    warnings.warn(
+        "TEST_DATABASE_URL 미설정 — 공유 앱 DB(DATABASE_URL)로 테스트합니다. 운영 데이터 오염 위험. "
+        "backend/.env 에 전용 test DB(verith_test)를 두세요.",
+        stacklevel=2,
+    )
+elif _TEST_DATABASE_URL == settings.DATABASE_URL:
+    warnings.warn(
+        "TEST_DATABASE_URL 이 앱 DATABASE_URL 과 동일합니다 — 테스트가 앱/운영 DB 상태에 오염됩니다. "
+        "전용 test DB(verith_test)로 분리하세요.",
+        stacklevel=2,
+    )
 
 _AI_OUTPUTS: dict[str, dict] = {
     "NORMAL": NORMAL_OUTPUT,

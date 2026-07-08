@@ -26,9 +26,10 @@ verith/
 ```
 
 > **AI 상위 Supervisor 상태:** 질문 해석 → 조건부 resolve → 5-agent fan-out → technical 실행 계층이 연결돼
-> 있다. **현재는 technical MVP 범위(`BATTERY_TICKERS` 2차전지 10종) 기준으로 supervisor+technical real smoke
-> 실증 완료**(예: 373220 LG에너지솔루션 · 051910 LG화학 — technical success). 전체 종목 확장은 후속.
-> 상세: [`ai/src/supervisor/README.md`](ai/src/supervisor/README.md).
+> 있다. **`BATTERY_TICKERS`(2차전지 10종) 기준 supervisor+technical real smoke 실증 완료**(373220 LG에너지솔루션 ·
+> 051910 LG화학 — technical success). technical 은 이제 10종 gate 없이 **형식상 유효한 ticker 를 기본 지원**하고
+> 종목명 정본은 backend canonical(`stock_name` 주입)이 담당한다(전체 종목 확장 구조 완료). 확장 종목 real smoke 는
+> backend `stocks` seed 후 검증. 상세: [`ai/src/supervisor/README.md`](ai/src/supervisor/README.md).
 
 ---
 
