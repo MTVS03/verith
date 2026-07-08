@@ -19,16 +19,19 @@ FRONT_STD = (9, 21)   # 표준코드
 FRONT_NAME_START = 21  # 한글명 = front[21:]
 
 # ── tail 길이 ────────────────────────────────────────────────────────────────
-KOSPI_TAIL = 228
-KOSDAQ_TAIL = 222
+# 실데이터 검산(sync_stocks --inspect)으로 확정: 공식 field_specs 누적합(228/222)은 실제보다 1 크다
+# (tail 창이 한글명 끝 공백 1문자를 물어 group='ST'가 ' S'로 밀렸음). tail_len 을 -1 하면 tail[0] 이
+# 'ST' 로 맞고 group/etp/spac/pref 가 상대 오프셋이라 일괄 정렬된다. KOSPI 005930·KOSDAQ 086520 검산.
+KOSPI_TAIL = 227
+KOSDAQ_TAIL = 221
 
 # ── tail 내부 필드 (name → (offset, width)) ─────────────────────────────────
-# KOSPI: 그룹코드 idx0, ETP idx12, SPAC idx19, 우선주 idx49
+# tail 내부 오프셋(tail[0] 기준). 실데이터 검산으로 확정(005930·005935·069500 앵커 diff).
 KOSPI_FIELDS: dict[str, tuple[int, int]] = {
-    "group": (0, 2),     # 증권그룹구분코드
-    "etp": (21, 1),      # ETP
-    "spac": (29, 1),     # SPAC(기업인수목적회사여부)
-    "pref": (105, 1),    # 우선주
+    "group": (0, 2),     # 증권그룹구분코드 (ST/EF/RT/BC/… — 005930='ST')
+    "etp": (35, 1),      # ETP 상품구분(ETF=Y, 주권=N — 069500=Y, 005930=N). ETF/ETN은 group으로 이미 제외되는 이중장치
+    "spac": (29, 1),     # SPAC 여부(보조 제외). KOSPI SPAC 앵커 부재로 값 미검증 — fail-open(false 제외 0)
+    "pref": (158, 1),    # 우선주 구분(005935=set, 005930=미set). is_preferred 통계용(저장 안 함)
 }
 # KOSDAQ: 증권그룹구분코드 idx0, ETP 상품구분코드 idx8, 기업인수목적회사여부 idx14, 우선주 구분 코드 idx48
 KOSDAQ_FIELDS: dict[str, tuple[int, int]] = {
@@ -43,9 +46,13 @@ MARKET_KOSPI = "KOSPI"
 MARKET_KOSDAQ = "KOSDAQ"
 
 # ── 값 의미(value semantics) 상태 ───────────────────────────────────────────
-# offset/width 는 공식 파서로 **확정**됐다. 그러나 아래 "값"의 의미(주권코드 'ST', 플래그 설정값)는
-# `sync_stocks --inspect` 실데이터 검산 전까지 **임시 추정(PROVISIONAL)** 이다. 확정 시 True 로 올린다.
-FLAG_VALUE_SEMANTICS_VERIFIED = False
+# **실데이터 검산 완료(True)**: `sync_stocks --inspect` 로 앵커 검산해 offset/값 의미를 확정했다.
+#   - 검증됨: group='ST'(주권; 005930·005935·086520·247540), ETF='EF'/REIT='RT'(group 제외),
+#     KOSPI etp(35)=ETF만 Y·주권 N(069500 Y, 005930 N), KOSPI 우선주(158)=005935 set·005930 미set,
+#     KOSDAQ spac(24)=실 SPAC(디비금융제N호스팩) 검출(43건).
+#   - fail-open(값 미검증이나 false 제외 0): KOSPI spac(SPAC 앵커 부재)·KOSDAQ etp/pref(앵커 부재).
+#     ETF/ETN/REIT 는 group 으로 이미 제외되므로 이 보조 필터가 틀려도 실제 주권을 배제하지 않는다.
+FLAG_VALUE_SEMANTICS_VERIFIED = True
 
 # 증권그룹구분코드 — 주권 값(KIS 표준 추정). 1차 포함 판정의 근거. 보통주·우선주 모두 이 값.
 GROUP_CODE_STOCK = "ST"  # 검산 전 추정

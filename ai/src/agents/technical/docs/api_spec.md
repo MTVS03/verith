@@ -263,7 +263,7 @@ MVP는 전체 JSONL 원문이 아니라 요약만 반환한다. 전체 trace log
 > **구현 상태(`feat/technical-ai-endpoint` + hardening):** §7.1·§7.2가 `src/api/technical.py`(FastAPI router, `main.py`에 등록)로 구현됐다. runtime 의존성은 `src/api/dependencies.py`가 주입한다 — OpenAI client 팩토리(`default_openai_client(deadline=…)`)·KIS fetcher(기본 None=실 KIS)·Redis cache(`default_cache()`, `REDIS_URL` 없으면 None=비활성)·trace sink(이번 브랜치는 Noop). 에러는 §9 envelope로 매핑(`src/api/errors.py`, secret-free 고정 메시지). sync agent는 `run_in_threadpool`로 실행한다.
 >
 > - **입력 검증**: `TechnicalAgentInput`이 ticker 6자리·query/request_id 비어있지 않음·as_of 미래 금지를 validator로 강제한다(형식 오류 → 422 VALIDATION_ERROR, OpenAI/KIS 이전 차단).
-> - **allowlist 선검증**: MVP 범위(BATTERY_TICKERS) 밖 ticker는 `supervisor.run` 시작부에서 즉시 `OutOfScopeTickerError` → 422 OUT_OF_SCOPE_TICKER. **OpenAI·cache·KIS 이전**에 항상 검사되어 fetcher/cache 주입으로 우회되지 않는다(전 진입 경로 보호).
+> - **종목 지원 정책 선검증(전체 종목 확장)**: `config.is_supported_ticker`(기본 정책 = 형식상 유효한 6자리 전체 허용, **BATTERY_TICKERS membership 아님**)을 `supervisor.run` 시작부에서 검사한다 — 정책 밖이면 `OutOfScopeTickerError` → 422 OUT_OF_SCOPE_TICKER, **OpenAI·cache·KIS 이전**(fetcher/cache 주입으로 우회 불가). 단 6자리 형식은 위 입력 검증(422 VALIDATION_ERROR)에서 먼저 걸리므로, 실무상 이 경로는 거의 도달하지 않는다(향후 시장/유형 제한 정책의 확장 지점). 종목 지원 여부는 gate 가 아니라 데이터/결과 상태(`data_status`)로 표현한다.
 > - **deadline**: `TECHNICAL_AGENT_TIMEOUT_SECONDS`(기본 55초 < 60초 계약)로 `Deadline`을 만들어 agent→supervisor에 전달, stage마다 cooperative check(초과 시 `DeadlineExceeded`). endpoint는 `asyncio.wait_for`로 응답 시간까지 바운딩. OpenAI 어댑터는 per-call timeout을 남은 예산 이하로 줄인다. 둘 다 초과 시 504 AI_TIMEOUT. **협조적이라 실행 중 sync 작업을 즉시 죽이진 못하고 다음 check에서 멈춘다** — 진짜 강제 취소(스레드 종료)는 후속.
 > - **인증 미구현**(§7.1 "내부망 또는 내부 토큰" 전제). **이 endpoint는 절대 공개 노출 금지 — production 배포 전 네트워크 격리 또는 내부 인증(gateway/internal token) 필수**. 임의 header는 backend/gateway와 조율해 후속에서 도입.
 > - **후속**: client lifecycle(app lifespan singleton for OpenAI·Redis pool)·PostgreSQL 저장/조회는 backend integration 범위. OpenAI `store=False`(stateless)이며 분석 이력·follow-up context는 backend PostgreSQL이 관리한다(이 브랜치 미구현).
@@ -336,7 +336,7 @@ GET /internal/technical/health
 | --- | --- | --- |
 | 요청 JSON 오류 | 400 | JSON 파싱 실패 |
 | 필수값 누락/형식 오류 | 422 | ticker/query/request_id 누락·ticker 6자리 아님·as_of 미래 |
-| MVP 범위 밖 종목 | 422 | allowlist(2차전지 10종목) 밖 → OUT_OF_SCOPE_TICKER(OpenAI/KIS 이전 차단) |
+| 지원 정책 밖 종목 | 422 | `is_supported_ticker` 밖(형식 오류/빈 값 등; allowlist 아님) → OUT_OF_SCOPE_TICKER(OpenAI/KIS 이전). 6자리 형식은 위 VALIDATION_ERROR 가 먼저 잡음 |
 | KIS 통신 장애 + stale 없음 / LLM 호출·설정 오류 | 502 | AI_UNAVAILABLE (아무 데이터도 못 받은 인프라 장애) |
 | 전체 처리 시간 초과(내부 55초 budget·응답 wait_for) | 504 | AI_TIMEOUT |
 | 예상 못한 내부 오류 | 500 | INTERNAL_ERROR |
@@ -361,7 +361,7 @@ GET /internal/technical/health
 | --- | --- | --- |
 | `INVALID_REQUEST` | 400 | 요청 JSON 오류 |
 | `VALIDATION_ERROR` | 422 | 필수값 누락/형식 오류 |
-| `OUT_OF_SCOPE_TICKER` | 422 | MVP 조사 범위(2차전지 10종목) 밖 종목 |
+| `OUT_OF_SCOPE_TICKER` | 422 | 종목 지원 정책(`is_supported_ticker`) 밖. **"2차전지 10종 allowlist" 의미는 폐기** — 현재는 형식 오류·빈 값·향후 제한 정책 의미(코드는 유지) |
 | `REPORT_NOT_FOUND` | 404 | 리포트 없음 |
 | `AI_TIMEOUT` | 504 | AI 응답 시간 초과 |
 | `AI_UNAVAILABLE` | 502 | AI 호출 불가 |

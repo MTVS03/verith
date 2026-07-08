@@ -274,7 +274,7 @@ def _load_real(ticker: str, as_of: str | None) -> tuple[list[OHLCV], list[OHLCV]
     try:
         by_period = kc.fetch_multi_timeframe_ohlcv(ticker, end_date=end)
     except kc.OutOfScopeTickerError as exc:
-        print(f"[diagnose] allowlist 밖 종목 → skip: {exc}", file=sys.stderr)
+        print(f"[diagnose] 지원 정책 밖(형식 오류) 종목 → skip: {exc}", file=sys.stderr)
         return None
     return list(by_period["D"]), list(by_period["W"]), list(by_period["M"])
 

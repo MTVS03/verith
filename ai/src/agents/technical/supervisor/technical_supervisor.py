@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from .langgraph_state import TechnicalGraphState
 from .pipeline_steps import MinuteFetcher, OhlcvFetcher
 from .technical_graph import build_technical_graph
-from ..config import BATTERY_TICKERS
+from ..config import is_supported_ticker
 from ..nodes._llm_utils import LlmClient
 from ..observability.trace_logger import TraceLogger, TraceSink, hash_query
 from ..runtime.deadline import Deadline
@@ -52,11 +52,13 @@ def run(
 
     `trace_sink`(선택): 주입 시 실행 trace를 emit한다. 미주입이면 Noop — 기존 동작·출력 불변.
     `deadline`(선택): 주요 stage 시작 전 예산 초과를 감지(cooperative). 초과 시 `DeadlineExceeded` 전파.
-    **allowlist**: MVP 조사 범위(BATTERY_TICKERS) 밖 ticker는 OpenAI/cache/KIS **이전에** 즉시
+    **지원 정책(단일 경계)**: `config.is_supported_ticker` 밖 ticker는 OpenAI/cache/KIS **이전에** 즉시
     `OutOfScopeTickerError`로 거절한다 — fake/custom fetcher·fresh cache를 주입해도 우회되지 않는다.
+    기본 정책은 형식상 유효한 ticker 전체 허용이므로(BATTERY_TICKERS membership 아님), resolver 가 식별한
+    종목은 기본적으로 여기를 통과한다. 종목 지원 여부는 이후 데이터/결과 상태(data_status)로 표현한다.
     """
-    if agent_input.ticker not in BATTERY_TICKERS:  # allowlist 선검증(전 진입 경로 보호, OpenAI 호출 전)
-        raise OutOfScopeTickerError(f"MVP 조사 범위 밖 종목입니다: {agent_input.ticker!r}")
+    if not is_supported_ticker(agent_input.ticker):  # 지원 정책 선검증(전 진입 경로 보호, OpenAI 호출 전)
+        raise OutOfScopeTickerError(f"지원 정책 밖 종목입니다: {agent_input.ticker!r}")
     trace_id = trace_id or uuid.uuid4().hex
     # 관측 계층(trace_schema.md). sink 미주입이면 Noop — 기존 동작·성능 불변. trace 실패는 흡수(계산 무영향).
     trace = TraceLogger(trace_sink, trace_id=trace_id)

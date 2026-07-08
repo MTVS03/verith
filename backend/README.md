@@ -7,6 +7,7 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 - Stock Resolver 응답 의미·경계: [`docs/stock_resolver.md`](docs/stock_resolver.md)
 - 전체 종목 마스터 동기화(KIS): [`docs/stock_master_sync.md`](docs/stock_master_sync.md)
 - DART 법인코드 동기화(corp_code): [`docs/dart_corp_code_sync.md`](docs/dart_corp_code_sync.md)
+- **DB 역할 경계(canonical/dev/test)**: [`docs/db_boundaries.md`](docs/db_boundaries.md)
 
 ## 개발 환경
 
@@ -72,11 +73,38 @@ uv run python -m scripts.sync_corp_codes --apply      # 실제 반영(commit)
 SELECT stock_code, stock_name, market FROM stocks ORDER BY stock_code;
 ```
 
+## Shared verith SQL dump
+
+팀원이 **외부 KIS/DART sync 를 다시 돌리지 않고도** 공용 `verith` canonical 상태를 pull 후 재현할 수 있게,
+repo 에 **SQL dump snapshot** 을 커밋해 둔다([`dumps/README.md`](dumps/README.md)).
+
+```bash
+docker compose up -d postgres
+
+cd backend
+uv sync
+uv run alembic upgrade head
+docker exec -i verith-postgres psql -U verith -d verith < dumps/shared_verith_snapshot.sql
+```
+
+이 dump 는 다음 canonical 상태를 담는다.
+
+- `stocks` — **2,607**
+- `stock_aliases` — **32**
+- `stock_corp_codes` — **3,976**
+
 ## 테스트
+
+pytest 는 **전용 test DB(`TEST_DATABASE_URL`, 예: `verith_test`)** 를 써야 한다 — 공유 dev/smoke DB
+(`verith`)에 붙으면 운영 `--apply`/seed 커밋이 테스트 전제를 오염시킨다(conftest 가 미설정/앱DB동일 시
+경고). DB 역할·설정은 [`docs/db_boundaries.md`](docs/db_boundaries.md).
 
 ```bash
 cd backend
-# TEST_DATABASE_URL 우선, 없으면 DATABASE_URL(backend/.env) 사용. PostgreSQL 필요.
+# 최초 1회: 전용 test DB 생성 + 스키마
+docker exec verith-postgres psql -U verith -d postgres -c "CREATE DATABASE verith_test;"
+DATABASE_URL=postgresql+asyncpg://verith:verith1234@localhost:5433/verith_test uv run alembic upgrade head
+# backend/.env 에 TEST_DATABASE_URL=…/verith_test 를 두면 자동 사용.
 uv run pytest
 uv run ruff check db src tests scripts
 uv run alembic check

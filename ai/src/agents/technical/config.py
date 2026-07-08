@@ -4,7 +4,7 @@
 1:1 옮긴 것이다. 여기서 값을 새로 설계하지 않는다(튜닝은 config.md 문서 기준).
 
 이 파일이 담는 범위 (config.md 대응 섹션):
-  - BATTERY_TICKERS allowlist  ......  config.md §11
+  - BATTERY_TICKERS dev/smoke 표시명 fallback + 지원 정책 함수  ......  config.md §11
   - KIS period 상수 (D/W/M)     ......  config.md §3
   - KIS 재시도/타임아웃 상수     ......  config.md §8
   - .env 기반 KIS 인증정보 로딩  ......  kis_mapping.md §11.1
@@ -18,15 +18,24 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+# 종목코드 형식(6자리 숫자). 입력 계약(TechnicalAgentInput) validator 와 동일 규칙을 지원 정책 함수에도
+# 둔다 — kis_client 등 **계약 밖 경계**에서도 형식 방어가 되도록(경계 방어를 단일 정책 함수에 모은다).
+_TICKER_RE = re.compile(r"\d{6}")
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. MVP 종목 allowlist (config.md §11 BATTERY_TICKERS 정본과 1:1)
+# 1. dev/smoke/test 표시명 fallback (production gate·정본 아님)
 # ─────────────────────────────────────────────────────────────────────────────
+# ⚠️ 이 상수는 더 이상 **production allowlist gate 나 종목명 canonical source 가 아니다.**
+# production 에서 종목 정본(코드·이름·시장)은 backend canonical stock context 가 담당하고,
+# supervisor 가 `stock_name` 을 technical 입력으로 주입한다(contracts §TechnicalAgentInput). 이 map 은
+# dev/smoke/test 에서 종목명이 주입되지 않았을 때의 **표시명 fallback** 으로만 남는다(2차전지 대표 10종).
 BATTERY_TICKERS: dict[str, str] = {
     "051910": "LG화학",
     "373220": "LG에너지솔루션",
@@ -41,13 +50,25 @@ BATTERY_TICKERS: dict[str, str] = {
 }
 
 
-def is_allowed_ticker(ticker: str) -> bool:
-    """MVP allowlist(2차전지 10종목)에 속하는 종목코드인지 판별한다.
+def is_supported_ticker(ticker: str) -> bool:
+    """종목 지원 정책의 **단일 경계**. 기본 정책: **형식상 유효한(6자리 숫자) ticker 는 모두 지원**한다.
 
-    범위 밖 종목의 예외/응답 처리(OUT_OF_SCOPE_TICKER)는 이번 단계 범위가 아니며,
-    이후 kis_client/서비스 계층에서 이 함수를 근거로 처리한다.
+    입력 계약(`TechnicalAgentInput`)에도 6자리 validator 가 있지만, 이 함수는 `kis_client` 등 **계약 밖
+    경계**(직접 fetch·스크립트)에서도 불리므로 여기서 형식을 다시 검증해 방어를 단일 정책 함수에 모은다
+    (형식 규칙을 코드 여기저기 흩뿌리는 것과 다르다). 종목 지원 여부는 **allowlist membership 이 아니라
+    실제 데이터/결과 상태(data_status)** 로 표현한다 — BATTERY_TICKERS 소속에 더 이상 의존하지 않는다.
+    향후 시장/유형 정책이 필요하면 gate 를 흩뿌리지 말고 이 함수에서만 확장한다.
     """
-    return ticker in BATTERY_TICKERS
+    return bool(_TICKER_RE.fullmatch(ticker))
+
+
+def dev_stock_name(ticker: str) -> str | None:
+    """dev/smoke/test 표시명 fallback (production 정본 아님).
+
+    production 종목명 정본은 backend canonical stock context 이며 supervisor 가 `stock_name` 으로
+    주입한다. 이 함수는 stock_name 이 주입되지 않은 dev 경로에서만 표시명을 보조로 제공한다.
+    """
+    return BATTERY_TICKERS.get(ticker)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

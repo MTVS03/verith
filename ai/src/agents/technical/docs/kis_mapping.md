@@ -10,14 +10,19 @@
 
 1. MVP에서 사용하는 KIS API와 요청/응답 구조를 정의한다.
 2. KIS 원본 필드를 내부 표준 OHLCV 필드로 매핑한다.
-3. 종목 allowlist·호출 제한·구간 분할 등 실무 제약을 정리한다.
+3. 종목 지원 정책·호출 제한·구간 분할 등 실무 제약을 정리한다.
 4. `services/kis_client.py` 구현의 기준 문서가 된다.
 
 ---
 
-## 2. MVP 종목 범위
+## 2. 종목 범위 (전체 종목 확장)
 
-MVP 조사 범위는 **2차전지 10종목**으로 제한한다. KIS API는 섹터 단위 조회가 아니라 종목코드 단위 조회이므로, 10종목을 allowlist 순회하며 각 종목마다 D/W/M을 개별 호출한다(§3).
+**"2차전지 10종 allowlist 제한"은 폐기됐다.** technical 은 형식상 유효한(6자리) ticker 를 기본 지원하며
+(`config.md §11` `is_supported_ticker`, allowlist membership 아님), 종목 지원 여부는 gate 가 아니라 데이터/
+결과 상태로 표현한다. KIS API 는 종목코드 단위 조회이므로, 확장 종목도 종목당 D/W/M 을 개별 호출한다(§3).
+
+아래 10종은 초기 검증(§9)에 쓴 **2차전지 대표주(dev/smoke 표시명 fallback 예시)** 이며, 지원 범위를 정의하지
+않는다. 종목명 정본은 이 표가 아니라 **backend canonical stock context**(supervisor 가 `stock_name` 주입).
 
 | 종목명 | 종목코드 |
 | --- | --- |
@@ -32,7 +37,9 @@ MVP 조사 범위는 **2차전지 10종목**으로 제한한다. KIS API는 섹�
 | 엔켐 | 348370 |
 | SK아이이테크놀로지 | 361610 |
 
-allowlist 정본은 `config.md` §11 `BATTERY_TICKERS`다. allowlist 밖 종목은 조회하지 않고 범위 밖(`OUT_OF_SCOPE_TICKER`)으로 처리한다. 최종 종목코드는 KIS 종목정보파일(`stocks_info/`) 또는 KRX 기준으로 한 번 검증하는 것을 권장한다.
+`config.md §11` `BATTERY_TICKERS` 는 더 이상 allowlist 정본이 아니라 **dev/smoke/test 표시명 fallback**
+전용이다(`config.dev_stock_name`). 확장 종목의 종목코드는 backend canonical stocks(KRX/KIS 종목마스터)로
+검증된 값을 supervisor 가 넘겨준다.
 
 ---
 
@@ -201,7 +208,7 @@ KIS 호출 실패 시 재시도·폴백은 `config.md` §8·`sequence.md`·`trac
 
 > timeout 계층 구분: 여기 5초는 **KIS 1회 호출** timeout(`config.md` §8)이다. `api_spec.md`의 60초는 백엔드→AI **전체 분석 요청** timeout으로, 층이 다르다(AI 내부에서 KIS 재시도·폴백을 처리하는 시간을 포함).
 
-allowlist 밖 종목은 KIS 호출 자체를 하지 않고 `OUT_OF_SCOPE_TICKER`로 즉시 반환한다(§2).
+지원 정책(`is_supported_ticker`, §2) 밖(형식 오류·빈 값)이면 KIS 호출 없이 `OUT_OF_SCOPE_TICKER`로 즉시 반환한다. allowlist membership 기반 차단은 폐기됐다.
 
 ---
 

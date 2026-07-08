@@ -5,7 +5,9 @@
 - stocks 에 추가한 임의 종목은 Resolver 코드 변경 없이 resolved(데이터 주도).
 - Technical 지원 범위(BATTERY_TICKERS)와 무관 — Resolver 는 지원 여부/Agent/intent 를 판단하지 않는다.
 - 응답 계약(Pydantic StockResolveResponse)에 agent/intent/query 키가 없다(문자열 검사 아님).
-- 네트워크 호출 없음. 원문 query 미노출. 카카오 fixture 는 트랜잭션 격리(롤백).
+- 네트워크 호출 없음. 원문 query 미노출. "임의 종목" fixture 는 **synthetic 코드**(실존 종목 아님)로
+  트랜잭션 격리(롤백)한다 — 실존 대표 종목(카카오/삼성전자)은 canonical seed 로 승격됐으므로 여기서
+  "아직 없는 임의 종목" 예시로 쓰지 않는다(역할 분리).
 
 이 테스트는 **Resolver 자체의 방어 동작**만 검증한다. 실제 Top Supervisor 가 비종목 질의에서
 Resolver 를 조건부로 호출/미호출하는지는 **Step 4 의 AI 테스트**에서 검증하며, 여기서는 Supervisor
@@ -19,12 +21,14 @@ import pathlib
 from db.models.common.stock import Stock
 from scripts.seed_stock_aliases import seed as seed_aliases
 from scripts.seed_stocks import seed as seed_stocks
-from src.api.constants.stocks import SUPPORTED_STOCKS
+from src.api.constants.stocks import REPRESENTATIVE_STOCKS, SUPPORTED_STOCKS
 from src.api.schemas.stock_resolve import StockResolveResponse
 from src.api.services.stock_resolver_service import StockResolverService
 
 _URL = "/api/stocks/resolve"
-_KAKAO = ("035720", "카카오", "KOSPI")  # bootstrap 10종/BATTERY_TICKERS 밖
+# synthetic(실존 아님) 임의 종목 — seed/commit 되지 않아 격리·데이터주도 검증에 안전. 990xxx 대역.
+_SYNTHETIC = ("990001", "합성테스트종목", "KOSPI")
+_SEEDED_CODES = {s["stock_code"] for s in (*SUPPORTED_STOCKS, *REPRESENTATIVE_STOCKS)}
 
 
 async def _seed(session):
@@ -56,36 +60,37 @@ async def test_non_stock_sentences_are_not_found_200(client, db_session):
         assert body.stock is None and body.candidates == []
 
 
-# ── stocks 에 추가한 임의 종목은 코드 변경 없이 resolved (데이터 주도) ────────
+# ── stocks 에 추가한 임의(synthetic) 종목은 코드 변경 없이 resolved (데이터 주도) ────────
 async def test_arbitrary_stock_resolves_without_code_change(db_session):
     await _seed(db_session)
-    code, name, market = _KAKAO
-    assert code not in {s["stock_code"] for s in SUPPORTED_STOCKS}  # bootstrap/Technical 밖
+    code, name, market = _SYNTHETIC
+    assert code not in _SEEDED_CODES  # seed(battery+representative) 밖의 임의 종목
     db_session.add(Stock(stock_code=code, stock_name=name, market=market))
     await db_session.flush()
 
-    res = await StockResolverService(db_session).resolve("카카오 수급 분석해줘")
+    res = await StockResolverService(db_session).resolve(f"{name} 수급 분석해줘")
     assert res.status == "resolved" and res.reason == "exact_match"
     assert res.stock is not None
-    assert (res.stock.stock_code, res.stock.stock_name, res.stock.market) == _KAKAO
+    assert (res.stock.stock_code, res.stock.stock_name, res.stock.market) == _SYNTHETIC
     # 응답에 Agent/지원여부 결과가 없다 — 계약 키만 존재.
     assert set(res.model_dump().keys()) == {"status", "reason", "stock", "candidates"}
 
 
-# ── 카카오 fixture 격리: 롤백 후 공용 DB 오염 없음 ───────────────────────────
-async def test_kakao_fixture_is_isolated(db_session):
-    # 앞 테스트의 카카오는 트랜잭션 롤백으로 사라졌어야 한다(이 테스트는 seed 만).
+# ── synthetic fixture 격리: 롤백 후 공용 DB 오염 없음 ────────────────────────
+async def test_synthetic_fixture_is_isolated(db_session):
+    # 앞 테스트의 synthetic 종목은 트랜잭션 롤백으로 사라졌어야 한다(seed 만; 990xxx 는 commit 안 됨).
     await _seed(db_session)
-    assert await db_session.get(Stock, _KAKAO[0]) is None
+    assert await db_session.get(Stock, _SYNTHETIC[0]) is None
 
 
 # ── Resolver 는 Technical 지원 여부를 판단하지 않는다 ────────────────────────
 async def test_resolver_does_not_check_technical_support(db_session):
     await _seed(db_session)
-    # BATTERY_TICKERS 밖(카카오)도 stocks 에 있으면 resolved — 지원 게이팅 없음.
-    db_session.add(Stock(stock_code=_KAKAO[0], stock_name=_KAKAO[1], market=_KAKAO[2]))
+    # 지원 정책과 무관하게 stocks 에 있으면 resolved — Resolver 는 지원 게이팅을 하지 않는다.
+    code, name, market = _SYNTHETIC
+    db_session.add(Stock(stock_code=code, stock_name=name, market=market))
     await db_session.flush()
-    res = await StockResolverService(db_session).resolve("카카오 리포트")
+    res = await StockResolverService(db_session).resolve(f"{name} 리포트")
     assert res.status == "resolved"  # 지원 범위와 무관하게 종목 context 제공
 
 

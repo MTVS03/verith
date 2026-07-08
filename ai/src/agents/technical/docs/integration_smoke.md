@@ -12,11 +12,15 @@ endpoint)이 살아있는지 사람이 수동으로 확인한다. 단위 테스�
 - pytest에 포함되지 않는다(파일명이 `test_` 아님, opt-in 테스트도 만들지 않음).
 
 > **상위 Supervisor 연계 실증(잠금):** **현재는 `BATTERY_TICKERS`(2차전지 10종) 기준으로
-> supervisor+technical real smoke 실증 완료.** 상위 Supervisor 경유 e2e(`resolver → planning →
-> execution → technical success`)는 `src/supervisor/scripts/smoke_supervisor.py` 로 확인하며,
-> **범위 내 종목만** 사용한다(373220 LG에너지솔루션·051910 LG화학 확인: `source=KIS·data_status=normal·
-> final_regime 산출`). 범위 밖 ticker 는 `technical_supervisor.run()` 시작부에서 `OutOfScopeTickerError`
-> 로 거절된다(KIS/OpenAI 이전). 전체 종목 확장은 이 실증 이후 별도 단계. 경계·정책: `src/supervisor/README.md`.
+> supervisor+technical real smoke 실증 완료** — 373220 LG에너지솔루션·051910 LG화학(`source=KIS·
+> data_status=normal·final_regime 산출`). 상위 Supervisor 경유 e2e(`resolver → planning → execution →
+> technical success`)는 `src/supervisor/scripts/smoke_supervisor.py` 로 확인한다.
+>
+> **전체 종목 확장(구조 완료):** technical 은 이제 `BATTERY_TICKERS` membership gate 로 종목을 막지 않고
+> **형식상 유효한 ticker 를 기본 지원**한다(`config.is_supported_ticker`, §config.md 11). 종목명 정본은
+> 내부 상수가 아니라 backend canonical(`TechnicalAgentInput.stock_name`) 이 담당한다. 데이터 부족·미상장은
+> gate 가 아니라 `data_status` 로 표현. **확장 종목(예: 005930)의 real smoke 는 backend `stocks` 에 해당
+> 종목이 seed 된 뒤 검증**한다(resolver universe 종속). 경계·정책: `src/supervisor/README.md`.
 
 ## 필요한 env (값이 아니라 존재만 확인)
 
@@ -73,7 +77,7 @@ uv run python src/agents/technical/scripts/smoke_technical_integration.py \
 `--clear-cache-for-ticker`(+`--yes`, 없으면 네트워크 호출 전 실패)·`--require-{redis,openai,kis}`(기본 true,
 `--no-require-*`로 해제)·`--timeout-seconds`(기본 55).
 
-**입력 검증(fail-fast)**: allowlist(BATTERY_TICKERS) 밖 ticker·미래 as_of는 **어떤 네트워크/비용 호출
+**입력 검증(fail-fast)**: 형식 오류(6자리 아님) ticker·미래 as_of는 **어떤 네트워크/비용 호출
 전에** 명확한 메시지로 중단한다.
 
 ## ⚠️ 네트워크/비용 주의
@@ -114,7 +118,7 @@ response·interpretation 전문·raw candles. 대신 `present`/`missing`·개수
 - `[openai] config error` → `OPENAI_API_KEY`/`OPENAI_MODEL` 누락. `[openai] call failed=…Error` → 모델
   ID·네트워크·rate limit 확인(`smoke_openai_llm.py`로 격리 확인).
 - `[redis] connected=false` → `REDIS_URL`·Redis 서버 상태.
-- `[kis] fetch failed=…` → allowlist(BATTERY_TICKERS) 내 ticker인지, KIS 자격·시장 시간 확인.
+- `[kis] fetch failed=…` → ticker 형식(6자리)·KIS 자격·시장 시간·해당 종목 상장/거래 여부 확인.
 - `[agent] run failed=DeadlineExceeded` → `--timeout-seconds` 상향 또는 LLM/KIS 지연 확인.
 
 ## 기본 pytest에는 포함되지 않는다

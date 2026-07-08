@@ -36,7 +36,7 @@ if str(_AI_ROOT) not in sys.path:
 from src.agents.technical.config import REQUIRED_ENV_KEYS  # noqa: E402
 from src.agents.technical.services import kis_client as kc  # noqa: E402
 
-_DEFAULT_TICKER = "373220"  # LG에너지솔루션 (MVP allowlist·고유동성). 005930은 allowlist 밖 → raw만.
+_DEFAULT_TICKER = "373220"  # LG에너지솔루션 (고유동성 대표주). 지원 정책은 형식(6자리)이라 005930 등도 normalized 가능.
 _DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "intraday_smoke_output"
 _OUT1_KEYS = ("stck_prdy_clpr", "stck_prpr", "acml_vol", "acml_tr_pbmn", "hts_kor_isnm")
 
@@ -99,14 +99,15 @@ def _raw_stage(ticker: str, input_hour: str, client: httpx.Client) -> tuple[dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. normalized fetch (fetch_minute_ohlcv — allowlist 밖이면 skip)
+# 2. normalized fetch (fetch_minute_ohlcv — 지원 정책 밖=형식 오류면 skip)
 # ─────────────────────────────────────────────────────────────────────────────
 def _normalized_stage(ticker: str, as_of: datetime | None, input_hour: str | None,
                       limit: int | None) -> tuple[dict, dict]:
     try:
         result = kc.fetch_minute_ohlcv(ticker, as_of=as_of, input_hour=input_hour, limit=limit)
     except kc.OutOfScopeTickerError:
-        skip = {"skipped": "out_of_scope_ticker (MVP allowlist 밖 — raw만 확인)"}
+        # 전체 종목 확장: is_supported_ticker 는 형식(6자리)만 본다 → 형식 오류일 때만 여기로 온다.
+        skip = {"skipped": "unsupported_ticker (형식 6자리 아님 — raw만 확인)"}
         return skip, skip
 
     ts = [c.timestamp for c in result.candles]
@@ -178,7 +179,7 @@ def _build_checklist(*, executed_at: str, ticker: str, input_hour: str,
         "fid_combo_ok": raw["fid_combo_ok"],
         "rate_check_result": rate,
         "notes": (
-            "005930 등 allowlist 밖 ticker는 normalized 단계 skip(raw만). "
+            "형식 오류(6자리 아님) ticker만 normalized 단계 skip(raw만) — 전체 종목 확장 후 005930 등은 정상. "
             "cntg_vol은 첫 체결 전 직전 분봉 체결량 표기 가능(volume spike 한계, kis_mapping §12.6). "
             "raw_order_direction이 descending이면 fetcher가 오름차순 정규화함(정합)."
         ),
@@ -194,7 +195,7 @@ def _save(out_dir: Path, name: str, data: object) -> Path:
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="KIS 주식당일분봉조회 manual smoke (raw + normalized)")
-    p.add_argument("--ticker", default=_DEFAULT_TICKER, help="종목코드(6자리). allowlist 밖이면 normalized skip")
+    p.add_argument("--ticker", default=_DEFAULT_TICKER, help="종목코드(6자리). 형식 오류면 normalized skip(allowlist 아님)")
     p.add_argument("--as-of", dest="as_of", default=None, help="기준 시각(ISO). 생략 시 현재")
     p.add_argument("--input-hour", dest="input_hour", default=None, help="FID_INPUT_HOUR_1(HHMMSS)")
     p.add_argument("--limit", type=int, default=None, help="normalized 최신 N개만")

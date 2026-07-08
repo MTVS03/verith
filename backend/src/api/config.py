@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     # SQLAlchemy async DSN. 검증은 _load_settings() 에서(secret-safe).
     DATABASE_URL: str = ""
+    # pytest 전용 DB(예: verith_test). 공유 dev/smoke DB 오염 방지용 경계. app runtime 은 쓰지 않고
+    # conftest 만 참조한다(미설정이면 os env → DATABASE_URL fallback + 경고). startup 필수 아님.
+    TEST_DATABASE_URL: str = ""
 
     # Neo4j(뉴스 지식그래프) 접속. PostgreSQL 과 마찬가지로 별도 DB 서버이며,
     # bolt 드라이버로 접속한다(예: bolt://localhost:7687). 값·비밀번호는 코드에 박지 않고

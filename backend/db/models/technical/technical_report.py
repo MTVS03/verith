@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Index, String, Text, text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,9 @@ class TechnicalReport(Base):
     request_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     client_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
     ticker: Mapped[str] = mapped_column(String, nullable=False)
+    stock_code: Mapped[str] = mapped_column(
+        String, ForeignKey("stocks.stock_code"), nullable=False
+    )
     stock_name: Mapped[str | None] = mapped_column(String, nullable=True)
     original_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalized_query: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -52,6 +55,7 @@ class TechnicalReport(Base):
             "client_session_id",
             text("created_at DESC"),
         ),
+        Index("ix_technical_reports_stock_code_as_of", "stock_code", text("as_of DESC")),
         Index("ix_technical_reports_ticker_as_of", "ticker", text("as_of DESC")),
         Index("ix_technical_reports_trace_id", "trace_id"),
     )
