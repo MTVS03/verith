@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import typing
 
-import state
+import src.agents.news.state as state
+
 
 
 def _annotation_strings(td) -> dict[str, str]:

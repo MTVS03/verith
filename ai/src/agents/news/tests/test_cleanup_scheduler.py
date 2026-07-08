@@ -10,9 +10,9 @@ from __future__ import annotations
 import pathlib
 from unittest.mock import MagicMock
 
-import scheduler.cleanup_scheduler as cleanup
-from scheduler.cleanup_scheduler import run_cleanup_once, start_cleanup_scheduler
-from schemas.response import CleanupResponse
+import src.agents.news.scheduler.cleanup_scheduler as cleanup
+from src.agents.news.scheduler.cleanup_scheduler import run_cleanup_once, start_cleanup_scheduler
+from src.agents.news.schemas.response import CleanupResponse
 
 
 # ---------------------------------------------------------------------------

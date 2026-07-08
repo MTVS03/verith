@@ -7,10 +7,10 @@ monkeypatch 해 고정 라벨·확률을 돌려주고, 매핑·분기·계약(�
 """
 from __future__ import annotations
 
-import services.finbert as finbert
-import nodes.sentiment as sentiment_node_mod
-from nodes.sentiment import sentiment_node
-from schemas.article import Article, Sentiment
+import src.agents.news.services.finbert as finbert
+import src.agents.news.nodes.sentiment as sentiment_node_mod
+from src.agents.news.nodes.sentiment import sentiment_node
+from src.agents.news.schemas.article import Article, Sentiment
 
 
 def _article(url: str, content: str | None, crawl_status: str = "success") -> Article:
@@ -267,5 +267,5 @@ def test_node_does_not_import_llm():
 
 
 def _sr(sentiment: Sentiment, score: float):
-    from schemas.article import SentimentResult
+    from src.agents.news.schemas.article import SentimentResult
     return SentimentResult(sentiment=sentiment, score=score)

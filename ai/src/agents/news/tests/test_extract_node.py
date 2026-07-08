@@ -6,9 +6,9 @@
 """
 from __future__ import annotations
 
-import nodes.extract as extract_node_mod
-from nodes.extract import extract_node
-from schemas.article import Article, ExtractResult, SourceType
+import src.agents.news.nodes.extract as extract_node_mod
+from src.agents.news.nodes.extract import extract_node
+from src.agents.news.schemas.article import Article, ExtractResult, SourceType
 
 
 def _article(url: str, title: str = "제목") -> Article:
