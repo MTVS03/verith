@@ -48,10 +48,20 @@ class FallbackLookupError(RuntimeError):
 
 
 @dataclass
+class FallbackResolveMeta:
+    """관측용 내부 메타(외부 HTTP contract 아님). composite 가 채운다. 판정에는 영향 없음."""
+
+    final_source: str | None = None                 # resolved 를 만든 source 이름
+    source_hits: dict[str, int] = field(default_factory=dict)  # source 이름 → hit 수
+    match_types: list[str] = field(default_factory=list)       # 고려된 distinct match reason
+
+
+@dataclass
 class FallbackResult:
     status: FallbackStatus
     stock: StockContext | None = None
     candidates: list[StockCandidate] = field(default_factory=list)
+    meta: FallbackResolveMeta | None = None         # 관측 메타(선택). 없어도 판정 동일.
 
 
 class FallbackLookupProtocol(Protocol):

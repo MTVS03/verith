@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from src.supervisor.planning.fallback_lookup import FallbackResult
+from src.supervisor.planning.fallback_lookup import FallbackResolveMeta, FallbackResult
 from src.supervisor.schemas import StockCandidate, StockContext
 
 # hit 이 어떤 근거로 잡혔는지(왜 resolved/ambiguous 인지 설명 가능하게). 우선순위 랭크에도 쓴다.
@@ -117,19 +117,24 @@ class CuratedFallbackSource:
         return hits
 
 
-def _resolved(hit: SourceHit) -> FallbackResult:
+def _resolved(hit: SourceHit, source_hits: dict[str, int], match_types: list[str]) -> FallbackResult:
     return FallbackResult(
         status="resolved",
         stock=StockContext(stock_code=hit.stock_code, stock_name=hit.stock_name, market=hit.market),
+        meta=FallbackResolveMeta(final_source=hit.source, source_hits=source_hits, match_types=match_types),
     )
 
 
-def _ambiguous(hits: list[SourceHit]) -> FallbackResult:
+def _ambiguous(hits: list[SourceHit], source_hits: dict[str, int], match_types: list[str]) -> FallbackResult:
     cands = [
         StockCandidate(stock_code=h.stock_code, stock_name=h.stock_name, market=h.market) for h in hits
     ]
     cands.sort(key=lambda c: c.stock_code)   # 결정론 순서
-    return FallbackResult(status="ambiguous", candidates=cands)
+    return FallbackResult(
+        status="ambiguous",
+        candidates=cands,
+        meta=FallbackResolveMeta(final_source=None, source_hits=source_hits, match_types=match_types),
+    )
 
 
 class CompositeFallbackLookup:
@@ -148,8 +153,14 @@ class CompositeFallbackLookup:
         hits: list[SourceHit] = []
         for src in self._sources:
             hits.extend(src.find(query))   # FallbackLookupError 전파(도구 장애)
+        # 관측용 source 별 hit 수(dedup 전 원시 집계).
+        source_hits: dict[str, int] = {}
+        for h in hits:
+            source_hits[h.source] = source_hits.get(h.source, 0) + 1
         if not hits:
-            return FallbackResult(status="not_found")
+            return FallbackResult(
+                status="not_found", meta=FallbackResolveMeta(source_hits=source_hits)
+            )
 
         # stock_code 기준 dedup — 같은 종목을 여러 source/경로가 가리켜도 1개(가장 강한 match 유지).
         best: dict[str, SourceHit] = {}
@@ -158,15 +169,16 @@ class CompositeFallbackLookup:
             if cur is None or _MATCH_RANK[h.match] > _MATCH_RANK[cur.match]:
                 best[h.stock_code] = h
         distinct = list(best.values())
+        match_types = sorted({h.match for h in distinct})
 
         code_exacts = [h for h in distinct if h.match == "code_exact"]
         if len(code_exacts) == 1:
-            return _resolved(code_exacts[0])
+            return _resolved(code_exacts[0], source_hits, match_types)
         if len(code_exacts) >= 2:
-            return _ambiguous(code_exacts)
+            return _ambiguous(code_exacts, source_hits, match_types)
         if len(distinct) == 1:
-            return _resolved(distinct[0])
-        return _ambiguous(distinct)
+            return _resolved(distinct[0], source_hits, match_types)
+        return _ambiguous(distinct, source_hits, match_types)
 
 
 # 사람이 리뷰한 curated seed — canonical(한글 정본)이 흔히 놓치는 **영문/로마자 표기** 중심(공개 사실 기반,
@@ -187,5 +199,12 @@ CURATED_FALLBACK_ENTRIES: tuple[FallbackEntry, ...] = (
 
 
 def default_fallback_lookup() -> CompositeFallbackLookup:
-    """운영 기본 fallback — curated source 하나로 시작(향후 KIS/DART source 추가 주입). 네트워크 없음."""
-    return CompositeFallbackLookup([CuratedFallbackSource(CURATED_FALLBACK_ENTRIES)])
+    """운영 기본 fallback — 정밀도순 composite: curated(고확신 소량) + DART 공시명 스냅샷(canonical 이 못 잡는
+    공시 표기). 둘 다 결정론·read-only·네트워크 없음. KIS master source 는 canonical(stocks=전체 KIS ST 주권)과
+    중복이 커 이번 조합에서 제외한다(필요 시 별도 source 로 추가 주입). composite 규칙(dedup/ambiguous)은 일관."""
+    # 지연 import — data 스냅샷 로드는 source.find() 시점(모듈 import 시 파일 I/O·네트워크 없음).
+    from src.supervisor.planning.fallback_source_dart import DartSnapshotFallbackSource
+
+    return CompositeFallbackLookup(
+        [CuratedFallbackSource(CURATED_FALLBACK_ENTRIES), DartSnapshotFallbackSource()]
+    )
