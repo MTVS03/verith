@@ -95,6 +95,8 @@ directional_bias?·final_regime?·as_of? — 스레드 헤더 연결감)·`follo
 
 ### 6.2 write — `POST /api/technical/reports/{id}/followups`
 - **answer 는 caller(상위/프론트)가 생성해 보낸다.** backend 는 검증·저장·parent snapshot 만(본문 재생성/AI 재호출 아님).
+  누가 answer 를 만들고 backend 책임은 어디까지인지(+미래 AI 생성 경로)는
+  [`technical_followup_answer_boundary.md`](technical_followup_answer_boundary.md) 정본.
 - **요청 `FollowupCreateRequest`**: `question`(1–1000자, 필수)·`answer`(1–50000자, 필수)·`client_session_id?`·`request_id?`·`trace_id?`·`model_name?`.
 - **응답 201 = `FollowupItem`**(GET list item 과 **동일 shape** → 프론트가 thread 에 그대로 append).
 - **메타 정책**: `request_id` 없으면 backend 생성, `trace_id`/`model_name` 없으면 `null`(정직).
