@@ -28,8 +28,8 @@ from src.api.dependencies import (
     get_trace_sink,
 )
 from src.api.errors import AppError
-from src.supervisor.agent_adapters import AgentAdapter, ExecutionDeps
-from src.supervisor.resolve_client import ResolverProtocol
+from src.supervisor.execution.adapters import AgentAdapter, ExecutionDeps
+from src.supervisor.planning.resolve_client import ResolverProtocol
 from src.supervisor.runtime import run_analysis, to_response_dict
 from src.supervisor.schemas import SupervisorInput
 

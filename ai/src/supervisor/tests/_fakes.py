@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.supervisor.resolve_client import ResolveResult, ResolverToolError
+from src.supervisor.planning.resolve_client import ResolveResult, ResolverToolError
 from src.supervisor.schemas import ResolverErrorKind, StockCandidate, StockContext
 
 

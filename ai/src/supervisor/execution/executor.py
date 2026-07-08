@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from src.supervisor.agent_adapters import AgentAdapter, ExecutionDeps, default_adapters
-from src.supervisor.execution_schemas import AgentResult, ExecutionError, ExecutionResult
+from src.supervisor.execution.adapters import AgentAdapter, ExecutionDeps, default_adapters
+from src.supervisor.execution.schemas import AgentResult, ExecutionError, ExecutionResult
 from src.supervisor.schemas import AGENT_ORDER, SupervisorDecision
 
 # 실패 메시지 상한(secret-safe — 짧게, 개행 제거, traceback/raw payload 미노출).

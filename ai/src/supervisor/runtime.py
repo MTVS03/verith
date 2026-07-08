@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.supervisor.agent_adapters import AgentAdapter, ExecutionDeps
-from src.supervisor.execution_schemas import AgentResult, ExecutionResult
-from src.supervisor.executor import run_tasks
-from src.supervisor.interpret import QueryClassifier
-from src.supervisor.resolve_client import ResolverProtocol
+from src.supervisor.execution.adapters import AgentAdapter, ExecutionDeps
+from src.supervisor.execution.schemas import AgentResult, ExecutionResult
+from src.supervisor.execution.executor import run_tasks
+from src.supervisor.planning.interpret import QueryClassifier
+from src.supervisor.planning.resolve_client import ResolverProtocol
 from src.supervisor.schemas import SupervisorInput
-from src.supervisor.supervisor import run_supervisor
+from src.supervisor.planning.planner import run_supervisor
 
 
 def run_analysis(

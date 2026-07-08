@@ -6,11 +6,29 @@
 모두**에 대해 실행 가능 여부까지 포함한 결과를 만든다. **분석기가 아니다** — 집계/랭킹/투자의견/HTML/
 검증/점수는 하지 않는다. backend DB 를 직접 만지지 않고, 종목 식별은 backend HTTP 경계로만 한다.
 
+## 폴더 구조
+```
+supervisor/
+├── schemas.py            # 공통 typed 계약(planning 산출 + enums)
+├── config.py             # 공통 설정(resolver 접속)
+├── runtime.py            # planning+execution 조립 + JSON 직렬화
+├── planning/             # 질문 해석 · 조건부 resolve · 5 task 생성
+│   ├── planner.py        #   run_supervisor (planning 진입)
+│   ├── interpret.py · policy.py · rewrite.py · resolve_client.py
+├── execution/            # 5 agent fan-out 실행
+│   ├── executor.py       #   run_tasks (execution 진입)
+│   ├── adapters.py       #   agent 별 thin adapter + ExecutionDeps
+│   └── schemas.py        #   AgentResult / ExecutionResult (result envelope)
+├── scripts/smoke_supervisor.py   # 수동 real smoke(opt-in)
+└── tests/
+```
+endpoint(외부 HTTP 입구)는 `../api/supervisor.py`.
+
 ## 계층 (책임 분리 — 흐리지 말 것)
-| 계층 | 파일 | 책임 |
+| 계층 | 모듈 | 책임 |
 |---|---|---|
-| planning | `supervisor.py` (+`interpret`/`policy`/`rewrite`/`resolve_client`/`schemas`) | 질문 해석 · 조건부 resolve · 5 task envelope 생성 |
-| execution | `executor.py` (+`agent_adapters`/`execution_schemas`) | 5 agent fan-out 실행 · skipped/failed/success 정리 |
+| planning | `planning/planner.py` (+`planning/interpret`·`policy`·`rewrite`·`resolve_client`, `schemas.py`) | 질문 해석 · 조건부 resolve · 5 task envelope 생성 |
+| execution | `execution/executor.py` (+`execution/adapters`·`schemas`) | 5 agent fan-out 실행 · skipped/failed/success 정리 |
 | runtime | `runtime.py` | planning+execution 조립(`run_analysis`) · JSON 직렬화(`to_response_dict`) |
 | endpoint | `../api/supervisor.py` | 외부 HTTP 입구 + dependency wiring (얇게) |
 
@@ -56,6 +74,13 @@
   범위 밖이면 `can_run=false` + `reason=out_of_scope` 로 **실행 전 차단**.
 - **smoke·문서·운영 기대는 범위 내 종목으로 맞춘다**(예: 373220 LG에너지솔루션 · 051910 LG화학 ·
   006400 삼성SDI · 247540 에코프로비엠). 범위 밖(삼성전자 등)은 technical smoke 문맥에 쓰지 않는다.
+
+> **실증 상태(잠금):** **현재는 `BATTERY_TICKERS`(2차전지 10종) 기준으로 supervisor+technical real smoke
+> 실증 완료.** 수동 real smoke 로 `resolver(resolved) → planning(5 tasks) → execution → technical success`
+> 를 확인했다 — 373220 LG에너지솔루션·051910 LG화학(둘 다 `source=KIS · data_status=normal · final_regime
+> 산출`). 범위 밖(005930 삼성전자)은 dev `stocks` 미해결로 `not_found → technical skipped`(또는 resolve 강제
+> 시 `OutOfScopeTickerError → failed`, 무네트워크 테스트로 잠금). news/flow/industry 는 각자 실 의존성
+> (import 경로·KIS 403·ai.env Neo4j) 문제로 failed 지만 격리됨. **전체 종목 확장은 이 실증 이후 별도 단계.**
 
 ## adapter 별 입력 매핑 / 흡수 차이 (thin)
 | agent | 공개 입력 | 매핑 | 흡수 차이 |

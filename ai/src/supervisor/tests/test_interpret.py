@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.supervisor.interpret import Interpretation, interpret
+from src.supervisor.planning.interpret import Interpretation, interpret
 
 
 @pytest.mark.parametrize(

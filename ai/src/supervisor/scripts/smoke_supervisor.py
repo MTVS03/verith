@@ -23,8 +23,8 @@ import sys
 from datetime import UTC, datetime
 
 from src.agents.technical.services.openai_llm_client import default_openai_client
-from src.supervisor.agent_adapters import ExecutionDeps, default_adapters
-from src.supervisor.resolve_client import StockResolverClient
+from src.supervisor.execution.adapters import ExecutionDeps, default_adapters
+from src.supervisor.planning.resolve_client import StockResolverClient
 from src.supervisor.runtime import run_analysis
 from src.supervisor.schemas import SupervisorInput
 
