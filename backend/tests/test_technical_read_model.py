@@ -1,0 +1,103 @@
+"""technical read model projection 단위 테스트 (순수 — DB 없음).
+
+build_read_model 이 raw output_payload + canonical stock 를 프론트 친화 shape 로 정리하는지,
+구조화 섹션/역호환(구버전 payload)/canonical 우선/verification·chart·signal 블록을 검증한다.
+"""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+from db.models.common.stock import Stock
+from src.api.schemas.ai_technical_output import MirrorInterpretation
+from src.api.services.technical_report_service import build_read_model
+
+_RID = uuid4()
+
+
+def _raw(**over) -> dict:
+    base = {
+        "request_id": "req-1", "ticker": "373220", "as_of": "2026-07-09T00:00:00+00:00",
+        "source": "KIS", "trace_id": "trace-1", "data_status": "normal",
+        "regime": {
+            "final_regime": "uptrend_intact", "daily_regime": "uptrend_intact",
+            "weekly_trend": "up", "monthly_trend": "up", "alignment_flag": "aligned",
+            "regime_context": "상승 추세.",
+        },
+        "signal": {"consensus": "weak_positive", "signal_score": 0.3, "confidence": 0.42,
+                   "confidence_basis": "엇갈림"},
+        "technical_signals": [
+            {"indicator": "moving_average", "signal": "positive", "value": 82900.0,
+             "metrics": ["5MA 82900"], "detail": "이동평균 긍정", "detail_source": "llm"},
+        ],
+        "risk": {"items": [{"flag": "volume_not_confirmed", "note": "거래량 약함", "ref_price": None}]},
+        "charts": [
+            {"period": "3m", "chart_data": {"candle_unit": "D", "annotations": [{"kind": "x"}]}},
+            {"period": "1y", "chart_data": {"candle_unit": "D", "annotations": []}},
+        ],
+        "interpretation": {
+            "text": "종합 해석.", "source": "llm",
+            "one_line_summary": "과열·약한 긍정", "directional_bias": "bullish",
+            "trend_interpretation": "추세 해석", "signal_interpretation": "신호 해석",
+            "risk_interpretation": "리스크 해석", "timeframe_alignment": "정합",
+            "key_drivers": ["이동평균 긍정"], "warning_points": ["거래량 약함"],
+            "what_to_watch_next": "거래량", "invalidation_or_caution": "추세 전환 시 무효",
+        },
+        "verification": {"calc_passed": True, "regime_passed": True, "label_matched": True,
+                         "outcome": "passed", "regen_count": 0},
+    }
+    base.update(over)
+    return base
+
+
+def test_projection_full_sections():
+    rm = build_read_model(report_id=_RID, raw=_raw(), stock=None)
+    assert rm.summary.one_line_summary == "과열·약한 긍정"
+    assert rm.summary.directional_bias == "bullish"
+    assert rm.summary.final_regime == "uptrend_intact" and rm.summary.timeframe_alignment == "정합"
+    assert rm.interpretation.trend_interpretation == "추세 해석"
+    assert rm.interpretation.invalidation_or_caution == "추세 전환 시 무효"
+    assert rm.drivers.key_drivers == ["이동평균 긍정"] and rm.drivers.warning_points == ["거래량 약함"]
+    assert rm.signals.items[0].indicator == "moving_average" and rm.signals.items[0].value == 82900.0
+    assert rm.risks.items[0].flag == "volume_not_confirmed"
+    assert rm.charts.available_periods == ["3m", "1y"]
+    assert rm.charts.items[0].candle_unit == "D" and rm.charts.items[0].annotation_count == 1
+    assert rm.charts.items[0].has_chart_data is True
+    assert rm.verification.outcome == "passed" and rm.verification.regen_count == 0
+    assert rm.meta.source == "KIS" and rm.meta.trace_id == "trace-1"
+
+
+def test_projection_canonical_stock_priority():
+    # canonical stocks 값이 payload 보다 우선한다.
+    stock = Stock(stock_code="373220", stock_name="LG에너지솔루션", market="KOSPI")
+    rm = build_read_model(report_id=_RID, raw=_raw(stock_name="구舊이름"), stock=stock)
+    assert rm.stock.stock_code == "373220"
+    assert rm.stock.stock_name == "LG에너지솔루션" and rm.stock.market == "KOSPI"
+
+
+def test_projection_backward_compat_no_sections():
+    # 구버전 payload(구조화 섹션 없음)에서도 shape 안정 — 섹션 필드는 None/빈 배열.
+    raw = _raw(interpretation={"text": "옛 해석.", "source": "llm"})
+    rm = build_read_model(report_id=_RID, raw=raw, stock=None)
+    assert rm.interpretation.text == "옛 해석."
+    assert rm.summary.one_line_summary is None and rm.summary.directional_bias is None
+    assert rm.drivers.key_drivers == [] and rm.drivers.warning_points == []
+    # 계산/저장 기반 필드는 여전히 채워진다.
+    assert rm.summary.final_regime == "uptrend_intact"
+    assert rm.verification.outcome == "passed"
+
+
+def test_projection_tolerates_partial_payload():
+    # 부분/이종 payload(빈 dict)에서도 예외 없이 안정 shape.
+    rm = build_read_model(report_id=_RID, raw={}, stock=None)
+    assert rm.signals.items == [] and rm.risks.items == [] and rm.charts.items == []
+    assert rm.summary.final_regime is None and rm.verification.outcome is None
+
+
+def test_mirror_sections_dict_none_when_empty():
+    empty = MirrorInterpretation(text="t", source="llm")
+    assert empty.sections_dict() is None                       # 구버전 → None(sections 컬럼 NULL)
+    full = MirrorInterpretation(text="t", source="llm", one_line_summary="s",
+                                key_drivers=["a"])
+    d = full.sections_dict()
+    assert d is not None and d["one_line_summary"] == "s" and d["key_drivers"] == ["a"]

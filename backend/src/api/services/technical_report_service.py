@@ -31,8 +31,20 @@ from src.api.repositories import technical_report_repository as tr_repo
 from src.api.schemas.agent_report import AgentReportListItem
 from src.api.schemas.ai_technical_output import TechnicalAgentOutputMirror
 from src.api.schemas.technical_report import (
+    ChartItem,
+    ChartsBlock,
+    DriversBlock,
+    InterpretationBlock,
+    MetaBlock,
+    RiskItemBlock,
+    RisksBlock,
+    SignalItem,
+    SignalsBlock,
+    StockBlock,
+    SummaryBlock,
     TechnicalReportCreateRequest,
-    TechnicalReportEnvelope,
+    TechnicalReportReadModel,
+    VerificationBlock,
 )
 
 
@@ -44,6 +56,122 @@ def _parse_dt(value: object) -> datetime | None:
     return None
 
 
+def _d(node: object) -> dict:
+    """dict 이면 그대로, 아니면 빈 dict(방어적 projection — 구버전/부분 payload 안정)."""
+    return node if isinstance(node, dict) else {}
+
+
+def _list(node: object) -> list:
+    return node if isinstance(node, list) else []
+
+
+def build_read_model(
+    *, report_id: UUID, raw: dict, stock: Stock | None, model_name: str | None = None
+) -> TechnicalReportReadModel:
+    """저장된 raw output_payload + canonical stock → 프론트 친화 read model(projection, 재해석 없음).
+
+    모든 접근은 방어적(.get)이라 구버전/부분 payload(구조화 섹션 없음)에서도 shape 가 안정적이다.
+    `stock` 블록은 **canonical stocks 우선**(없으면 payload/ticker fallback)."""
+    interp = _d(raw.get("interpretation"))
+    regime = _d(raw.get("regime"))
+    signal = _d(raw.get("signal"))
+    verification = _d(raw.get("verification"))
+    ticker = str(raw.get("ticker") or (stock.stock_code if stock else "") or "")
+
+    charts = _list(raw.get("charts"))
+    chart_items: list[ChartItem] = []
+    periods: list[str] = []
+    for i, c in enumerate(charts):
+        cd = _d(_d(c).get("chart_data"))
+        period = str(_d(c).get("period") or "")
+        if period:
+            periods.append(period)
+        chart_items.append(ChartItem(
+            period=period,
+            candle_unit=cd.get("candle_unit"),
+            display_order=i,
+            has_chart_data=bool(cd),
+            annotation_count=len(_list(cd.get("annotations"))),
+        ))
+
+    return TechnicalReportReadModel(
+        report_id=report_id,
+        stock=StockBlock(
+            stock_code=(stock.stock_code if stock else ticker),
+            stock_name=(stock.stock_name if stock else raw.get("stock_name")),
+            market=(stock.market if stock else None),
+        ),
+        meta=MetaBlock(
+            request_id=raw.get("request_id"),
+            trace_id=raw.get("trace_id"),
+            as_of=_parse_dt(raw.get("as_of")),
+            source=raw.get("source"),
+            data_status=raw.get("data_status"),
+            model_name=model_name,
+        ),
+        summary=SummaryBlock(
+            one_line_summary=interp.get("one_line_summary"),
+            directional_bias=interp.get("directional_bias"),
+            final_regime=regime.get("final_regime"),
+            daily_regime=regime.get("daily_regime"),
+            weekly_trend=regime.get("weekly_trend"),
+            monthly_trend=regime.get("monthly_trend"),
+            alignment_flag=regime.get("alignment_flag"),
+            timeframe_alignment=interp.get("timeframe_alignment"),
+        ),
+        interpretation=InterpretationBlock(
+            text=interp.get("text"),
+            source=interp.get("source"),
+            trend_interpretation=interp.get("trend_interpretation"),
+            signal_interpretation=interp.get("signal_interpretation"),
+            risk_interpretation=interp.get("risk_interpretation"),
+            what_to_watch_next=interp.get("what_to_watch_next"),
+            invalidation_or_caution=interp.get("invalidation_or_caution"),
+        ),
+        drivers=DriversBlock(
+            key_drivers=[str(x) for x in _list(interp.get("key_drivers"))],
+            warning_points=[str(x) for x in _list(interp.get("warning_points"))],
+        ),
+        signals=SignalsBlock(
+            signal_score=signal.get("signal_score"),
+            consensus=signal.get("consensus"),
+            confidence=signal.get("confidence"),
+            confidence_basis=signal.get("confidence_basis"),
+            items=[
+                SignalItem(
+                    indicator=str(_d(s).get("indicator") or ""),
+                    signal=_d(s).get("signal"),
+                    value=_d(s).get("value"),
+                    metrics=[str(m) for m in _list(_d(s).get("metrics"))],
+                    detail=_d(s).get("detail"),
+                    detail_source=_d(s).get("detail_source"),
+                )
+                for s in _list(raw.get("technical_signals"))
+            ],
+        ),
+        risks=RisksBlock(
+            items=[
+                RiskItemBlock(
+                    flag=str(_d(r).get("flag") or ""),
+                    note=_d(r).get("note"),
+                    ref_price=_d(r).get("ref_price"),
+                )
+                for r in _list(_d(raw.get("risk")).get("items"))
+            ],
+        ),
+        charts=ChartsBlock(available_periods=periods, items=chart_items),
+        verification=VerificationBlock(
+            outcome=verification.get("outcome"),
+            calc_passed=verification.get("calc_passed"),
+            regime_passed=verification.get("regime_passed"),
+            label_matched=verification.get("label_matched"),
+            regen_count=verification.get("regen_count"),
+            failed_indicators=[str(x) for x in _list(verification.get("failed_indicators"))],
+            summary=verification.get("validation_summary"),
+        ),
+    )
+
+
 class TechnicalReportService:
     def __init__(self, session: AsyncSession, ai_client: AIClient) -> None:
         self._session = session
@@ -52,7 +180,7 @@ class TechnicalReportService:
     # ── 저장 ──────────────────────────────────────────────────────────────────
     async def create_report(
         self, req: TechnicalReportCreateRequest
-    ) -> TechnicalReportEnvelope:
+    ) -> TechnicalReportReadModel:
         request_id = f"req-{uuid4().hex}"
         as_of = req.as_of or datetime.now(UTC)
         ai_input = {
@@ -168,7 +296,8 @@ class TechnicalReportService:
             model_name=None,
             template_fallback_used=(output.interpretation.source == "template_fallback"),
             detail_source_count=None,
-            sections=None,
+            # AI 구조화 섹션(additive)을 JSONB 로 보존 — 구버전 output 이면 None.
+            sections=output.interpretation.sections_dict(),
         )
         verification = TechnicalReportVerification(
             id=uuid4(),
@@ -223,7 +352,11 @@ class TechnicalReportService:
         await agent_repo.add(self._session, agent_report)
         await self._session.commit()
 
-        return TechnicalReportEnvelope(report_id=report_id, report=raw)
+        # 저장 직후 응답 == GET 단건 응답이 되도록 **동일 경로**로 조립한다(canonical stock·model_name 소스 일치).
+        stock = await tr_repo.get_stock(self._session, req.ticker)
+        return build_read_model(
+            report_id=report_id, raw=raw, stock=stock, model_name=interpretation.model_name
+        )
 
     async def _resolve_stock_name(self, ticker: str, requested: str | None) -> str:
         """마스터 우선: 기존 stocks > allowlist > 요청값(미지 종목) > ticker."""
@@ -234,11 +367,18 @@ class TechnicalReportService:
         return allowlist_name(ticker) or req_name or ticker
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
-    async def get_report(self, report_id: UUID) -> TechnicalReportEnvelope | None:
+    async def get_report(self, report_id: UUID) -> TechnicalReportReadModel | None:
         report = await tr_repo.get_report(self._session, report_id)
         if report is None:
             return None
-        return TechnicalReportEnvelope(report_id=report.id, report=report.output_payload)
+        stock = await tr_repo.get_stock(self._session, report.stock_code)
+        interp = await tr_repo.get_interpretation(self._session, report_id)
+        return build_read_model(
+            report_id=report.id,
+            raw=report.output_payload,
+            stock=stock,
+            model_name=(interp.model_name if interp else None),
+        )
 
     async def list_reports(
         self,

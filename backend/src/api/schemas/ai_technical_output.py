@@ -68,6 +68,36 @@ class MirrorChart(_Lenient):
 class MirrorInterpretation(_Lenient):
     text: str
     source: str = Field(min_length=1)
+    # AI 해석 고도화(additive) — 구조화 섹션. 없어도(구버전 output) 전방호환(전부 optional).
+    one_line_summary: str | None = None
+    directional_bias: str | None = None
+    trend_interpretation: str | None = None
+    signal_interpretation: str | None = None
+    risk_interpretation: str | None = None
+    timeframe_alignment: str | None = None
+    key_drivers: list[str] = Field(default_factory=list)
+    warning_points: list[str] = Field(default_factory=list)
+    what_to_watch_next: str | None = None
+    invalidation_or_caution: str | None = None
+
+    def sections_dict(self) -> dict | None:
+        """구조화 섹션을 JSONB(sections 컬럼) 저장용 dict 로. 하나도 없으면(구버전) None."""
+        data = {
+            "one_line_summary": self.one_line_summary,
+            "directional_bias": self.directional_bias,
+            "trend_interpretation": self.trend_interpretation,
+            "signal_interpretation": self.signal_interpretation,
+            "risk_interpretation": self.risk_interpretation,
+            "timeframe_alignment": self.timeframe_alignment,
+            "key_drivers": self.key_drivers,
+            "warning_points": self.warning_points,
+            "what_to_watch_next": self.what_to_watch_next,
+            "invalidation_or_caution": self.invalidation_or_caution,
+        }
+        has_any = any(
+            v for v in data.values() if not isinstance(v, list)
+        ) or self.key_drivers or self.warning_points
+        return data if has_any else None
 
 
 class MirrorVerification(_Lenient):

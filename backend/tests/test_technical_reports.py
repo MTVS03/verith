@@ -25,12 +25,18 @@ _POST = "/api/technical/reports"
 _REQ = {"ticker": TICKER, "query": "373220 기술적 흐름 분석", "client_session_id": "test-sess-1"}
 
 
+_READ_MODEL_KEYS = {
+    "report_id", "stock", "meta", "summary", "interpretation",
+    "drivers", "signals", "risks", "charts", "verification",
+}
+
+
 async def _create(client) -> UUID:
     resp = await client.post(_POST, json=_REQ)
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert set(body.keys()) == {"report_id", "report"}          # api_spec §6 wrapper
-    assert body["report"]["ticker"] == TICKER                   # report = AI 원본
+    assert set(body.keys()) == _READ_MODEL_KEYS                 # read model(저장 직후도 일관)
+    assert body["stock"]["stock_code"] == TICKER                # canonical stock 블록
     return UUID(body["report_id"])
 
 
@@ -98,15 +104,33 @@ async def test_stock_master_not_overwritten_by_request(client, db_session):
     assert stock.stock_name == "정상마스터명"  # 요청값으로 덮이지 않음
 
 
-# 4) GET 상세 = { report_id, report }
-async def test_get_report_envelope(client):
+# 4) GET 상세 = read model
+async def test_get_report_read_model(client):
     rid = await _create(client)
     resp = await client.get(f"{_POST}/{rid}")
     assert resp.status_code == 200
     body = resp.json()
+    assert set(body.keys()) == _READ_MODEL_KEYS
     assert body["report_id"] == str(rid)
-    assert body["report"]["ticker"] == TICKER
-    assert body["report"]["verification"]["outcome"] == "passed"
+    assert body["stock"]["stock_code"] == TICKER                # canonical block
+    assert body["stock"]["stock_name"]                          # stocks 조인
+    assert body["verification"]["outcome"] == "passed"          # verification read summary
+    assert body["summary"]["final_regime"] == "uptrend_intact"  # summary 블록
+    assert body["meta"]["source"] == "KIS"                      # meta 블록
+    # signals/charts 섹션이 누락 없이 구조화돼 있다.
+    assert len(body["signals"]["items"]) == len(INDICATORS)
+    assert body["charts"]["available_periods"]                  # 기간 목록
+    assert isinstance(body["interpretation"]["text"], str)      # text 는 호환 유지
+
+
+# 4b) POST 직후 응답 == GET 단건 응답 (정본 계약 잠금 — 두 진입점 shape·값 완전 동일)
+async def test_post_and_get_return_identical_read_model(client):
+    post = await client.post(_POST, json=_REQ)
+    assert post.status_code == 201, post.text
+    post_body = post.json()
+    rid = post_body["report_id"]
+    get_body = (await client.get(f"{_POST}/{rid}")).json()
+    assert post_body == get_body           # 저장 직후 == 조회: 프론트가 믿을 단일 응답 계약
 
 
 # 5) GET /api/reports 목록

@@ -8,6 +8,7 @@ FastAPI 백엔드 — 요청을 받아 AI 에이전트를 호출하고, 결과 J
 - 전체 종목 마스터 동기화(KIS): [`docs/stock_master_sync.md`](docs/stock_master_sync.md)
 - DART 법인코드 동기화(corp_code): [`docs/dart_corp_code_sync.md`](docs/dart_corp_code_sync.md)
 - **DB 역할 경계(canonical/dev/test)**: [`docs/db_boundaries.md`](docs/db_boundaries.md)
+- **Technical Report 응답 계약(프론트 read model 정본)**: [`docs/technical_backend_handoff.md`](docs/technical_backend_handoff.md)
 
 ## 개발 환경
 

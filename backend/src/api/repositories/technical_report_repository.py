@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,8 +57,24 @@ async def add_report(
 
 
 async def get_report(session: AsyncSession, report_id: UUID) -> TechnicalReport | None:
-    """root 조회(없으면 None). API 는 report.output_payload 를 report 로 반환한다."""
+    """root 조회(없으면 None). read model projection 이 output_payload 를 읽는다."""
     return await session.get(TechnicalReport, report_id)
+
+
+async def get_stock(session: AsyncSession, stock_code: str) -> Stock | None:
+    """canonical 종목(stocks) 조회 — read model stock 블록의 정본 source(없으면 None)."""
+    return await session.get(Stock, stock_code)
+
+
+async def get_interpretation(
+    session: AsyncSession, report_id: UUID
+) -> TechnicalReportInterpretation | None:
+    """정규화 interpretation 행 조회(model_name 등 payload 밖 backend 필드용). report_id 는 unique."""
+    return await session.scalar(
+        select(TechnicalReportInterpretation).where(
+            TechnicalReportInterpretation.report_id == report_id
+        )
+    )
 
 
 async def delete_root(session: AsyncSession, report_id: UUID) -> int:
