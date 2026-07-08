@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid5, NAMESPACE_URL
 
 from ..core.contract import Evidence
+from .period import period_label
 
 
 def _report_id(trace_id: str, ticker: str, bsns_year: int, reprt_code: str) -> str:
@@ -18,6 +19,10 @@ def _evidence_id(report_id: str, metric: str, rcept_no: str, account_id: str, ro
 
 def _ratio_id(report_id: str, ratio_name: str, bsns_year: int) -> str:
     return str(uuid5(NAMESPACE_URL, f"{report_id}:{ratio_name}:{bsns_year}"))
+
+
+def _insight_id(report_id: str, insight_type: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"{report_id}:insight:{insight_type}"))
 
 
 def _decimal(value: float | int | None) -> str | None:
@@ -81,6 +86,17 @@ def _trend_label(metric: str) -> tuple[str, str, str]:
     return labels.get(metric, (metric, "추세", ""))
 
 
+def _json_safe_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    safe = dict(meta or {})
+    safe.pop("erd_payload", None)
+    return safe
+
+
+def _extract_optional_text(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return str(value) if value not in (None, "") else None
+
+
 def build_erd_payload(
     *,
     request_id: str,
@@ -103,6 +119,17 @@ def build_erd_payload(
     risk_flags: list[str],
     verification: dict[str, Any],
     retrieval_summary: dict[str, Any],
+    reprt_name: str | None = None,
+    report_mode: str = "annual",
+    years_count: int | None = None,
+    score_breakdown: dict[str, Any] | None = None,
+    insights: dict[str, Any] | None = None,
+    report_html: str | None = None,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    llm_latency_ms: int | None = None,
+    dart_calls: int | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """PostgreSQL ERD에 맞춘 저장용 payload를 만든다.
 
@@ -122,8 +149,8 @@ def build_erd_payload(
                 "id": ratio_id,
                 "report_id": report_id,
                 "ratio_name": metric,
-                "bsns_year": int(item.get("fiscal_year") or bsns_year),
                 "fiscal_year": int(item.get("fiscal_year") or bsns_year),
+                "fiscal_period": period_label(item.get("fiscal_year") or bsns_year, reprt_code),
                 "value": item.get("value"),
                 "unit": item.get("unit"),
                 "label": item.get("label", metric),
@@ -154,8 +181,8 @@ def build_erd_payload(
                     "id": ratio_id,
                     "report_id": report_id,
                     "ratio_name": trend_metric,
-                    "bsns_year": year_int,
                     "fiscal_year": year_int,
+                    "fiscal_period": period_label(year_int, reprt_code),
                     "value": _trend_decimal(value),
                     "unit": unit,
                     "label": label,
@@ -178,16 +205,22 @@ def build_erd_payload(
                 report_evidence.append(
                     {
                         "id": _evidence_id(report_id, item.metric, account_rcept_no, account.account_id, role),
+                        "report_id": report_id,
                         "ratio_id": ratio_id,
+                        "metric": item.metric,
+                        "claim": item.claim,
                         "rcept_no": account_rcept_no,
                         "bsns_year": account_year,
+                        "fiscal_period": period_label(account_year, reprt_code),
                         "sj_div": account.sj_div,
                         "account_id": account.account_id,
                         "account_nm": account.account_nm,
                         "amount": _decimal(account.amount),
-                        "currency": _currency(account.currency),
+                        "unit": _currency(account.currency),
+                        "display_value": item.display_value,
                         "role": role,
                         "source_url": account.source_url or item.source_url,
+                        "raw": account.model_dump(),
                     }
                 )
             continue
@@ -195,20 +228,41 @@ def build_erd_payload(
             report_evidence.append(
                 {
                     "id": _evidence_id(report_id, item.metric, item.rcept_no, account_id, _evidence_role(item.metric, index)),
+                    "report_id": report_id,
                     "ratio_id": ratio_id,
+                    "metric": item.metric,
+                    "claim": item.claim,
                     "rcept_no": item.rcept_no,
                     "bsns_year": int(item.fiscal_year),
+                    "fiscal_period": period_label(item.fiscal_year, reprt_code),
                     "sj_div": "",
                     "account_id": account_id,
                     "account_nm": "",
                     "amount": _decimal(item.value),
-                    "currency": _currency(item.unit),
+                    "unit": _currency(item.unit),
+                    "display_value": item.display_value,
                     "role": _evidence_role(item.metric, index),
                     "source_url": item.source_url,
+                    "raw": item.model_dump(),
                 }
             )
 
     data_status = "normal" if not risk_flags else "partial_with_flags"
+    root_period_label = period_label(bsns_year, reprt_code)
+    report_insights = []
+    for insight_type, payload in (insights or {}).items():
+        if not isinstance(payload, dict):
+            payload = {"value": payload}
+        report_insights.append(
+            {
+                "id": _insight_id(report_id, str(insight_type)),
+                "report_id": report_id,
+                "insight_type": str(insight_type),
+                "source_endpoint": _extract_optional_text(payload, "source_endpoint"),
+                "rcept_no": _extract_optional_text(payload, "rcept_no"),
+                "payload": payload,
+            }
+        )
     return {
         "stock": {
             "stock_code": ticker,
@@ -220,17 +274,28 @@ def build_erd_payload(
             "stock_code": ticker,
             "corp_code": corp_code,
             "bsns_year": bsns_year,
+            "years": years_count,
             "fs_div": fs_div,
+            "report_mode": report_mode,
             "reprt_code": reprt_code,
+            "reprt_name": reprt_name,
+            "period_label": root_period_label,
             "verdict": verdict,
             "verdict_label": label,
             "confidence": confidence,
             "fin_score": score,
             "data_status": data_status,
             "risk_flags": risk_flags,
+            "score_breakdown": score_breakdown or {},
+            "report_html": report_html,
+            "llm_provider": llm_provider or interpretation_source,
+            "llm_model": llm_model,
+            "llm_latency_ms": llm_latency_ms,
+            "dart_calls": dart_calls,
             "trace_id": trace_id,
             "as_of": created_at,
             "created_at": created_at,
+            "meta": _json_safe_meta(meta),
         },
         "report_ratios": report_ratios,
         "report_evidence": report_evidence,
@@ -239,6 +304,12 @@ def build_erd_payload(
             "report_id": report_id,
             "interpretation": interpretation,
             "interpretation_source": interpretation_source,
+            "provider": llm_provider or interpretation_source,
+            "model": llm_model,
+            "prompt_meta": {
+                "retrieval_summary": retrieval_summary,
+                "risk_flags": risk_flags,
+            },
         },
         "report_verification": {
             "id": str(uuid5(NAMESPACE_URL, f"{report_id}:verification")),
@@ -248,6 +319,11 @@ def build_erd_payload(
             "verdict_stable": bool(verification.get("verdict_stable", True)),
             "outcome": str(verification.get("outcome", "passed")),
             "regen_count": int(verification.get("regen_count", 0)),
+            "evidence_count": len(report_evidence),
+            "guard_violations": verification.get("guard_violations", []),
+            "flags": risk_flags,
         },
+        "report_insights": report_insights,
+        "report_filing_snippets": [],
         "retrieval_summary": retrieval_summary,
     }

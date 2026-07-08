@@ -1,6 +1,35 @@
+import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+_TICKER_RE = re.compile(r"\d{6}")
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class FundamentalAgentInput(_StrictModel):
+    request_id: str
+    trace_id: str
+    ticker: str
+    query: str
+
+    @field_validator("ticker")
+    @classmethod
+    def ticker_must_be_six_digits(cls, value: str) -> str:
+        if not _TICKER_RE.fullmatch(value):
+            raise ValueError("ticker must be exactly 6 digits")
+        return value
+
+    @field_validator("request_id", "trace_id", "query")
+    @classmethod
+    def value_must_not_be_blank(cls, value: str, info) -> str:
+        if not value or not value.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
 
 
 class FundamentalRequest(BaseModel):

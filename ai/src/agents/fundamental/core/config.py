@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     DART_TIMEOUT: float = 10.0
     DEFAULT_FS_DIV: str = "CFS"        # 연결 고정 — OFS 혼용 금지
     DEFAULT_REPRT_CODE: str = "11011"  # 사업보고서(연간)
+    VERITH_DB_URL: str = Field(
+        default="",
+        validation_alias=AliasChoices("VERITH_DB_URL", "DATABASE_URL"),
+    )
+    CORP_CODE_DB_TIMEOUT_SECONDS: float = 1.5
+    CORP_CODE_DB_RETRIES: int = 1
 
     # Team convention: QWEN_API_KEY stores the OpenAI-compatible Qwen base URL.
     # QWEN_BASE_URL is also accepted for local overrides.

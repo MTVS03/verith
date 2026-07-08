@@ -16,6 +16,8 @@ class FundamentalAgentState(TypedDict, total=False):
     use_cache: bool
     corp_code: str
     corp_name: str
+    corp_code_resolution: dict[str, Any]
+    input_interpretation: dict[str, Any]
     years: list[str]
     fs_div: str
     reprt_code: str
