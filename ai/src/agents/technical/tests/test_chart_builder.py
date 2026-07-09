@@ -644,9 +644,34 @@ def test_cup_handle_schema_and_meta():
     assert a["importance"] == "medium"
     assert a["source"] == "code"
     assert a["meta"]["candidate_stage"] == "handle_forming"
+    # 기존 price/조건 meta 유지 + 신규 구간 좌표(date) 추가.
     assert {"lookback_bars", "left_rim_price", "right_rim_price", "bottom_price",
             "cup_depth_pct", "rim_tolerance_pct", "handle_pullback_pct", "handle_bars",
-            "candidate_stage", "volume_confirmed", "volume_ratio"} <= set(a["meta"])
+            "candidate_stage", "volume_confirmed", "volume_ratio",
+            "left_rim_date", "bottom_date", "right_rim_date",
+            "handle_start_date", "handle_end_date"} <= set(a["meta"])
+
+
+def test_cup_handle_geometry_dates_ordered_and_real():
+    # 구간 렌더용 x축 좌표: 실제 source date(ISO), 논리 순서 left≤bottom≤right<handle_end.
+    a = _cup_anns_1y(_cup_series(120))[0]
+    m = a["meta"]
+    lr, bt, rr = m["left_rim_date"], m["bottom_date"], m["right_rim_date"]
+    hs, he = m["handle_start_date"], m["handle_end_date"]
+    assert lr <= bt <= rr < he                       # ISO date 문자열 순서 == 시간 순서
+    assert rr < hs <= he                             # handle 은 우측 rim 이후 구간
+    assert he == a["date"]                           # handle_end = anchor(현재 봉)
+    assert all(isinstance(v, str) and len(v) == 10 for v in (lr, bt, rr, hs, he))  # ISO date
+
+
+def test_cup_handle_5y_weekly_has_geometry_dates():
+    weekly = _cup_series(78, step_days=7)
+    anns = cdata(payload_of(build_chart_payloads([], weekly, []),
+                            ChartPeriod.FIVE_YEARS))["annotations"]
+    cup = next(a for a in anns if a["kind"] == "cup_handle_candidate")
+    assert {"left_rim_date", "bottom_date", "right_rim_date",
+            "handle_start_date", "handle_end_date"} <= set(cup["meta"])
+    assert cup["meta"]["left_rim_date"] <= cup["meta"]["handle_end_date"]
 
 
 # ── 5y period-aware importance retier (feat/technical-chart-patterns) ───────────

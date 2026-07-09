@@ -372,8 +372,15 @@ importance=`medium`(장기 패턴 후보 — 5y high-only 필터에서 숨겨지
 { "kind": "cup_handle_candidate", "date": "2026-06-30", "label": "컵앤핸들 후보", "importance": "medium", "source": "code",
   "meta": { "lookback_bars": 120, "left_rim_price": 82000.0, "right_rim_price": 81500.0, "bottom_price": 64000.0,
             "cup_depth_pct": 0.2, "rim_tolerance_pct": 0.006, "handle_pullback_pct": 0.07, "handle_bars": 14,
-            "candidate_stage": "handle_forming", "volume_confirmed": false, "volume_ratio": 1.1 } }
+            "candidate_stage": "handle_forming", "volume_confirmed": false, "volume_ratio": 1.1,
+            "left_rim_date": "2026-03-12", "bottom_date": "2026-04-18", "right_rim_date": "2026-06-10",
+            "handle_start_date": "2026-06-11", "handle_end_date": "2026-06-30" } }
 ```
+
+> **구간 렌더용 x축 좌표(meta 날짜):** 프론트가 1y/5y 차트에 컵/핸들 **구간을 음영·브래킷**으로 그릴 수 있도록,
+> 탐지에 이미 쓴 index(`left_rim_idx`·`bottom_idx`·`right_rim_idx`·`end_i`)에서 **실제 source candle date 만**
+> 파생해 싣는다(추정 없음). 순서: `left_rim_date ≤ bottom_date ≤ right_rim_date < handle_start_date ≤
+> handle_end_date`(=anchor `date`). **탐지 heuristic·annotation-only 정책은 불변** — signal_score/regime 무반영.
 
 ---
 
