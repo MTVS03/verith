@@ -405,11 +405,16 @@ def _interpret(
 
 
 def _emit_validation(trace: TraceLogger, attempt: _Attempt, attempt_idx: int) -> None:
-    """검증③(LLM 라벨 왜곡) 결과를 validation 이벤트로 남긴다 — raw LLM 응답이 아닌 요약만(§9·§12)."""
+    """검증③(LLM 라벨 왜곡) 결과를 validation 이벤트로 남긴다 — raw LLM 응답이 아닌 요약만(§9·§12).
+
+    trace sink 가 운영에서 None 이어도 실패 원인이 유실되지 않도록, 실패 시 **구조화 로그**로도 남긴다(§C).
+    secret-safe: target/reason(라벨 코드) 만, raw LLM 문장은 남기지 않는다."""
     ev = attempt.result
     if ev is None:  # 파싱 실패 → 검증 자체 불가
         trace.emit("validation", "failed", node="interpret_report",
                    output_summary={"attempt": attempt_idx, "validation_result": "parse_failed"})
+        logger.warning("interpret_validation_failed",
+                       extra={"attempt": attempt_idx, "reason": "parse_failed"})
         return
     trace.emit(
         "validation", "success" if ev.passed else "failed", node="interpret_report",
@@ -422,6 +427,17 @@ def _emit_validation(trace: TraceLogger, attempt: _Attempt, attempt_idx: int) ->
             "failed_indicators": sorted(ev.failed_indicators),  # 지표명만(원문 없음)
         },
     )
+    if not ev.passed:  # 운영 진단성(§C) — trace sink 없어도 실패 사유가 로그에 남는다.
+        logger.warning(
+            "interpret_validation_failed",
+            extra={
+                "attempt": attempt_idx,
+                "interpretation_failed": ev.interpretation_failed,
+                "details_structure_failed": ev.details_structure_failed,
+                "failed_indicators": sorted(ev.failed_indicators),
+                "reasons": sorted({f"{f.target}:{f.reason}" for f in ev.failures})[:12],
+            },
+        )
 
 
 def _interpret_summary(result: _Interpretation) -> dict[str, object]:
