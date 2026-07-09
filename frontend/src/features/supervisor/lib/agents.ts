@@ -72,5 +72,6 @@ export function agentReportHref(type: AgentType, reportId: string | null): strin
   if (!reportId) return null;
   if (type === "technical") return `/reports/technical/${reportId}`;
   if (type === "news") return `/reports/news/${reportId}`;
+  if (type === "industry") return `/reports/industry/${reportId}`;
   return null;
 }

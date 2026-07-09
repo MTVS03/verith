@@ -14,6 +14,7 @@ import httpx
 _ANALYZE_PATH = "/internal/technical/analyze"
 _FUNDAMENTAL_ANALYZE_PATH = "/internal/fundamental/analyze"
 _INDUSTRY_ANALYZE_PATH = "/internal/industry/analyze"
+_INDUSTRY_RENDER_PATH = "/internal/industry/render"
 
 
 class AIClientError(Exception):
@@ -102,6 +103,33 @@ class AIClient:
             return resp.json()
         if resp.status_code == 422:
             raise AIValidationError("AI 요청 검증 실패(422)")
+        if resp.status_code == 504:
+            raise AITimeoutError("AI 서버 timeout(504)")
+        if resp.status_code in (502, 503):
+            raise AIUnavailableError(f"AI 서버 사용 불가({resp.status_code})")
+        raise AIUnavailableError(f"AI 서버 오류({resp.status_code})")
+
+    async def render_industry_html(self, payload: dict) -> str:
+        """`/internal/industry/render` 호출 → 완결 HTML 문서(text) 반환.
+
+        payload 는 저장된 research-report.v1(dict). 검증 실패(422)는 payload 손상 →
+        AIValidationError 로 올려 라우트가 422 로 매핑한다(빈 iframe 금지, handoff §5).
+        """
+        url = self._base_url + _INDUSTRY_RENDER_PATH
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
+                resp = await client.post(url, json=payload)
+        except httpx.TimeoutException as exc:
+            raise AITimeoutError("AI 서버 응답 timeout") from exc
+        except httpx.HTTPError as exc:
+            raise AIUnavailableError(f"AI 서버 연결 실패: {type(exc).__name__}") from exc
+
+        if resp.status_code == 200:
+            return resp.text
+        if resp.status_code == 422:
+            raise AIValidationError("리포트 payload 검증 실패(422)")
         if resp.status_code == 504:
             raise AITimeoutError("AI 서버 timeout(504)")
         if resp.status_code in (502, 503):

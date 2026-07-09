@@ -144,6 +144,16 @@ class IndustryReportService:
             return None
         return IndustryReportEnvelope(report_id=report.id, report=report.payload)
 
+    async def get_report_html(self, report_id: UUID) -> str | None:
+        """저장된 payload → AI 렌더 → 완결 HTML(text). 없으면 None(→404).
+
+        payload 손상 시 AI 가 422 → AIValidationError 를 그대로 올린다(라우트가 422).
+        """
+        report = await ir_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        return await self._ai.render_industry_html(report.payload)
+
     async def list_reports(
         self,
         *,

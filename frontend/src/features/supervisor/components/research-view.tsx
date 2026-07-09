@@ -7,6 +7,7 @@ import { GitBranch, Sparkles } from "lucide-react";
 import { analyzeQuery } from "@/api/supervisor";
 import { createTechnicalReport } from "@/api/technical-create";
 import { createNewsReport } from "@/api/news-create";
+import { createIndustryReport } from "@/api/industry-create";
 import type { SupervisorAnalyzeResponse } from "@/types/supervisor";
 import type { AgentType } from "@/types/archive";
 import { AGENT_META, AGENT_ORDER } from "@/features/supervisor/lib/agents";
@@ -111,6 +112,16 @@ export function ResearchView() {
           .then((r) => setCreated("news", { reportId: r.report_id }))
           .catch(() => setCreated("news", { reportId: null }))
           .finally(() => setCreated("news", { creating: false }));
+      }
+
+      // industry: backend create 가 AI(GraphRAG)를 재호출→검증→저장(입력은 원 질문).
+      // supervisor 출력을 save-only 로 받는 경로가 없어 technical 과 동일 방식.
+      if (resultOf("industry")?.status === "success") {
+        setCreated("industry", { creating: true, reportId: null });
+        createIndustryReport({ question: q })
+          .then((r) => setCreated("industry", { reportId: r.report_id }))
+          .catch(() => setCreated("industry", { reportId: null }))
+          .finally(() => setCreated("industry", { creating: false }));
       }
 
       // 응답을 받은 뒤 스텝을 순차로 밝힌다(목업의 진행 연출과 동일 타이밍).

@@ -3,6 +3,7 @@ import type { AgentType, ArchiveItem } from "@/types/archive";
 export function frontendReportHref(agentType: AgentType, reportId: string): string | null {
   if (agentType === "technical") return `/reports/technical/${reportId}`;
   if (agentType === "news") return `/reports/news/${reportId}`;
+  if (agentType === "industry") return `/reports/industry/${reportId}`;
   return null;
 }
 
