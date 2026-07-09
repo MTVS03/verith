@@ -42,6 +42,7 @@ from langgraph.graph import END, StateGraph
 
 from .companies import COMPANIES
 from .config import get_chat_llm, get_neo4j_graph
+from .normalize import normalize_lookup_key
 from .retrieve import MAX_CONTEXT_ROWS, generate_answer, generate_cypher
 from .schema import CYPHER_SCHEMA
 from .vector_retrieve import vector_search
@@ -131,20 +132,21 @@ def _route_after_classify(state: AgentState) -> str:
 # answerer to sketch the industry's power blocs and cross-cutting nodes.
 _OVERVIEW_QUERIES = {
     "경쟁_상위": (
-        "MATCH (a:Company)-[:COMPETES_WITH]-(b:Company) "
-        "WITH a, count(DISTINCT b) AS deg RETURN a.name AS company, deg "
+        "MATCH (a:Company)-[r:COMPETES_WITH]-(b:Company) "
+        "WITH a, count(DISTINCT b) AS deg, collect(DISTINCT {source: a.name, relation: type(r), target: b.name, evidences: r.evidences, origins: r.origins})[0..3] AS evidence_edges "
+        "RETURN a.name AS company, deg, evidence_edges "
         "ORDER BY deg DESC LIMIT 10"
     ),
     "산업별_소속": (
-        "MATCH (c:Company)-[:BELONGS_TO]->(i:Industry) "
-        "WITH i, collect(c.name) AS members, count(*) AS n WHERE n >= 2 "
-        "RETURN i.name AS industry, n, members[0..6] AS sample "
+        "MATCH (c:Company)-[r:BELONGS_TO]->(i:Industry) "
+        "WITH i, collect(c.name) AS members, count(*) AS n, collect(DISTINCT {source: c.name, relation: type(r), target: i.name, evidences: r.evidences, origins: r.origins})[0..6] AS evidence_edges WHERE n >= 2 "
+        "RETURN i.name AS industry, n, members[0..6] AS sample, evidence_edges "
         "ORDER BY n DESC LIMIT 10"
     ),
     "공급_허브": (
-        "MATCH (s:Company)-[:SUPPLIES]->(c:Company) "
-        "WITH s, count(DISTINCT c) AS deg WHERE deg >= 3 "
-        "RETURN s.name AS supplier, deg ORDER BY deg DESC LIMIT 10"
+        "MATCH (s:Company)-[r:SUPPLIES]->(c:Company) "
+        "WITH s, count(DISTINCT c) AS deg, collect(DISTINCT {source: s.name, relation: type(r), target: c.name, evidences: r.evidences, origins: r.origins})[0..3] AS evidence_edges WHERE deg >= 3 "
+        "RETURN s.name AS supplier, deg, evidence_edges ORDER BY deg DESC LIMIT 10"
     ),
 }
 
@@ -212,12 +214,37 @@ def _should_retry(state: AgentState) -> str:
 
 
 # --- retrieve_chunks ---------------------------------------------------------
-def _mentioned_company(question: str) -> str | None:
+# Surface priority for tie-breaking equal-length matches (lower wins).
+_SURFACE_PRIORITY = {"canonical": 0, "alias": 1, "stock_code": 2}
+
+
+def _build_company_surfaces() -> list[tuple[str, str, str]]:
+    """(normalized_key, canonical, surface_type) for every canonical/alias/stock_code."""
+    surfaces: list[tuple[str, str, str]] = []
     for company in COMPANIES:
-        names = [company.canonical, *company.aliases, company.stock_code]
-        if any(name and name in question for name in names):
-            return company.canonical
-    return None
+        surfaces.append((normalize_lookup_key(company.canonical), company.canonical, "canonical"))
+        for alias in company.aliases:
+            surfaces.append((normalize_lookup_key(alias), company.canonical, "alias"))
+        if company.stock_code:
+            surfaces.append((normalize_lookup_key(company.stock_code), company.canonical, "stock_code"))
+    return surfaces
+
+
+_COMPANY_SURFACES = _build_company_surfaces()
+
+
+def _mentioned_company(question: str) -> str | None:
+    """Deterministic entity link: longest matching surface wins (avoids e.g.
+    '에코프로' shadowing '에코프로비엠' just because it comes first in COMPANIES)."""
+    qkey = normalize_lookup_key(question)
+    matches = [
+        (len(key), -_SURFACE_PRIORITY[kind], canonical)
+        for key, canonical, kind in _COMPANY_SURFACES
+        if key and key in qkey
+    ]
+    if not matches:
+        return None
+    return max(matches)[2]
 
 
 def _retrieve_chunks(state: AgentState, *, graph) -> AgentState:
@@ -317,3 +344,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
