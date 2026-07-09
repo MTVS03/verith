@@ -1,6 +1,6 @@
 """Export one live agent answer as the research-report.v1 JSON payload.
 
-The wireframe in ``wireframes/research-report`` consumes a report-shaped JSON
+The report template in ``make_report/`` consumes a report-shaped JSON
 object, while the LangGraph agent returns its natural execution state
 (``question``, ``label``, ``cypher``, ``rows``, ``chunks``, ``answer``). This
 module bridges those two shapes without changing the answer pipeline.
@@ -23,11 +23,11 @@ from typing import Any
 
 from .agent import build_agent
 from .config import get_neo4j_graph
+from .make_report.render import TEMPLATE_PATH, render_report_html
 
 SCHEMA_VERSION = "research-report.v1"
 LOCALE = "ko-KR"
 MAX_TAGS = 8
-DEFAULT_TEMPLATE = Path(__file__).resolve().parent / "data" / "report_template.html"
 
 RELATION_TARGET_TYPES = {
     "BELONGS_TO": "Industry",
@@ -287,7 +287,9 @@ def build_graph_and_evidence(
             "title": f"{source} -> {target}",
             "quote": quote or "",
             "source": {
-                "name": source_name or ("DART filing" if origins else "Neo4j aggregate result"),
+                # The report renders name and reportName side by side, so only name the
+                # source when the filing itself is unidentified.
+                "name": "" if source_name else ("DART filing" if origins else "Neo4j aggregate result"),
                 "publisher": "DART" if origins else "",
                 "reportName": source_name,
                 "stockCode": str(origins[0]) if origins else "",
@@ -585,80 +587,6 @@ def export_question(question: str, *, graph=None, report_id: str | None = None) 
             graph.close()
 
 
-def render_report_html(payload: dict[str, Any], template_path: Path = DEFAULT_TEMPLATE) -> str:
-    """Return standalone report HTML with the JSON payload embedded."""
-    has_template = template_path.exists()
-    if has_template:
-        template = template_path.read_text(encoding="utf-8")
-    else:
-        template = "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>산업/거시 보고서</title></head><body></body></html>"
-    support_path = template_path.parent / "support.js"
-    if support_path.exists():
-        support_js = support_path.read_text(encoding="utf-8").replace("</script", "<\\/script")
-        template = template.replace(
-            '<script src="./support.js"></script>',
-            f"<script>\n{support_js}\n</script>",
-            1,
-        )
-    data = json.dumps(payload, ensure_ascii=False, indent=2).replace("</", "<\\/")
-    script = f'<script id="research-report-data" type="application/json">\n{data}\n</script>\n'
-    if not has_template:
-        script += _fallback_report_script()
-    marker = "</body>"
-    if marker not in template:
-        return template + "\n" + script
-    return template.replace(marker, script + marker, 1)
-
-
-def _fallback_report_script() -> str:
-    """Plain HTML renderer used when the DC/React runtime cannot boot."""
-    return r"""<script>
-setTimeout(() => {
-  if (document.getElementById('dc-root')) return;
-  const dataEl = document.getElementById('research-report-data');
-  if (!dataEl) return;
-  let payload;
-  try { payload = JSON.parse(dataEl.textContent || '{}'); } catch { return; }
-  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-  const answer = payload.answer || {};
-  const question = payload.question || {};
-  const metrics = payload.metrics || {};
-  const nodes = ((payload.graph || {}).nodes || []).slice(0, 40);
-  const edges = ((payload.graph || {}).edges || []).slice(0, 80);
-  const evidence = (payload.evidence || []).slice(0, 80);
-  const tags = (answer.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
-  const edgeRows = edges.map(e => `<tr><td>${esc(e.label || e.relation)}</td><td>${esc(e.source)}</td><td>${esc(e.target)}</td></tr>`).join('');
-  const evRows = evidence.map(ev => {
-    const src = ev.source || {};
-    const url = src.textFragmentUrl || src.url || '';
-    const link = url ? `<a href="${esc(url)}" target="_blank" rel="noreferrer">원문</a>` : '';
-    return `<article class="evidence"><b>[${esc(ev.ref || ev.id)}] ${esc(ev.title)}</b><p>${esc(ev.quote)}</p><small>${esc(src.name || src.reportName || 'GraphRAG 결과')} ${link}</small></article>`;
-  }).join('');
-  document.body.innerHTML = `
-    <style>
-      body{margin:0;background:#eceef3;color:#1b1e26;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-      main{max-width:1120px;margin:0 auto;padding:32px 22px 56px}
-      section{background:#fff;border:1px solid rgba(20,26,40,.08);border-radius:18px;padding:24px;margin-top:16px;box-shadow:0 8px 28px rgba(20,30,60,.07)}
-      h1{font-size:34px;margin:0 0 10px} h2{font-size:18px;margin:0 0 14px}
-      .meta,.muted{color:#6a7280;font-size:13px}.tag{display:inline-block;margin:4px;padding:7px 11px;border:1px solid #d9deea;border-radius:999px;font-weight:700;font-size:13px}
-      .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.metric{background:#f7f9fc;border-radius:12px;padding:14px}.metric b{display:block;font-size:24px}
-      table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px solid #edf0f5;padding:9px;text-align:left;vertical-align:top}
-      .evidence{border:1px solid #edf0f5;border-radius:12px;padding:14px;margin:10px 0;background:#fbfcfe}.evidence p{white-space:pre-line;line-height:1.6}
-      a{color:#2b53c0;text-decoration:none}
-    </style>
-    <main>
-      <div class="meta">GraphRAG · ${esc(payload.schemaVersion || 'research-report.v1')} · fallback renderer</div>
-      <section><h1>산업/거시 보고서</h1><p>${esc(question.text || '')}</p><p class="meta">${esc(payload.createdAt || '')} · ${esc(question.label || question.type || '')}</p></section>
-      <section><h2>답변 요약</h2><h3>${esc(answer.headline || '분석 결과')}</h3><p style="white-space:pre-line;line-height:1.75">${esc(answer.body || '')}</p><div>${tags}</div></section>
-      <section><h2>지표</h2><div class="metrics"><div class="metric">조회 행<b>${esc(metrics.rows || 0)}</b></div><div class="metric">노드<b>${esc(metrics.graphNodes || nodes.length)}</b></div><div class="metric">엣지<b>${esc(metrics.graphEdges || edges.length)}</b></div><div class="metric">근거<b>${esc(metrics.citations || evidence.length)}</b></div></div></section>
-      <section><h2>관계 그래프 데이터</h2><table><thead><tr><th>관계</th><th>출발</th><th>도착</th></tr></thead><tbody>${edgeRows}</tbody></table></section>
-      <section><h2>근거</h2>${evRows || '<p class="muted">근거 없음</p>'}</section>
-    </main>`;
-}, 1000);
-</script>
-"""
-
-
 def _write_stdout(text: str) -> None:
     """Write UTF-8 reliably on Windows consoles whose default encoding is cp949."""
     try:
@@ -677,7 +605,7 @@ def main() -> None:
     parser.add_argument(
         "--template",
         type=Path,
-        default=DEFAULT_TEMPLATE,
+        default=TEMPLATE_PATH,
         help="Report HTML template path.",
     )
     args = parser.parse_args()
