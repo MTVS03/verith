@@ -28,7 +28,7 @@ _REQ = {"ticker": TICKER, "query": "373220 기술적 흐름 분석", "client_ses
 _READ_MODEL_KEYS = {
     "report_id", "stock", "meta", "summary", "interpretation",
     "drivers", "signals", "risks", "charts", "verification", "trace_summary",
-    "trust_summary", "followup_count",
+    "trust_summary", "indicator_cards", "followup_count",
 }
 
 

@@ -10,6 +10,7 @@ API 가 반환/조회하는 report 는 AI 원본(output_payload)이며, 정규�
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -40,11 +41,14 @@ from src.api.schemas.report_archive import (
     ArchiveListResponse,
 )
 from src.api.schemas.technical_report import (
+    AnnotationBrief,
     ChartItem,
     ChartItemFull,
     ChartsBlock,
     DataQualityBlock,
     DriversBlock,
+    IndicatorCalcBasis,
+    IndicatorCard,
     FollowupContextBlock,
     FollowupCreateRequest,
     FollowupItem,
@@ -278,6 +282,7 @@ def build_read_model(
                     indicator=str(_d(s).get("indicator") or ""),
                     signal=_d(s).get("signal"),
                     value=_d(s).get("value"),
+                    weight=_d(s).get("weight"),
                     metrics=[str(m) for m in _list(_d(s).get("metrics"))],
                     detail=_d(s).get("detail"),
                     detail_source=_d(s).get("detail_source"),
@@ -307,6 +312,7 @@ def build_read_model(
         ),
         trace_summary=trace_summary,
         trust_summary=trust_summary,
+        indicator_cards=build_indicator_cards(raw, verified=not v_warning),
         followup_count=followup_count,
     )
 
@@ -502,6 +508,166 @@ def build_trace_detail(*, report: TechnicalReport) -> TechnicalTraceDetailReadMo
         ),
         steps=steps,
     )
+
+
+# ── indicator card projection (지표 카드 UI용 — projection only, 새 판단 없음) ──
+_INDICATOR_TITLE = {
+    "moving_average": "이동평균", "rsi": "RSI", "volume": "거래량",
+    "support_resistance": "지지·저항", "pattern": "패턴",
+}
+_SIGNAL_LABEL = {"positive": "긍정", "neutral": "중립", "negative": "부정"}
+# calc_basis.related_annotations 로 붙일 지표별 annotation kind.
+_INDICATOR_ANNOTATION_KINDS = {
+    "moving_average": {"golden_cross", "dead_cross"},
+    "rsi": {"rsi_overbought", "rsi_oversold"},
+    "volume": {"volume_spike"},
+    "support_resistance": {"support_touch", "resistance_touch"},
+    "pattern": set(),
+}
+# pattern 카드의 pattern_candidates 로 노출할 annotation kind(annotation-only 정책 — signal_score 무반영).
+_PATTERN_CANDIDATE_KINDS = {"cup_handle_candidate", "box_breakout_candidate", "box_range_candidate"}
+_NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_MA_ROWS = 8       # 카드 MA 표 최근 행 수
+_RSI_POINTS = 30   # RSI 스파크라인 포인트 수
+_VOL_BARS = 8      # 거래량 바 개수
+
+
+def _metric_num(metrics: list, prefix: str) -> float | None:
+    """metrics 칩에서 'prefix <숫자>' 형태의 값을 방어적으로 파싱(없으면 None — 조작 안 함)."""
+    for m in metrics:
+        if isinstance(m, str) and m.strip().startswith(prefix):
+            found = _NUM_RE.search(m[len(prefix):])
+            if found:
+                return float(found.group())
+    return None
+
+
+def _annotation_briefs(charts: list, kinds: set[str], *, limit: int | None = None) -> list[AnnotationBrief]:
+    """차트 annotation 중 kinds 를 카드용으로 요약. **최근(date desc) 순**, limit 이면 상위 N개만
+    (카드에 전 기간 전부를 덤프하지 않는다). period 는 부모 차트에서."""
+    out: list[AnnotationBrief] = []
+    for c in charts:
+        cd = _d(_d(c).get("chart_data"))
+        period = _d(c).get("period")
+        for a in _list(cd.get("annotations")):
+            a = _d(a)
+            if a.get("kind") in kinds:
+                out.append(AnnotationBrief(
+                    kind=str(a.get("kind")), label=a.get("label"), period=period,
+                    date=a.get("date"), importance=a.get("importance"),
+                    meta=(a.get("meta") if isinstance(a.get("meta"), dict) else None),
+                ))
+    out.sort(key=lambda b: (b.date or ""), reverse=True)   # 최근 우선
+    return out[:limit] if limit is not None else out
+
+
+def _daily_chart_data(charts: list) -> dict:
+    """카드 시계열의 원천 = 일봉 차트 chart_data(저장값). '1y' 우선, 없으면 최장 일봉(candle_unit 'D')."""
+    best: dict = {}
+    best_n = -1
+    for c in charts:
+        cd = _d(_d(c).get("chart_data"))
+        if cd.get("candle_unit") != "D":
+            continue
+        if _d(c).get("period") == "1y":
+            return cd
+        n = len(_list(cd.get("candles")))
+        if n > best_n:
+            best, best_n = cd, n
+    return best
+
+
+def _ma_series(cd: dict) -> tuple[list[dict], float | None]:
+    """overlays.moving_average(window별 points) → 최근 N행 [{date, ma5?, ma20?, ma60?}] + 20일 이격도(%)."""
+    series = _list(_d(cd.get("overlays")).get("moving_average"))
+    by_window: dict[int, dict[str, float]] = {}
+    for s in series:
+        s = _d(s)
+        w = s.get("window")
+        if isinstance(w, int):
+            by_window[w] = {str(_d(p).get("date")): _d(p).get("value") for p in _list(s.get("points"))}
+    dates = sorted({d for w in by_window.values() for d in w})[-_MA_ROWS:]
+    rows = [{"date": dt, "ma5": by_window.get(5, {}).get(dt),
+             "ma20": by_window.get(20, {}).get(dt), "ma60": by_window.get(60, {}).get(dt)}
+            for dt in dates]
+    disparity = None
+    candles = _list(cd.get("candles"))
+    cur_close = _d(candles[-1]).get("close") if candles else None
+    ma20_now = by_window.get(20, {}).get(dates[-1]) if dates else None
+    if isinstance(cur_close, (int, float)) and isinstance(ma20_now, (int, float)) and ma20_now:
+        disparity = round((cur_close - ma20_now) / ma20_now * 100, 2)
+    return rows, disparity
+
+
+def _calc_basis(indicator: str, value, metrics: list, charts: list) -> IndicatorCalcBasis:
+    cb = IndicatorCalcBasis(kind=indicator, current_value=value if isinstance(value, (int, float)) else None,
+                            metrics=[str(m) for m in metrics])
+    cd = _daily_chart_data(charts)
+    if indicator == "moving_average":
+        ma = {k: v for k, v in (("5", _metric_num(metrics, "5MA")), ("20", _metric_num(metrics, "20MA")),
+                                ("60", _metric_num(metrics, "60MA"))) if v is not None}
+        cb.ma = ma or None
+        if len(ma) == 3:
+            m5, m20, m60 = ma["5"], ma["20"], ma["60"]
+            cb.alignment = "정배열" if m5 > m20 > m60 else "역배열" if m5 < m20 < m60 else "혼조"
+        cb.recent_ma, cb.disparity_20_pct = _ma_series(cd)   # 일자별 MA 표 + 20일 이격도(저장값)
+    elif indicator == "rsi":
+        p = _metric_num(metrics, "RSI(")
+        cb.rsi_period = int(p) if p is not None else None
+        # "기준 35/70" → oversold/overbought
+        for m in metrics:
+            if isinstance(m, str) and "기준" in m:
+                nums = _NUM_RE.findall(m)
+                if len(nums) >= 2:
+                    cb.oversold, cb.overbought = float(nums[0]), float(nums[1])
+        pts = _list(_d(_d(cd.get("subcharts")).get("rsi")).get("points"))[-_RSI_POINTS:]
+        cb.rsi_recent_points = [{"date": _d(p).get("date"), "value": _d(p).get("value")} for p in pts]
+    elif indicator == "volume":
+        cb.relative_volume = _metric_num(metrics, "거래량비")
+        candles = _list(cd.get("candles"))
+        bars = candles[-_VOL_BARS:]
+        cb.volume_recent_bars = [{"date": _d(c).get("date"), "volume": _d(c).get("volume")} for c in bars]
+        cur_vol = _d(candles[-1]).get("volume") if candles else None
+        cb.current_volume = cur_vol if isinstance(cur_vol, (int, float)) else None
+        # 20일 평균 = 당일/상대거래량(신호가 쓴 비율 그대로 역산 → 재계산 drift 없음)
+        if cb.current_volume is not None and cb.relative_volume:
+            cb.avg_volume = round(cb.current_volume / cb.relative_volume, 1)
+    elif indicator == "support_resistance":
+        cb.support = _metric_num(metrics, "지지")
+        cb.resistance = _metric_num(metrics, "저항")
+        cur = cb.current_value
+        if cur is not None and cb.support is not None and cb.resistance is not None:
+            cb.position = ("지지 근접" if abs(cur - cb.support) < abs(cur - cb.resistance) else "저항 근접")
+    cb.related_annotations = _annotation_briefs(
+        charts, _INDICATOR_ANNOTATION_KINDS.get(indicator, set()), limit=3)  # 최근 3개 요약
+    return cb
+
+
+def build_indicator_cards(raw: dict, *, verified: bool) -> list[IndicatorCard]:
+    """technical_signals + charts annotations → 지표 카드 projection(계산 재실행 없음)."""
+    charts = _list(raw.get("charts"))
+    cards: list[IndicatorCard] = []
+    for s in _list(raw.get("technical_signals")):
+        s = _d(s)
+        ind = str(s.get("indicator") or "")
+        if not ind:
+            continue
+        metrics = _list(s.get("metrics"))
+        cards.append(IndicatorCard(
+            indicator=ind,
+            title=_INDICATOR_TITLE.get(ind, ind),
+            signal=s.get("signal"),
+            signal_label=_SIGNAL_LABEL.get(s.get("signal")),
+            weight=s.get("weight"),
+            llm_detail=s.get("detail"),
+            detail_source=s.get("detail_source"),
+            verified=verified,
+            code_metrics=[str(m) for m in metrics],
+            calc_basis=_calc_basis(ind, s.get("value"), metrics, charts),
+            pattern_candidates=(_annotation_briefs(charts, _PATTERN_CANDIDATE_KINDS, limit=6)
+                                if ind == "pattern" else []),
+        ))
+    return cards
 
 
 def _derive_status(raw: dict) -> tuple[str, bool, bool]:
