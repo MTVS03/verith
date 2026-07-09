@@ -643,6 +643,17 @@ def test_intraday_matches_as_of_helper():
     assert steps._intraday_matches_as_of(INTRADAY_CANDLES + _INTRADAY_OTHER_DATE, d) is False  # 일부만 다름
 
 
+def test_intraday_matches_as_of_uses_kst_date_for_tzaware():
+    """tz-aware as_of(UTC)는 KST 날짜로 비교한다. candle 은 KST 장 시각(2026-06-30 09:xx).
+
+    회귀: UTC 날짜로 비교하면 06-30 00:00~09:00 KST(=06-29 UTC) 구간에서 정상 당일 분봉이
+    전날로 어긋나 폐기됐다."""
+    from datetime import datetime, timezone
+    # 2026-06-30 00:30 KST == 2026-06-29 15:30 UTC → UTC.date()면 06-29(불일치), KST면 06-30(일치)
+    as_of_utc = datetime(2026, 6, 29, 15, 30, tzinfo=timezone.utc)
+    assert steps._intraday_matches_as_of(INTRADAY_CANDLES, as_of_utc) is True
+
+
 def test_intraday_date_match_included():
     out = _run(_INTRA, intraday_candles=INTRADAY_CANDLES)  # 2026-06-30 == as_of.date()
     assert {p.period.value for p in out.charts} == {"3m", "1y", "5y", "1d"}

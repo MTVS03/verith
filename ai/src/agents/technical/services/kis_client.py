@@ -18,7 +18,7 @@ import math
 import re
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from pydantic import ValidationError
@@ -68,6 +68,9 @@ REQUIRED_KIS_FIELDS = (
     KIS_FIELD_DATE, KIS_FIELD_OPEN, KIS_FIELD_HIGH, KIS_FIELD_LOW,
     KIS_FIELD_CLOSE, KIS_FIELD_VOLUME, KIS_FIELD_TRADING_VALUE,
 )
+
+# KIS 시장 시각 타임존(KST). 분봉 조회시각/당일 판정은 UTC가 아니라 장 시각 기준이어야 한다.
+KST = timezone(timedelta(hours=9))
 
 # ── 주식당일분봉조회 API (kis_mapping §12) — D/W/M과 별도 TR ────────────────────
 MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
@@ -613,13 +616,19 @@ class IntradayFetchResult:
 
 
 def _resolve_input_hour(as_of: date | datetime | None, input_hour: str | None) -> str:
-    """FID_INPUT_HOUR_1(HHMMSS). input_hour 우선, 없으면 as_of 시각, 그것도 없으면 현재 시각."""
+    """FID_INPUT_HOUR_1(HHMMSS). input_hour 우선, 없으면 as_of 시각, 그것도 없으면 현재 시각.
+
+    KIS 분봉 조회시각은 **KST(장 시각) 기준**이다. 백엔드가 as_of를 UTC(tz-aware)로 넘기면 그대로
+    HHMMSS를 뽑을 때 UTC 시각(예: 12:15 KST → 03:15)이 되어 장전으로 조회→전일 봉이 나온다. 따라서
+    tz-aware datetime은 **KST로 변환**해서 HHMMSS를 만든다(naive는 이미 KST로 간주 — 기존 동작 유지).
+    """
     if input_hour is not None:
         # 6자리 형식뿐 아니라 실제 시각까지 검증해 네트워크 호출 전에 fail-fast(256000 등 거부).
         return _validate_hhmmss(input_hour, field="input_hour")
     if isinstance(as_of, datetime):
-        return as_of.strftime("%H%M%S")
-    return datetime.now().strftime("%H%M%S")
+        kst = as_of.astimezone(KST) if as_of.tzinfo is not None else as_of
+        return kst.strftime("%H%M%S")
+    return datetime.now(KST).strftime("%H%M%S")
 
 
 def _hhmmss_minus_minute(hhmmss: str) -> str:

@@ -6,7 +6,7 @@ dedupe/sort·limit·빈 응답·high<low 거부, 그리고 헤더 tr_id·필수 
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -295,3 +295,24 @@ def test_request_header_tr_id_and_fid_params(monkeypatch):
     # 계좌번호는 요청에 없음(env 추가 없이 token/header 흐름 재사용)
     assert not any("ACCOUNT" in k.upper() for k in req["params"])
     assert not any("ACCOUNT" in k.upper() for k in req["headers"])
+
+
+# ── as_of(UTC) → KST 조회시각 변환 (1d intraday 실패 회귀) ──────────────────────
+def test_resolve_input_hour_converts_utc_to_kst():
+    """백엔드가 UTC(tz-aware) as_of를 넘기면 KIS 조회시각(HHMMSS)은 KST여야 한다.
+
+    회귀: 예전엔 UTC 시각을 그대로 넣어(12:15 KST→03:15) 장전 조회→전일 봉→날짜 가드 탈락으로
+    모든 리포트에서 1d가 사라졌다."""
+    utc_noon_kst = datetime(2026, 7, 9, 3, 15, 18, tzinfo=timezone.utc)  # = 12:15:18 KST
+    assert kc._resolve_input_hour(utc_noon_kst, None) == "121518"
+
+
+def test_resolve_input_hour_naive_datetime_unchanged():
+    """naive datetime 은 이미 KST로 간주 — 기존 동작 유지(변환 안 함)."""
+    assert kc._resolve_input_hour(datetime(2026, 7, 9, 12, 15, 18), None) == "121518"
+
+
+def test_resolve_input_hour_explicit_overrides_as_of():
+    """명시 input_hour 는 as_of/타임존과 무관하게 우선."""
+    utc_dt = datetime(2026, 7, 9, 3, 15, 18, tzinfo=timezone.utc)
+    assert kc._resolve_input_hour(utc_dt, "093000") == "093000"
