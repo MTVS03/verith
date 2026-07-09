@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>veriθ — Evidence-based AI Stock Research</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Pretendard', 'system-ui', 'sans-serif'],
+        },
+        colors: {
+          brand: {
+            50: '#f5f3ff', 100: '#edd8ff', 200: '#d9b3ff', 300: '#bc7eff', 400: '#9b42fc',
+            500: '#6366f1', 600: '#4f46e5', 700: '#3730a3', 800: '#312e81', 900: '#1e1b4b',
+          },
+          ink: {
+            50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1', 400: '#94a3b8',
+            500: '#64748b', 600: '#475569', 700: '#334155', 800: '#1e293b', 900: '#0f172a',
+          },
+          up: '#ef4444',     // Red for stock increase (Korean standard)
+          down: '#3b82f6',   // Blue for stock decrease (Korean standard)
+          good: '#10b981',   // Emerald green for confidence/verification
+        },
+        boxShadow: {
+          card: '0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.02)',
+          pop: '0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.08)',
+          float: '0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 10px 10px -5px rgba(15, 23, 42, 0.04)',
+        }
+      }
+    }
+  }
+</script>
+<style>
+  * { -webkit-font-smoothing: antialiased; }
+  body { font-family: 'Pretendard', system-ui, sans-serif; background: #f8fafc; color: #1e293b; }
+  .num { font-feature-settings: 'tnum' 1; font-variant-numeric: tabular-nums; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  
+  .screen-enter { animation: fadeUp 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .pulse-ring { animation: pulseGlow 2s infinite; }
+  @keyframes pulseGlow {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+    70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+
+  .typing span { animation: blink 1.2s infinite; }
+  @keyframes blink {
+    0%, 60%, 100% { opacity: 0.2; }
+    30% { opacity: 1; }
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+  /* Interactive Graph Styling */
+  .edge { transition: stroke 0.3s, stroke-width 0.3s; }
+  .node-group { transition: opacity 0.3s; }
+  .node-glow { transition: r 0.3s, opacity 0.3s; }
+  .node-group:hover .node-glow { opacity: 0.25; }
+
+  /* Glassmorphism utility */
+  .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+</style>
+</head>
+<body>
+<div id="app" class="flex h-screen w-screen overflow-hidden bg-slate-50"></div>
+<div id="overlay-root"></div>
+<div id="toast-root" class="fixed bottom-6 right-6 z-[100] flex flex-col gap-2.5 items-end"></div>
+
+<script>
+/* ============================================================ DATA MODEL */
+const DATA = {
+  user: { name: '김도현', email: 'dohyun.kim@kakao.com', plan: 'Pro Member', initials: '김' },
+  stocks: [
+    { t: '005930', n: '삼성전자', sec: '반도체', price: 89400, chg: 2.34, vol: 14238000, cap: '533.6조', per: 13.2, pbr: 1.42, ai: 94 },
+    { t: '000660', n: 'SK하이닉스', sec: '반도체', price: 214500, chg: 3.12, vol: 5120000, cap: '156.2조', per: 9.8, pbr: 1.88, ai: 91 },
+    { t: '005380', n: '현대차', sec: '자동차', price: 248500, chg: 1.45, vol: 1180000, cap: '52.0조', per: 5.1, pbr: 0.62, ai: 80 },
+    { t: '373220', n: 'LG에너지솔루션', sec: '2차전지', price: 412000, chg: -2.18, vol: 410000, cap: '96.4조', per: 42.7, pbr: 2.91, ai: 83 }
+  ],
+  prompts: [
+    '이 종목의 최근 실적과 컨센서스 대비 서프라이즈는?',
+    '동종 업계 대비 밸류에이션이 비싼가요?',
+    '최근 3개월 주요 공시와 리스크 요인을 정리해줘',
+    'HBM 관련 수주 모멘텀을 근거와 함께 분석해줘'
+  ],
+  reports: [
+    { id: 'r1', stock: '삼성전자', t: '005930', title: '삼성전자 HBM 경쟁력 및 2026 실적 전망', conf: 94, date: '2026-07-06', tag: '재무·뉴스', evid: 38, sec: '반도체', type: 1 },
+    { id: 'r2', stock: 'SK하이닉스', t: '000660', title: 'SK하이닉스 HBM4 양산 로드맵 점검', conf: 90, date: '2026-07-05', tag: '공시·기술', evid: 31, sec: '반도체', type: 2 },
+    { id: 'r3', stock: '현대차', t: '005380', title: '현대차 미국 IRA 영향 및 밸류에이션', conf: 84, date: '2026-07-03', tag: '정책·수출', evid: 27, sec: '자동차', type: 3 },
+    { id: 'r4', stock: 'LG에너지솔루션', t: '373220', title: 'LG엔솔 수주잔고와 전기차 둔화 리스크', conf: 79, date: '2026-07-01', tag: '리스크·시장', evid: 24, sec: '2차전지', type: 4 }
+  ]
+};
+DATA.byTicker = Object.fromEntries(DATA.stocks.map(s => [s.t, s]));
+
+/* Detailed contents for each report */
+const REPORT_CONTENTS = {
+  r1: {
+    executive: `삼성전자(005930)의 HBM3E 12단 양산 수율이 1분기 대비 크게 개선되며 엔비디아향 공급 비중이 하반기부터 급격히 확대될 전망입니다{cite-1}. 최근 외국인은 5거래일 연속 반도체 대형주를 순매수{cite-2}하며 업황 회복 기대감을 증명하고 있습니다. 에프앤가이드에 따르면 메모리 부문 영업이익 컨센서스는 전 분기 대비 12.4% 상향 조정{cite-3}되었습니다. 이에 따라 2026년 반도체 부문 전체 영업이익이 시장 기대치를 상회할 가능성이 매우 높음이 검증되었습니다{cite-4}.`,
+    citations: [
+      { id: 1, text: 'OpenDART 삼성전자 분기보고서 (2026.05.15)', desc: 'HBM3E 12단 양산 수율 개선 및 설비투자액 확인', type: '공시' },
+      { id: 2, text: 'KRX 투자자별 매매동향 통계 (2026.06.28)', desc: '외국인 대형 반도체주 5일 연속 순매수 기록', type: '시세' },
+      { id: 3, text: '에프앤가이드 상장사 실적 컨센서스 (2026.06.30)', desc: '반도체 부문 영업이익 예측값 12.4% 상향', type: '재무' },
+      { id: 4, text: '한국경제 - HBM3E 엔비디아 퀄 테스트 통과 임박 보도 (2026.06.29)', desc: '품질 검증 통과 및 공급 로드맵 확보', type: '뉴스' }
+    ],
+    financial: {
+      labels: ['2023', '2024', '2025', '2026E'],
+      sales: [258.9, 267.3, 289.5, 301.7],
+      profit: [6.6, 28.5, 35.4, 42.1],
+      stats: [
+        { label: '매출액', val: '301.7조원', chg: '+12.4% vs 2025' },
+        { label: '영업이익', val: '42.1조원', chg: '+38.2% vs 2025' },
+        { label: 'PER', val: '13.2배', chg: '동종업계 평균 14.8배 대비 저평가' },
+        { label: 'PBR', val: '1.42배', chg: '장부가치 대비 매력적인 밸류' }
+      ]
+    },
+    news: [
+      { sent: '긍정', text: '삼성전자, 엔비디아 HBM3E 12단 품질승인 최종 승인 임박', src: '한국경제', date: '2시간 전' },
+      { sent: '긍정', text: '반도체 외국인 순매수 지속 유입... 삼성전자 타겟', src: '연합인포맥스', date: '6시간 전' },
+      { sent: '중립', text: '범용 D램 고정거래가격 3분기 협상 관망세', src: '전자신문', date: '어제' },
+      { sent: '부정', text: '중국 CXMT 메모리 증설에 따른 범용 D램 공급 과잉 우려', src: '이데일리', date: '어제' }
+    ],
+    risks: [
+      { level: '높음', title: '범용 D램 공급 과잉', desc: '중국 업체의 중저가 D램 증설로 인한 가격 하락 우려', val: 70 },
+      { level: '중간', title: '환율 변동성 확대', desc: '원/달러 환율 급등락 시 수출 마진 영향', val: 45 },
+      { level: '낮음', title: '지정학적 무역 규제', desc: '미국 대선 결과에 따른 미·중 반도체 관세 조율', val: 25 }
+    ],
+    graph: {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '분기보고서', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '뉴스기사', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: 'HBM3E 수율', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: '엔비디아 공급', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '외인 순매수', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '2026 실적 개선', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '밸류에이션 매력', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' },
+        { from: 'n1', to: 'n4' },
+        { from: 'n2', to: 'n4' },
+        { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' },
+        { from: 'n4', to: 'n6' },
+        { from: 'n5', to: 'n7' },
+        { from: 'n6', to: 'n7' }
+      ]
+    }
+  },
+  r2: {
+    executive: `SK하이닉스(000660)는 HBM3E 시장에서의 독점적 지위를 유지하는 한편, TSMC와의 강력한 원팀 파트너십{cite-1}을 통해 HBM4(6세대) 2026년 하반기 양산 로드맵을 구체화하고 있습니다. 분기보고서에 따르면 신규 청주 M15X 팹 건설 및 설비투자(CAPEX) 확대{cite-2}가 차질 없이 실행 중입니다. 에프앤가이드는 2026년 영업이익 컨센서스를 28.2조원{cite-3}으로 상향했으며, 메모리 수급 호조가 지속될 시 어닝 서프라이즈 가능성이 상당 수준인 것으로 검증되었습니다{cite-4}.`,
+    citations: [
+      { id: 1, text: 'TSMC-SK하이닉스 기술 공동 로드맵 (2026.06.10)', desc: '공동 기술 연동 패키징 및 HBM4 인터포저 기술 합의', type: '공시' },
+      { id: 2, text: 'SK하이닉스 제78기 1분기 보고서 (2026.05.14)', desc: '청주 M15X 메모리 라인 인프라 투자 누계 확인', type: '공시' },
+      { id: 3, text: '에프앤가이드 애널리스트 실적 전망 집계 (2026.06.20)', desc: '영업이익 예측치 컨센서스 추이 상향 기록', type: '재무' },
+      { id: 4, text: '산업통상자원부 반도체 수출 통계 동향 (2026.07.01)', desc: '글로벌 HBM 및 서버용 메모리 해외 수출량 급증 확인', type: '통계' }
+    ],
+    financial: {
+      labels: ['2023', '2024', '2025', '2026E'],
+      sales: [32.7, 51.2, 62.4, 71.5],
+      profit: [-7.7, 16.1, 22.8, 28.2],
+      stats: [
+        { label: '매출액', val: '71.5조원', chg: '+14.5% vs 2025' },
+        { label: '영업이익', val: '28.2조원', chg: '+23.6% vs 2025' },
+        { label: 'PER', val: '9.8배', chg: '경쟁사 대비 낮은 멀티플' },
+        { label: 'PBR', val: '1.88배', chg: '보유 자산가치 대비 합리적 수준' }
+      ]
+    },
+    news: [
+      { sent: '긍정', text: 'SK하이닉스-TSMC, HBM4 공동 개발 동맹 강화 공식 발표', src: '매일경제', date: '3시간 전' },
+      { sent: '긍정', text: '2분기 반도체 대규모 흑자 전망에 기관 매매 순유입', src: '머니투데이', date: '5시간 전' },
+      { sent: '중립', text: '청주 M15X 반도체 공장 신축 인프라 조기 착공', src: '디일렉', date: '어제' },
+      { sent: '부정', text: '일각에서 제기되는 HBM 공급 과잉 리스크 보고서 논란', src: '조선비즈', date: '어제' }
+    ],
+    risks: [
+      { level: '중간', title: '설비투자 부담 누적', desc: '신규 팹 신축 및 전환 투자에 따른 CAPEX 재무 부담', val: 55 },
+      { level: '중간', title: '경쟁사 추격 격차 축소', desc: '경쟁사의 HBM3E 납품 본격화에 따른 판가 인하 압박', val: 50 },
+      { level: '낮음', title: '글로벌 인프라 병목', desc: '장비 공급 지연 및 엔지니어 확보 경쟁 과열', val: 20 }
+    ],
+    graph: {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '협력발표자료', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '분기보고서', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: 'HBM4 패키징', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: 'M15X 라인증설', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '서버 수출량', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '중장기 리더십', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '2026 실적 성장', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' },
+        { from: 'n2', to: 'n4' },
+        { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' },
+        { from: 'n4', to: 'n7' },
+        { from: 'n5', to: 'n7' },
+        { from: 'n6', to: 'n7' }
+      ]
+    }
+  },
+  r3: {
+    executive: `현대차(005380)는 미국 조지아주 메타플랜트(HMGMA)의 성공적인 가동에 따라 미국 IRA 세제 혜택 수혜율이 크게 상승할 전망입니다{cite-1}. 글로벌 전기차(EV) 둔화 장기화 시점을 하이브리드(HEV) 판매 다변화 및 차종 믹스 개선{cite-2}으로 극복하고 있습니다. 아울러 인도법인 IPO 추진에 따른 수조원대 특별 현금 확보{cite-3}와 강력한 자사주 매입 및 소각 조치가 상장사 밸류업 프로그램과 맞물려 저평가 극복을 이끌고 있습니다{cite-4}.`,
+    citations: [
+      { id: 1, text: '현대자동차 사업보고서 및 해외법인 투자공시 (2026.03.31)', desc: '미국 HMGMA 가동 현황 및 설비 투자 규모 공시', type: '공시' },
+      { id: 2, text: '미국 자동차 판매 집계 (Automotive News, 2026.06.05)', desc: '현대차 하이브리드 및 SUV 차종 전년 대비 18% 판매 증가율 확인', type: '통계' },
+      { id: 3, text: '현대차 인도법인 예비투자설명서 자료 (2026.06.15)', desc: '인도 증권거래소 예비 서류 검토 및 자금 조달 규모 산출', type: '공시' },
+      { id: 4, text: '금융위원회 상장사 밸류업 공시 점검 (2026.06.28)', desc: '현대차 자사주 환원 비중 및 자본 효율화 조치 부합도 검토', type: '공시' }
+    ],
+    financial: {
+      labels: ['2023', '2024', '2025', '2026E'],
+      sales: [162.7, 168.2, 175.4, 182.1],
+      profit: [15.1, 15.8, 16.5, 17.2],
+      stats: [
+        { label: '매출액', val: '182.1조원', chg: '+3.8% vs 2025' },
+        { label: '영업이익', val: '17.2조원', chg: '+4.2% vs 2025' },
+        { label: 'PER', val: '5.1배', chg: '동급 글로벌 자동차사 대비 매우 저평가' },
+        { label: 'PBR', val: '0.62배', chg: '순자산 가치 극도로 할인된 상태' }
+      ]
+    },
+    news: [
+      { sent: '긍정', text: '현대차 미국 하이브리드(HEV) 판매 비중 역대 최고 경신', src: '동아일보', date: '3시간 전' },
+      { sent: '긍정', text: '인도법인 10월 현지 상장 유력... 가치 25조원 육박', src: '서울경제', date: '6시간 전' },
+      { sent: '중립', text: '원화 절상 기조 변동에 따른 수출 마진 영향 관망세', src: '연합뉴스', date: '어제' },
+      { sent: '부정', text: '미국 관세 정책 불확실성 증대에 따른 장기적 규제 우려', src: '한겨레', date: '어제' }
+    ],
+    risks: [
+      { level: '높음', title: '미국 관세 및 대선 영향', desc: '대선 결과에 따른 친환경차 인센티브 변동 및 보호관세 리스크', val: 75 },
+      { level: '중간', title: '원화 강세 전환 리스크', desc: '달러 환율 추가 하락에 따른 분기별 수출 영업마진 감소', val: 40 },
+      { level: '낮음', title: '임금협상 및 노조 활동', desc: '파업 가능성에 따른 생산 라인 중단 리스크', val: 30 }
+    ],
+    graph: {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '해외투자보고서', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '인도법인공시', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: 'HMGMA 보조금', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: '하이브리드 판매', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '25조 IPO 자금', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '믹스 개선 완화', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '밸류업 저평가해소', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' },
+        { from: 'n1', to: 'n4' },
+        { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' },
+        { from: 'n4', to: 'n6' },
+        { from: 'n5', to: 'n7' },
+        { from: 'n6', to: 'n7' }
+      ]
+    }
+  },
+  r4: {
+    executive: `LG에너지솔루션(373220)은 유럽 전기차 시장 수요 둔화(캐즘) 영향으로 일시적 공장 가동률 조정을 거치고 있으나, 최근 대형 완성차향 대규모 LFP 배터리 공급 낙찰{cite-1}에 성공했습니다. 현재 수주잔고는 400조원 규모{cite-2}로 독점적 중장기 시장 점유율을 지지합니다. 양극재 가격 판가 연동 손실 리스크{cite-3}가 존재하나, GM 합작공장(얼티엄셀즈) 램프업과 미국 IRA AMPC 세액 공제 확보{cite-4}가 가속화되고 있습니다.`,
+    citations: [
+      { id: 1, text: 'LG에너지솔루션 신규 LFP 배터리 대규모 공급 수주 공시 (2026.05.15)', desc: '유럽 시장용 보급형 LFP 공급 단가 및 잔고 추정 확인', type: '공시' },
+      { id: 2, text: 'SNE Research 글로벌 EV 배터리 점유율 동향 (2026.06)', desc: '수주 잔고 400조원 규모 유지 상태 및 글로벌 생산 캐파 산출', type: '통계' },
+      { id: 3, text: 'LME 리튬/탄산 광물 원자재 현물 가격 일동향 (2026.06.25)', desc: '양극재 핵심 소재 현물가 변동으로 판가 마진 훼손 여부 산정', type: '통계' },
+      { id: 4, text: 'GM 얼티엄셀즈 오하이오 공장 가동 실적 집계 (2026.05)', desc: 'AMPC 세액 공제 분기 마진 환산액 4,200억원 계상 확인', type: '공시' }
+    ],
+    financial: {
+      labels: ['2023', '2024', '2025', '2026E'],
+      sales: [33.7, 31.5, 35.8, 39.2],
+      profit: [2.2, 1.6, 2.4, 2.9],
+      stats: [
+        { label: '매출액', val: '39.2조원', chg: '+9.5% vs 2025' },
+        { label: '영업이익', val: '2.9조원', chg: '+20.8% vs 2025' },
+        { label: 'PER', val: '42.7배', chg: '성장 멀티플이 반영된 수준' },
+        { label: 'PBR', val: '2.91배', chg: '북미 공장 가치 선투자 반영' }
+      ]
+    },
+    news: [
+      { sent: '긍정', text: 'LG엔솔 유럽 르노차에 창사 최초 LFP 배터리 양산 공급 계약', src: '아시아경제', date: '3시간 전' },
+      { sent: '중립', text: 'GM 합작공장 조율로 생산 가동률 적정선 하향 안정화', src: '뉴스1', date: '5시간 전' },
+      { sent: '부정', text: '테슬라 2분기 공급 부진에 따른 원통형 셀 공급 둔화', src: '헤럴드경제', date: '어제' },
+      { sent: '부정', text: '메탈가 하락 장기화로 인한 소재 판가 연동 평가 손실 발생', src: '파이낸셜뉴스', date: '어제' }
+    ],
+    risks: [
+      { level: '높음', title: '전기차 캐즘 수요 둔화', desc: '글로벌 완성차 메이커들의 EV 투자 지연에 따른 매출 성장 감속', val: 80 },
+      { level: '높음', title: '광물 원가 변동 여파', desc: '탄산리튬 현물 가격 약세 지속으로 배터리 판가 단기 하락', val: 65 },
+      { level: '중간', title: '유럽 내 중국산 LFP 공세', desc: '중국 배터리 제조사들의 유럽 무관세 우회 및 가격 압박', val: 48 }
+    ],
+    graph: {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: 'LFP수주공시', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '소재단가추이', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: '수주잔고 400조', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: 'AMPC 공제', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '원가 연동 손실', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '캐즘 실적 지연', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '하반기 이익 회복', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' },
+        { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n7' },
+        { from: 'n4', to: 'n7' },
+        { from: 'n5', to: 'n6' },
+        { from: 'n6', to: 'n7' }
+      ]
+    }
+  }
+};
+
+const STOCK_REPORT_TEMPLATES = {
+  '005930': [
+    { title: 'HBM 경쟁력 및 2026 실적 전망', tag: '재무/펀더멘탈', evid: 38, conf: 94, sec: '반도체' },
+    { title: '주가 기술적 분석 및 주요 지지선', tag: '가격/기술', evid: 25, conf: 89, sec: '반도체' },
+    { title: '실시간 뉴스 센티먼트 및 시장 루머', tag: '뉴스/심리', evid: 31, conf: 91, sec: '반도체' },
+    { title: '외국인/기관 순매수 수급 집중도', tag: '수급', evid: 18, conf: 83, sec: '반도체' },
+    { title: '반도체 업황 사이클 및 거시경제 영향', tag: '산업/거시', evid: 22, conf: 88, sec: '반도체' }
+  ],
+  '000660': [
+    { title: 'HBM4 양산 로드맵 및 수율 실적', tag: '재무/펀더멘탈', evid: 31, conf: 90, sec: '반도체' },
+    { title: '신고가 밸류에이션 및 기술적 매물대', tag: '가격/기술', evid: 27, conf: 86, sec: '반도체' },
+    { title: '메모리 공급 부족 오피니언 센티먼트', tag: '뉴스/심리', evid: 34, conf: 92, sec: '반도체' },
+    { title: '기관 집중 매수세 및 보유 비중 변동', tag: '수급', evid: 20, conf: 85, sec: '반도체' },
+    { title: '글로벌 AI 서버 수요 및 고배율 거시경제', tag: '산업/거시', evid: 19, conf: 81, sec: '반도체' }
+  ],
+  '005380': [
+    { title: 'HEV 믹스 개선 및 실적 마진 전망', tag: '재무/펀더멘탈', evid: 27, conf: 84, sec: '자동차' },
+    { title: '저PBR 할인율 및 차트 이동평균선', tag: '가격/기술', evid: 22, conf: 87, sec: '자동차' },
+    { title: '인도법인 IPO 흥행 가능성 여론 분석', tag: '뉴스/심리', evid: 29, conf: 89, sec: '자동차' },
+    { title: '주주환원 정책 연동 프로그램 수급 분석', tag: '수급', evid: 33, conf: 81, sec: '자동차' },
+    { title: '미국 대선 결과 시나리오 관세 거시경제', tag: '산업/거시', evid: 25, conf: 90, sec: '자동차' }
+  ],
+  '373220': [
+    { title: '르노 LFP 공급 수주 잔고 마진 전망', tag: '재무/펀더멘탈', evid: 24, conf: 79, sec: '2차전지' },
+    { title: '이차전지 캐즘 구간 기술적 반등 지지선', tag: '가격/기술', evid: 28, conf: 86, sec: '2차전지' },
+    { title: '전기차 캐즘 장기화 미디어 센티먼트', tag: '뉴스/심리', evid: 21, conf: 82, sec: '2차전지' },
+    { title: '유럽 경쟁사 수주 유치에 따른 수급 동향', tag: '수급', evid: 30, conf: 88, sec: '2차전지' },
+    { title: '글로벌 리튬 가격 연동 및 미 IRA 혜택', tag: '산업/거시', evid: 23, conf: 80, sec: '2차전지' }
+  ]
+};
+
+function generateReportContent(reportId, stock, typeIndex, title, tag, evid, conf) {
+  let executive = '';
+  let citations = [];
+  let financial = {
+    labels: ['2023', '2024', '2025', '2026E'],
+    sales: [stock.price * 0.003, stock.price * 0.0032, stock.price * 0.0035, stock.price * 0.0038],
+    profit: [stock.price * 0.0003, stock.price * 0.00035, stock.price * 0.0004, stock.price * 0.0005],
+    stats: []
+  };
+  let news = [];
+  let risks = [];
+  let graph = { nodes: [], edges: [] };
+  
+  if (typeIndex === 1) {
+    executive = `${stock.n}(${stock.t})의 차세대 라인 생산 수율 및 영업 마진 분석 결과, 하반기 영업이익률 개선이 가시적입니다{cite-1}. 주요 설비투자(CAPEX) 누적 예산 데이터베이스 확인 결과 해외 라인 증설에 예비 자금 12.5% 상향 투입이 승인되었습니다{cite-2}. 에프앤가이드 상장사 예측 컨센서스에 따르면 영업이익 상승 여력이 업종 평균을 상회합니다{cite-3}. 수출 물량 통계 및 장기 공급 계약 수치 또한 실적 반등세를 뒷받침합니다{cite-4}.`;
+    citations = [
+      { id: 1, text: `${stock.n} 최근 분기보고서`, desc: '핵심 공정 수율 개선 및 영업 마진 지표 파싱 완료', type: '공시' },
+      { id: 2, text: '금융감독원 OpenDART 주요사항보고서', desc: '해외 신공장 기계 설비 투자 누계액 교차 검증', type: '공시' },
+      { id: 3, text: '에프앤가이드 애널리스트 컨센서스 자료', desc: '영업이익 및 상장사 가치 예측 상향 변동 확인', type: '재무' },
+      { id: 4, text: '산업통상자원부 품목별 수출 실시간 통계', desc: '주요 제품군 해외 수출 가속화 지표 집계', type: '통계' }
+    ];
+    financial.stats = [
+      { label: '매출액(추정)', val: (stock.price * 0.0038).toFixed(1) + '조원', chg: '성장세 지속' },
+      { label: '영업이익(추정)', val: (stock.price * 0.0005).toFixed(1) + '조원', chg: '마진율 개선세' },
+      { label: 'PER', val: stock.per + '배', chg: '업계 평균 대비 밸류에이션 점검' },
+      { label: 'PBR', val: stock.pbr + '배', chg: '자산 비율 가치 대비 수준' }
+    ];
+    news = [
+      { sent: '긍정', text: `${stock.n}, 차세대 핵심 제품군 공급 논의 확대`, src: '매일경제', date: '3시간 전' },
+      { sent: '긍정', text: `외국인/기관 쌍끌이 매수세 유입으로 수급 개선`, src: '연합인포맥스', date: '5시간 전' },
+      { sent: '중립', text: '하반기 원자재 단가 변동 및 마진 영향 모니터링', src: '전자신문', date: '어제' },
+      { sent: '부정', text: '일부 부품 협력업체 단가 인상 압박 및 공급망 병목', src: '이데일리', date: '어제' }
+    ];
+    risks = [
+      { level: '높음', title: '글로벌 거시경제 변동성', desc: '금리 추이 및 외환 시장 변동에 따른 마진 변화 우려', val: 65 },
+      { level: '중간', title: '경쟁사 점유율 침투', desc: '유사 부문 신규 진입 가중으로 가격 경쟁 심화 우려', val: 50 },
+      { level: '낮음', title: '규제 요건 변화', desc: '환경 및 규제 법률 변경으로 인한 비용 가중 가능성', val: 30 }
+    ];
+    graph = {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '분기보고서', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '뉴스기사', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: '수급 개선', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: '신제품 공급', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '마진 분석', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '실적 안정성', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '가치 상승', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' }, { from: 'n1', to: 'n4' }, { from: 'n2', to: 'n4' }, { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' }, { from: 'n4', to: 'n6' }, { from: 'n5', to: 'n7' }, { from: 'n6', to: 'n7' }
+      ]
+    };
+  } else if (typeIndex === 2) {
+    executive = `${stock.n}(${stock.t})의 글로벌 피어 그룹 대비 현재 밸류에이션 지표를 비교 분석한 결과, 저평가 영역에 머물러 있습니다{cite-1}. 동종 업계 평균 PER 배수가 15.6배인 반면, 본 기업은 PER ${stock.per}배 수준으로 할인 거래 중입니다{cite-2}. 자산 가치 평가 척도인 PBR 역시 업계 중앙값인 1.6배에 비해 상대적으로 낮은 ${stock.pbr}배를 유지하고 있습니다{cite-3}. 주주환원 강도 및 이행률 데이터를 매핑해 보면 향후 멀티플의 점진적 상향 가능성이 검증됩니다{cite-4}.`;
+    citations = [
+      { id: 1, text: '글로벌 동종업계 멀티플 데이터베이스', desc: '글로벌 피어 그룹과의 가치 지표 1:1 비교 스캔', type: '통계' },
+      { id: 2, text: '상장사 밸류에이션 모니터링 공시', desc: 'PER 가치 배수의 글로벌 업계 중앙값 산출 비교', type: '재무' },
+      { id: 3, text: '한국거래소(KRX) 장부가치 공시 자료', desc: '주당 순자산 가치 비율 및 PBR 할인 여부 검증', type: '공시' },
+      { id: 4, text: '금융위원회 기업가치 제고(밸류업) 공시 가이드', desc: '주주 환원비율 및 자사주 소각 이행 능력 검토', type: '공시' }
+    ];
+    financial.stats = [
+      { label: '현재 PER 배수', val: stock.per + '배', chg: '피어 평균 15.6배 대비 저평가' },
+      { label: '현재 PBR 배수', val: stock.pbr + '배', chg: '피어 평균 1.62배 대비 할인' },
+      { label: '자기자본이익률(ROE)', val: '12.4%', chg: '안정적인 자본 이익 창출력' },
+      { label: '배당수익률', val: '2.8%', chg: '주주 환원 배당 여력 확대' }
+    ];
+    news = [
+      { sent: '긍정', text: '외국계 투자기관, "기업가치 저평가 매력적 구간 진입" 분석', src: '한국경제', date: '4시간 전' },
+      { sent: '긍정', text: '정부 밸류업 프로그램 부합을 위한 로드맵 조기 발표 예고', src: '매일경제', date: '어제' },
+      { sent: '중립', text: '기관 매도세 둔화에 따른 수급 반등 가능성 점검', src: '머니투데이', date: '어제' },
+      { sent: '부정', text: '글로벌 경기 둔화 우려로 대형주 업종 멀티플 동반 디레이팅 우려', src: '이데일리', date: '2일 전' }
+    ];
+    risks = [
+      { level: '중간', title: '글로벌 멀티플 디레이팅', desc: '글로벌 매크로 하강 시 시장 평균 밸류에이션 동반 하강 리스크', val: 55 },
+      { level: '낮음', title: '공시 로드맵 이행 지연', desc: '자본 계획 세부안 조율 과정에서의 일시적 공백', val: 20 }
+    ];
+    graph = {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '피어데이터', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '밸류업가이드', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: 'PER 저평가', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: 'PBR 할인율', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '주주환원력', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '가치 할증 대상', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '장기 상승 모멘텀', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' }, { from: 'n1', to: 'n4' }, { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' }, { from: 'n4', to: 'n6' }, { from: 'n5', to: 'n7' }, { from: 'n6', to: 'n7' }
+      ]
+    };
+  } else if (typeIndex === 3) {
+    executive = `${stock.n}(${stock.t})의 원자재 공급망 및 대외 지정학적 리스크 요인을 교차 분석한 결과, 장기 수주 잔고 기반을 통해 이익 방어력을 안정적으로 갖추고 있습니다{cite-1}. 주요 부품 원천가 동향 및 운임 지표를 점검한 결과 공급망 수수료 및 단가 인상 압박 요인이 일부 관측됩니다{cite-2}. 미국 현지 생산 라인 보조금 세액공제 금액 집계 결과 실질 비용 절감 혜택이 예상 범위 내에 위치하고 있으며{cite-3}, 외환 위험 관리 능력을 종합 스캔한 결과 단기적 마진 급락 가능성은 매우 낮음이 검증되었습니다{cite-4}.`;
+    citations = [
+      { id: 1, text: '글로벌 원자재 광물 현물가 거래 보고서', desc: '핵심 원소재 및 부품 수급 단가 장기 추이 분석', type: '통계' },
+      { id: 2, text: '해상 화물 상하이 컨테이너 운임지수(SCFI)', desc: '지정학적 리스크에 따른 글로벌 물류 운송 비용 산출', type: '통계' },
+      { id: 3, text: '미국 상무부 현지 공장 보조금 세액공제 공시', desc: 'IRA 연계 생산 수혜액 및 자본 비용 차감 효과 확인', type: '공시' },
+      { id: 4, text: '한국은행 금융안정보고서 외환 마진 분석', desc: '환율 급변에 따른 수출 기업 외환 방어 능력 스캔', type: '재무' }
+    ];
+    financial.stats = [
+      { label: '원가 연동률', val: '76.2%', chg: '원자재 변동 위험 방어 우수' },
+      { label: '공급망 보조금 수혜', val: '연간 2.4조원 추정', chg: '생산 원가 보조 효과 유효' },
+      { label: '물류 비용 비중', val: '매출액 대비 3.1%', chg: '운임 지수 급변에 따른 마진 방어' },
+      { label: '외환 헷징 비율', val: '82%', chg: '환율 변동 충격 차단 우수' }
+    ];
+    news = [
+      { sent: '긍정', text: '원자재 수급선 동남아/호주 다변화 계약 체결 완료', src: '연합뉴스', date: '3시간 전' },
+      { sent: '부정', text: '글로벌 환경 규제 기준 강화로 현지 공장 추가 비용 발생 가능성', src: '한겨레', date: '어제' },
+      { sent: '중립', text: '주요 부품 협력사의 단가 협상 개시 소식 확인', src: '전자신문', date: '어제' },
+      { sent: '부정', text: '일부 해상 항로 운임 상승 압박으로 운송 지연 가능성 스캔', src: '이데일리', date: '2일 전' }
+    ];
+    risks = [
+      { level: '높음', title: '무역 보호관세 리스크', desc: '해외 주요국 무역 조치 변화 시 관세 상향에 따른 단가 상승 우려', val: 78 },
+      { level: '중간', title: '부품 원가 마진 압박', desc: '협력업체 부품 공급가 상승 시 영업마진 일시 수축 위험', val: 55 }
+    ];
+    graph = {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '원광물현물', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '운임지수SCFI', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: '수급 다변화', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: '세액공제 수혜', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '외환헷징완료', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '단기 비용 방어', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '이익 방어 견고', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' }, { from: 'n1', to: 'n4' }, { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' }, { from: 'n4', to: 'n6' }, { from: 'n5', to: 'n7' }, { from: 'n6', to: 'n7' }
+      ]
+    };
+  } else if (typeIndex === 4) {
+    executive = `${stock.n}(${stock.t})의 공시 내용 및 지배구조 감사 보고서를 다각도 매핑한 결과, 이사회의 책임 경영 및 의사결정의 독립성이 입증되었습니다{cite-1}. 주요 공시된 주주가치 제고 방안에 따라 자사주 소각 예정 시기 및 규모를 분석한 결과, 주당 가치 증대에 충분한 규모임이 검증되었습니다{cite-2}. 거버넌스 투명성 평가 점수를 확인해 보면 업계 우수 등급에 위치해 있으며{cite-3}, 내부 통제 규정 준수 여부를 교차 검증한 결과 잠재 법률 리스크나 경영권 분쟁 등의 부정적 팩터는 발견되지 않았습니다{cite-4}.`;
+    citations = [
+      { id: 1, text: '이사회 의결 주요사항공시 및 감사보고서', desc: '이사회 사외이사 비율 및 독립성 기준 준수 여부 스캔', type: '공시' },
+      { id: 2, text: '자사주 매입 소각 예정일자 의결 공시', desc: '주주가치 극대화를 위한 자본 감소 공시 진위 판정', type: '공시' },
+      { id: 3, text: 'ESG 거버넌스 투명성 외부 평가 데이터', desc: '지배구조 투명성 및 주주권리 보호 등급 통계 분석', type: '통계' },
+      { id: 4, text: '법무법인 공시 소송 현황 및 법률 검토 보고서', desc: '의결권 권리 행사 지장 초래 법적 위험 확인', type: '공시' }
+    ];
+    financial.stats = [
+      { label: '사외이사 비율', val: '62.5%', chg: '과반 이상 확보로 의사 독립 우수' },
+      { label: '자사주 소각 규모', val: '약 1.5조원 계획', chg: '주당 장부가치 증가 기대' },
+      { label: '감사 의견', val: '적정', chg: '회계 투명성 확보 준수 완료' },
+      { label: '잠재 소송 발생 건수', val: '0건', chg: '사법적 경영 변동성 리스크 없음' }
+    ];
+    news = [
+      { sent: '긍정', text: '자사주 소각 결정을 통한 지배구조 신뢰 강화', src: '한국경제', date: '3시간 전' },
+      { sent: '긍정', text: '글로벌 지배구조 자문사, 안건 찬성 표명 권고', src: '매일경제', date: '어제' },
+      { sent: '중립', text: '정기 주주총회 안건 분석 및 사외이사 임용 이력 검증', src: '머니투데이', date: '어제' },
+      { sent: '부정', text: '소액주주 연대, 배당성향 추가 상향 요구 의견 제시', src: '이데일리', date: '2일 전' }
+    ];
+    risks = [
+      { level: '낮음', title: '주총 표대결 리스크', desc: '주요 우호 지분 구조 상 결의 안건 통과 무난할 것으로 예상', val: 15 },
+      { level: '낮음', title: '거버넌스 단기 변동성', desc: '신규 사내외이사 영입에 따른 전략 조율 단계 리스크', val: 10 }
+    ];
+    graph = {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '이사회공시', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '자사주공시', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: '의사결정독립', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: '자사주소각', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '회계감사적정', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '투명 거버넌스', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '책임경영안정', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' }, { from: 'n1', to: 'n4' }, { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' }, { from: 'n4', to: 'n6' }, { from: 'n5', to: 'n7' }, { from: 'n6', to: 'n7' }
+      ]
+    };
+  } else {
+    executive = `${stock.n}(${stock.t})의 주체별 수급 매수 데이터 및 뉴스 센티먼트 빅데이터를 스캔한 결과, 외국인과 기관의 쌍끌이 지분율 상승이 뚜렷합니다{cite-1}. 주요 금융투자 거래원 매매 대장 기록 확인 결과, 최근 5거래일 누적 외국인 보유율이 1.2% 포인트 상승했습니다{cite-2}. 뉴스 기사 감성 분류 점수를 머신러닝 스코어로 측정해 보면 긍정 비율이 74%로 나타나 시장의 기대가 매우 긍정적입니다{cite-3}. 일부 단기 매도 거래 대금 압박이 존재하나, 기술적 매수 대기 잔량이 충분하여 변동성 지지력이 높음이 검증되었습니다{cite-4}.`;
+    citations = [
+      { id: 1, text: '한국거래소(KRX) 주체별 순매수 데이터베이스', desc: '최근 5거래일간 투자자 유형별 매매 동향 스캔', type: '통계' },
+      { id: 2, text: '거래소 지정 메이저 거래원 매매 창구 대장', desc: '주요 외국계/기관 증권사 주문 계약 입출 누계 분석', type: '통계' },
+      { id: 3, text: '최근 3일 대형 언론사 증권 뉴스 오피니언 분석', desc: '실시간 미디어 단어 긍부정 비율 점수 계산', type: '통계' },
+      { id: 4, text: '투자자별 매도 주문 호가창 주문 잔량 기록', desc: '하단 지지 가격대 형성 매수 주문 깊이 검증', type: '통계' }
+    ];
+    financial.stats = [
+      { label: '외인 순매수 금액', val: '최근 5일 +3,200억원', chg: '매수 우위 흐름 지속' },
+      { label: '기관 순매수 금액', val: '최근 5일 +1,800억원', chg: '동반 매수 유입 유효' },
+      { label: '뉴스 감성 점수', val: '긍정 74% (매우 긍정)', chg: '시장 기대감 및 호감 우세' },
+      { label: '매수 대기 호가비율', val: '1.45배', chg: '하단 지지선 매수 압력 공고' }
+    ];
+    news = [
+      { sent: '긍정', text: '외인 매수세 지속 유입되며 기술적 주가 지지선 돌파 기대', src: '머니투데이', date: '3시간 전' },
+      { sent: '긍정', text: '글로벌 업황 턴어라운드 분석 리포트 배포 소식', src: '연합뉴스', date: '5시간 전' },
+      { sent: '중립', text: '하반기 공시 대기 정보 분석을 위한 거래원 관망세 관측', src: '전자신문', date: '어제' },
+      { sent: '부정', text: '단기 차익 실현 목적의 기관 일부 물량 매물 저항 확인', src: '이데일리', date: '어제' }
+    ];
+    risks = [
+      { level: '중간', title: '차익 매물 출회 가능성', desc: '단기 저항선 진입 시 일부 기관 투자자 차익 성격 매도 매물 출회 우려', val: 45 },
+      { level: '낮음', title: '단기 수급 불균형', desc: '거래량 일시 급감 시 호가 스프레드 확대에 따른 가격 흔들림', val: 20 }
+    ];
+    graph = {
+      nodes: [
+        { id: 'n1', x: 60, y: 50, label: '거래소수급', type: 'source', color: '#3b82f6' },
+        { id: 'n2', x: 60, y: 150, label: '뉴스감성빅데이터', type: 'source', color: '#3b82f6' },
+        { id: 'n3', x: 230, y: 40, label: '외인기관매수', type: 'fact', color: '#10b981' },
+        { id: 'n4', x: 230, y: 100, label: '기대감우세', type: 'fact', color: '#10b981' },
+        { id: 'n5', x: 230, y: 160, label: '매수잔량충분', type: 'fact', color: '#10b981' },
+        { id: 'n6', x: 400, y: 70, label: '수급 지지 공고', type: 'conclusion', color: '#4f46e5' },
+        { id: 'n7', x: 400, y: 130, label: '상승 기대감 확대', type: 'conclusion', color: '#4f46e5' }
+      ],
+      edges: [
+        { from: 'n1', to: 'n3' }, { from: 'n1', to: 'n4' }, { from: 'n2', to: 'n5' },
+        { from: 'n3', to: 'n6' }, { from: 'n4', to: 'n6' }, { from: 'n5', to: 'n7' }, { from: 'n6', to: 'n7' }
+      ]
+    };
+  }
+  
+  REPORT_CONTENTS[reportId] = { executive, citations, financial, news, risks, graph };
+}
+
+/* ============================================================ HELPERS */
+const $ = (s, r = document) => r.querySelector(s);
+const won = n => '₩' + n.toLocaleString('ko-KR');
+const pct = c => (c >= 0 ? '+' : '') + c.toFixed(2) + '%';
+const chgColor = c => c > 0 ? 'text-up' : (c < 0 ? 'text-down' : 'text-slate-500');
+const chgBg = c => c > 0 ? 'bg-red-50 text-up border border-red-100' : (c < 0 ? 'bg-blue-50 text-down border border-blue-100' : 'bg-slate-100 text-slate-500 border border-slate-200');
+const icon = (name, cls = 'w-5 h-5') => `<i data-lucide="${name}" class="${cls}"></i>`;
+function refreshIcons() { if (window.lucide) lucide.createIcons(); }
+function mount(html) { $('#app').innerHTML = html; refreshIcons(); }
+
+let STATE = { screen: 'research', params: {}, charts: [] };
+
+function destroyCharts() {
+  STATE.charts.forEach(c => { try { c.destroy() } catch (e) {} });
+  STATE.charts = [];
+}
+
+/* ---- Toast Notification ---- */
+function toast(msg, type = 'success') {
+  const colors = { success: ['#10b981', 'check-circle'], info: ['#4f46e5', 'info'], error: ['#ef4444', 'alert-circle'] };
+  const [col, ic] = colors[type] || colors.success;
+  const el = document.createElement('div');
+  el.className = 'toast-in flex items-center gap-3 bg-white/95 backdrop-blur-md shadow-float rounded-xl pl-3 pr-4 py-3 border border-slate-200/80 min-w-[280px] transition-all duration-300';
+  el.style.transform = 'translateY(12px)';
+  el.style.opacity = '0';
+  el.innerHTML = `
+    <span class="grid place-items-center w-8 h-8 rounded-lg" style="background:${col}1a;color:${col}">
+      ${icon(ic, 'w-4.5 h-4.5')}
+    </span>
+    <span class="text-sm font-semibold text-slate-800">${msg}</span>
+  `;
+  $('#toast-root').appendChild(el);
+  refreshIcons();
+  
+  // Animate in
+  setTimeout(() => {
+    el.style.transform = 'none';
+    el.style.opacity = '1';
+  }, 10);
+  
+  // Remove
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(8px)';
+    setTimeout(() => el.remove(), 300);
+  }, 3000);
+}
+
+/* ---- Overlay Overlay Manager ---- */
+function closeOverlay() { $('#overlay-root').innerHTML = ''; }
+
+function resetToHome() {
+  PIPELINE.completed = false;
+  PIPELINE.queryText = '';
+  PIPELINE.generatedReports = [];
+  navigate('research');
+}
+
+/* ============================================================ APP SHELL */
+function shell(activeId, content) {
+  return `
+  <div class="flex flex-col h-screen w-screen overflow-hidden bg-slate-50">
+    <!-- Top Navigation Bar -->
+    <header class="h-16 shrink-0 bg-white border-b border-slate-200/80 flex items-center justify-between px-6 z-20 shadow-sm">
+      <div class="flex items-center gap-8">
+        <!-- Logo -->
+        <div onclick="resetToHome()" class="flex items-center gap-2 cursor-pointer hover:opacity-80 transition">
+          <div class="w-8 h-8 rounded-lg bg-indigo-600 grid place-items-center text-white font-bold text-lg" style="font-family:'Pretendard'">θ</div>
+          <span class="text-[19px] font-bold tracking-tight text-slate-900">veri<span class="text-indigo-600">θ</span></span>
+          <span class="ml-1 text-[9px] font-semibold text-slate-400 border border-slate-200 rounded px-1.5 py-0.5 leading-none">BETA</span>
+        </div>
+        
+        <!-- Navigation Tabs -->
+        <nav class="flex items-center gap-1.5">
+          <button onclick="navigate('research')" class="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition duration-150 ${activeId === 'research' ? 'bg-slate-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}">
+            ${icon('sparkles', 'w-3.5 h-3.5')}
+            <span>AI Research</span>
+          </button>
+          <button onclick="navigate('library')" class="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition duration-150 ${activeId === 'library' ? 'bg-slate-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}">
+            ${icon('archive', 'w-3.5 h-3.5')}
+            <span>Library</span>
+          </button>
+          <button onclick="navigate('reports')" class="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition duration-150 ${activeId === 'reports' ? 'bg-slate-100 text-indigo-600' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}">
+            ${icon('file-text', 'w-3.5 h-3.5')}
+            <span>Reports</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- Right Context Indicator -->
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider" id="header-stock-name">분석 요청 시스템</span>
+      </div>
+    </header>
+
+    <!-- Main Workspace Area -->
+    <main id="main" class="flex-1 overflow-y-auto bg-slate-50">
+      ${content}
+    </main>
+  </div>`;
+}
+
+/* ============================================================ AI RESEARCH TAB */
+const PIPELINE = {
+  ticker: '005930',
+  steps: [
+    { k: 'planning', label: 'Planning', desc: 'Supervisor가 분석 쿼리를 하위 작업 분해 중...', ic: 'git-branch' },
+    { k: 'financial', label: 'Searching Financial Data', desc: 'OpenDART 데이터베이스 실시간 연동 중...', ic: 'database' },
+    { k: 'news', label: 'Searching News', desc: '시장 뉴스 및 미디어 오피니언 센티먼트 분류 중...', ic: 'newspaper' },
+    { k: 'graph', label: 'Building Graph', desc: 'GraphRAG 연결성 분석 및 홉 추론 증거 맵 구축 중...', ic: 'git-fork' },
+    { k: 'verify', label: 'Verifying Evidence', desc: '모든 수치 주장의 교차 증거 신뢰성 검증 중...', ic: 'shield-check' },
+    { k: 'report', label: 'Generating Report', desc: '출처 표기 노드 맵핑 및 최종 리포트 패키징 중...', ic: 'file-text' }
+  ],
+  running: false,
+  completed: false,
+  queryText: '',
+  generatedReports: [],
+  timer: null
+};
+
+function renderResearch() {
+  const stock = DATA.byTicker[PIPELINE.ticker];
+  const content = `
+  <div class="h-full flex flex-col screen-enter">
+    <div id="chat-scroll-area" class="flex-1 overflow-y-auto px-8 py-8">
+      <div id="intro-screen" class="max-w-3xl mx-auto flex flex-col items-center justify-center min-h-[50vh] text-center ${PIPELINE.completed ? 'hidden' : ''}">
+        <div class="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 grid place-items-center mb-6 shadow-md shadow-indigo-100">
+          ${icon('sparkles', 'w-8 h-8')}
+        </div>
+        <h1 class="text-3xl font-extrabold tracking-tight text-slate-900 leading-tight">근거 검증 기반 AI 리서치</h1>
+        <p class="text-slate-500 text-sm mt-3 max-w-lg leading-relaxed">원하시는 종목과 질문을 입력해 주세요. 실시간 공시 데이터, 정합성 뉴스, 분석 지표를 추적하여 검증된 리포트를 즉시 생성합니다.</p>
+        
+        <!-- Removed Prompt Suggestions -->
+      </div>
+
+      <!-- Chat conversation panel (hidden initially, shown during search) -->
+      <div id="conversation-panel" class="max-w-3xl mx-auto space-y-6 ${PIPELINE.completed ? '' : 'hidden'}">
+        <div id="user-msg-bubble" class="flex justify-end items-start gap-3">
+          <div class="bg-slate-900 text-white rounded-2xl rounded-tr-md px-5 py-3.5 max-w-[80%] text-[14.5px] leading-relaxed shadow-md">
+            <p id="user-query-text">${PIPELINE.queryText || ''}</p>
+          </div>
+        </div>
+
+        <div id="ai-response-container" class="flex gap-4">
+          <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white font-bold grid place-items-center text-sm shadow-md shrink-0">θ</div>
+          <div class="flex-1 space-y-4">
+            <!-- Pipeline Box -->
+            <div id="pipeline-box" class="bg-white rounded-2xl border border-slate-200/80 shadow-pop overflow-hidden ${PIPELINE.completed ? 'hidden' : ''}">
+              <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="relative flex w-2 h-2">
+                    <span class="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 animate-ping"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-600"></span>
+                  </span>
+                  <span class="text-[13.5px] font-bold text-slate-800">멀티에이전트 파이프라인 분석 중</span>
+                </div>
+                <span id="pipe-pct" class="text-sm font-extrabold text-indigo-600 num">0%</span>
+              </div>
+              <div class="px-5 py-4 space-y-3.5 bg-slate-50/50">
+                <div class="h-2 bg-slate-200/60 rounded-full overflow-hidden">
+                  <div id="pipe-progress-bar" class="h-full bg-indigo-600 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="space-y-1.5" id="pipeline-steps-list">
+                  ${PIPELINE.steps.map((s, idx) => `
+                    <div id="step-${idx}" class="flex items-start gap-3 p-2 rounded-xl transition duration-150 opacity-40">
+                      <span id="step-ico-${idx}" class="w-7 h-7 rounded-lg bg-slate-100 text-slate-400 grid place-items-center mt-0.5">
+                        ${icon(s.ic, 'w-4 h-4')}
+                      </span>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-[12.5px] font-bold text-slate-700" id="step-label-${idx}">${s.label}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 leading-snug">${s.desc}</div>
+                      </div>
+                      <span id="step-status-${idx}" class="text-[11px] font-bold text-slate-400 mt-0.5">대기 중</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+
+            <!-- AI Final response message (hidden during progress) -->
+            <div id="ai-final-message" class="bg-white rounded-2xl border border-slate-200/80 shadow-md p-5 space-y-4 ${PIPELINE.completed ? '' : 'hidden'}">
+              <p class="text-[14.5px] leading-relaxed text-slate-700 font-medium" id="ai-success-text"></p>
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-emerald-50/50 rounded-xl border border-emerald-100">
+                <div class="flex items-center gap-3">
+                  <span class="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-600 grid place-items-center shrink-0">
+                    ${icon('shield-check', 'w-5 h-5')}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs font-bold text-emerald-800">검증 완료 리포트 구성 완료</div>
+                    <div class="text-[10.5px] text-emerald-600 mt-0.5 font-medium" id="ai-report-meta"></div >
+                  </div>
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap" id="generated-report-buttons-container">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Composer Form Area -->
+    <div class="shrink-0 border-t border-slate-200/80 bg-white p-5">
+      <div class="max-w-3xl mx-auto">
+        <div class="bg-slate-50 border border-slate-200 shadow-card focus-within:border-indigo-400 focus-within:bg-white transition-all duration-200 rounded-2xl p-3 flex flex-col">
+          <textarea id="query-textarea" rows="2" placeholder="종목에 대해 궁금한 점을 적고 분석 요청을 하세요..." oninput="autoGrowTextarea(this)" class="w-full bg-transparent outline-none resize-none text-[14.5px] px-2 text-slate-800 placeholder-slate-400 leading-relaxed"></textarea>
+          
+          <div class="flex items-center justify-between border-t border-slate-200/60 mt-3 pt-3">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-slate-400 flex items-center gap-1">
+                ${icon('shield-check', 'w-3.5 h-3.5 text-emerald-500')} Verification Gate ON
+              </span>
+            </div>
+            
+            <button onclick="startReportGeneration()" id="query-submit-btn" class="w-10 h-10 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center justify-center shadow-md transition disabled:opacity-40">
+              ${icon('arrow-up', 'w-5 h-5')}
+            </button>
+          </div>
+        </div>
+        <p class="text-[10.5px] text-slate-400 text-center mt-2.5">veriθ의 AI 리포트는 출처가 매핑된 사실 정보만 제공하며, 최종 투자 결정은 투자자 본인의 판단하에 이루어져야 합니다.</p>
+      </div>
+    </div>
+  </div>`;
+  
+  mount(shell('research', content));
+  $('#header-stock-name').textContent = `AI 실시간 분석 리서치`;
+  
+  if (PIPELINE.completed) {
+    $('#ai-success-text').textContent = `질문하신 "${stock.n}" 분석 결과, 총 ${PIPELINE.generatedReports.length}개의 리포트가 성공적으로 생성되었습니다. 각 리포트의 신뢰 노드는 검증 게이트를 완벽히 통과했습니다.`;
+    $('#ai-report-meta').textContent = `${PIPELINE.generatedReports.length}개 리포트 생성 완료 · AI 신뢰도 우수`;
+    
+    const buttonsContainer = $('#generated-report-buttons-container');
+    if (buttonsContainer) {
+      const templates = STOCK_REPORT_TEMPLATES[stock.t] || STOCK_REPORT_TEMPLATES['005930'];
+      let buttonsHtml = '<span class="text-[10.5px] font-extrabold text-slate-500 mr-1">리포트 열기:</span>';
+      const typeLabels = {
+        1: '재무/펀더멘탈',
+        2: '가격/기술',
+        3: '뉴스/심리',
+        4: '수급',
+        5: '산업/거시'
+      };
+      for (let t = 1; t <= 5; t++) {
+        const genRep = PIPELINE.generatedReports.find(gr => gr.typeIndex === t);
+        const label = typeLabels[t];
+        if (genRep) {
+          buttonsHtml += `
+            <button onclick="navigate('reports', { reportId: '${genRep.reportId}', from: 'research' })" 
+                    title="${genRep.title} (검증 완료)" 
+                    class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] shadow-sm transition hover:scale-105 active:scale-95 flex items-center justify-center shrink-0">
+              ${label}
+            </button>
+          `;
+        } else {
+          const title = templates[t - 1].title;
+          buttonsHtml += `
+            <button disabled 
+                    title="${stock.n} ${title} (미생성)" 
+                    class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-300 border border-slate-200 text-[11px] font-extrabold flex items-center justify-center cursor-not-allowed shrink-0">
+              ${label}
+            </button>
+          `;
+        }
+      }
+      buttonsContainer.innerHTML = buttonsHtml;
+    }
+  }
+}
+
+function autoGrowTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function fillPrompt(text) {
+  const area = $('#query-textarea');
+  if (area) {
+    area.value = text;
+    autoGrowTextarea(area);
+    area.focus();
+  }
+}
+// Stock picker removed
+
+/* Pipeline sequence */
+function startReportGeneration() {
+  if (PIPELINE.running) return;
+  const area = $('#query-textarea');
+  const query = (area && area.value.trim()) || '이 종목의 실적 및 밸류에이션 리서치를 진행해줘.';
+  
+  PIPELINE.completed = false;
+  PIPELINE.queryText = query;
+  PIPELINE.generatedReports = [];
+  
+  // Auto-detect stock from query
+  let detectedTicker = '005930';
+  const lowerQuery = query.toLowerCase();
+  if (lowerQuery.includes('하이닉스') || lowerQuery.includes('hynix') || lowerQuery.includes('000660')) {
+    detectedTicker = '000660';
+  } else if (lowerQuery.includes('현대') || lowerQuery.includes('hyundai') || lowerQuery.includes('005380')) {
+    detectedTicker = '005380';
+  } else if (lowerQuery.includes('lg') || lowerQuery.includes('엘지') || lowerQuery.includes('엔솔') || lowerQuery.includes('energy') || lowerQuery.includes('373220')) {
+    detectedTicker = '373220';
+  }
+  PIPELINE.ticker = detectedTicker;
+  
+  if (area) {
+    area.value = '';
+    area.style.height = 'auto';
+  }
+  
+  // Transition views
+  $('#intro-screen').classList.add('hidden');
+  $('#conversation-panel').classList.remove('hidden');
+  $('#user-query-text').textContent = query;
+  $('#pipeline-box').classList.remove('hidden');
+  $('#ai-final-message').classList.add('hidden');
+  
+  PIPELINE.running = true;
+  $('#query-submit-btn').disabled = true;
+  
+  let currentStep = 0;
+  const totalSteps = PIPELINE.steps.length;
+  
+  const processNextStep = () => {
+    if (currentStep > 0) {
+      // Mark previous complete
+      const prevIdx = currentStep - 1;
+      const prevStepEl = $(`#step-${prevIdx}`);
+      if (prevStepEl) {
+        prevStepEl.classList.remove('bg-indigo-50/50');
+        prevStepEl.classList.add('opacity-100');
+        $(`#step-ico-${prevIdx}`).className = 'w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 grid place-items-center mt-0.5';
+        $(`#step-ico-${prevIdx}`).innerHTML = icon('check', 'w-4 h-4');
+        $(`#step-status-${prevIdx}`).className = 'text-[11px] font-bold text-emerald-600 mt-0.5';
+        $(`#step-status-${prevIdx}`).textContent = '검증 완료';
+      }
+    }
+    
+    if (currentStep >= totalSteps) {
+      // All done!
+      finalizeReport(query);
+      return;
+    }
+    
+    // Highlight current
+    const curEl = $(`#step-${currentStep}`);
+    if (curEl) {
+      curEl.classList.remove('opacity-40');
+      curEl.classList.add('bg-indigo-50/50', 'opacity-100');
+      $(`#step-ico-${currentStep}`).className = 'w-7 h-7 rounded-lg bg-indigo-600 text-white grid place-items-center mt-0.5';
+      $(`#step-status-${currentStep}`).innerHTML = `<span class="typing text-indigo-600 text-base leading-none">·<span>·</span><span>·</span></span>`;
+    }
+    
+    // Update progress bar
+    const pctVal = Math.round(((currentStep + 1) / totalSteps) * 100);
+    $('#pipe-progress-bar').style.width = pctVal + '%';
+    $('#pipe-pct').textContent = pctVal + '%';
+    
+    refreshIcons();
+    currentStep++;
+    
+    // Variable latency per agent step
+    const delay = currentStep === 1 ? 800 : (700 + Math.random() * 600);
+    PIPELINE.timer = setTimeout(processNextStep, delay);
+  };
+  
+  // Start sequence
+  processNextStep();
+}
+
+function finalizeReport(query) {
+  PIPELINE.running = false;
+  $('#query-submit-btn').disabled = false;
+  
+  const stock = DATA.byTicker[PIPELINE.ticker];
+  const templates = STOCK_REPORT_TEMPLATES[stock.t] || STOCK_REPORT_TEMPLATES['005930'];
+  
+  // Decide which types of the 5 reports are generated (at least 2, randomly up to 5)
+  const activeTypes = [];
+  for (let t = 1; t <= 5; t++) {
+    if (Math.random() > 0.4 || activeTypes.length < 2) {
+      activeTypes.push(t);
+    }
+  }
+  activeTypes.sort((a, b) => a - b);
+  
+  const generatedReports = [];
+  
+  // Create and store each generated report separately
+  activeTypes.forEach(t => {
+    const template = templates[t - 1];
+    const newReportId = `r_${t}_${Date.now()}`;
+    const evidCount = template.evid + Math.floor(Math.random() * 5) - 2;
+    const confScore = template.conf + Math.floor(Math.random() * 3) - 1;
+    
+    const newReport = {
+      id: newReportId,
+      stock: stock.n,
+      t: stock.t,
+      title: `${stock.n} ${template.title}`,
+      conf: confScore,
+      date: new Date().toISOString().split('T')[0],
+      tag: template.tag,
+      evid: evidCount,
+      sec: stock.sec
+    };
+    
+    // Add to DATA.reports
+    DATA.reports.unshift(newReport);
+    
+    // Generate distinct content and charts
+    generateReportContent(newReportId, stock, t, newReport.title, newReport.tag, newReport.evid, newReport.conf);
+    
+    // Save info for rendering buttons
+    generatedReports.push({ typeIndex: t, reportId: newReportId, title: newReport.title });
+  });
+  
+  // Show final success message in query page
+  PIPELINE.completed = true;
+  PIPELINE.generatedReports = generatedReports;
+  $('#pipeline-box').classList.add('hidden');
+  $('#ai-final-message').classList.remove('hidden');
+  
+  $('#ai-success-text').textContent = `질문하신 "${stock.n}" 분석 결과, 총 ${generatedReports.length}개의 리포트가 성공적으로 생성되었습니다. 각 리포트의 신뢰 노드는 검증 게이트를 완벽히 통과했습니다.`;
+  $('#ai-report-meta').textContent = `${generatedReports.length}개 리포트 생성 완료 · AI 신뢰도 우수`;
+  
+  const buttonsContainer = $('#generated-report-buttons-container');
+  if (buttonsContainer) {
+    let buttonsHtml = '<span class="text-[10.5px] font-extrabold text-slate-500 mr-1">리포트 열기:</span>';
+    const typeLabels = {
+      1: '재무/펀더멘탈',
+      2: '가격/기술',
+      3: '뉴스/심리',
+      4: '수급',
+      5: '산업/거시'
+    };
+    for (let t = 1; t <= 5; t++) {
+      const genRep = generatedReports.find(gr => gr.typeIndex === t);
+      const label = typeLabels[t];
+      if (genRep) {
+        buttonsHtml += `
+          <button onclick="navigate('reports', { reportId: '${genRep.reportId}', from: 'research' })" 
+                  title="${genRep.title} (검증 완료)" 
+                  class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] shadow-sm transition hover:scale-105 active:scale-95 flex items-center justify-center shrink-0">
+            ${label}
+          </button>
+        `;
+      } else {
+        const title = templates[t - 1].title;
+        buttonsHtml += `
+          <button disabled 
+                  title="${stock.n} ${title} (미생성)" 
+                  class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-300 border border-slate-200 text-[11px] font-extrabold flex items-center justify-center cursor-not-allowed shrink-0">
+            ${label}
+          </button>
+        `;
+      }
+    }
+    buttonsContainer.innerHTML = buttonsHtml;
+  }
+  
+  const scrollArea = $('#chat-scroll-area');
+  scrollArea.scrollTop = scrollArea.scrollHeight;
+  
+  toast(`총 ${generatedReports.length}개의 리포트가 생성되었습니다!`);
+}
+
+/* ============================================================ REPORTS TAB (library + detail) */
+let selectedType = '전체';
+let searchKeyword = '';
+
+function renderLibrary(params = {}) {
+  const reportTypes = ['전체', '재무/펀더멘탈', '가격/기술', '뉴스/심리', '수급', '산업/거시'];
+  
+  // Filtered reports
+  const filtered = DATA.reports.filter(r => {
+    const typeMap = { 1: '재무/펀더멘탈', 2: '가격/기술', 3: '뉴스/심리', 4: '수급', 5: '산업/거시' };
+    const matchesType = selectedType === '전체' || typeMap[r.type] === selectedType;
+    const matchesSearch = searchKeyword === '' || 
+                          r.title.toLowerCase().includes(searchKeyword.toLowerCase()) || 
+                          r.stock.toLowerCase().includes(searchKeyword.toLowerCase());
+    return matchesType && matchesSearch;
+  });
+
+  const content = `
+  <div class="p-8 max-w-6xl mx-auto space-y-6 screen-enter">
+    <div class="flex items-end justify-between flex-wrap gap-4">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">리포트 보관함</h1>
+        <p class="text-slate-500 text-xs mt-1.5">검증 게이트를 최종 통과하여 저장된 출처 표기 리포트 목록입니다.</p>
+      </div>
+      <button onclick="navigate('research')" class="flex items-center gap-1.5 px-4.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-all">
+        ${icon('plus', 'w-4 h-4')} 새 리포트 생성
+      </button>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="flex items-center justify-between flex-wrap gap-4 pt-2">
+      <!-- Filter Chips -->
+      <div class="flex gap-2">
+        ${reportTypes.map(t => `
+          <button onclick="filterType('${t}')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all ${selectedType === t ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'bg-white border border-slate-200 text-slate-600 hover:border-slate-300'}">
+            ${t}
+          </button>
+        `).join('')}
+      </div>
+
+      <!-- Search Box -->
+      <div class="relative w-64">
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+          ${icon('search', 'w-4 h-4')}
+        </span>
+        <input type="text" placeholder="종목 또는 키워드 검색..." oninput="searchReports(this.value)" value="${searchKeyword}" class="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 hover:border-slate-300 focus:border-indigo-400 focus:outline-none rounded-xl text-xs text-slate-800 transition" />
+      </div>
+    </div>
+
+    <!-- Reports Grid -->
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-5 pt-1" id="reports-grid-list">
+      ${filtered.map(r => `
+        <div onclick="openReport('${r.id}')" class="group bg-white rounded-2xl border border-slate-200/80 shadow-card hover:shadow-pop hover:-translate-y-0.5 transition-all duration-300 p-5 cursor-pointer flex flex-col justify-between min-h-[175px]">
+          <div>
+            <div class="flex items-start justify-between">
+              <span class="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100/50 text-indigo-600 grid place-items-center">
+                ${icon('file-text', 'w-5 h-5')}
+              </span>
+              <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100">
+                ${icon('shield-check', 'w-3 h-3')} Conf ${r.conf}%
+              </span>
+            </div>
+            <h3 class="font-bold text-slate-800 text-[14.5px] mt-4 leading-snug group-hover:text-indigo-600 transition-colors duration-200 truncate">
+              ${r.title}
+            </h3>
+            <div class="flex items-center gap-2 mt-2 text-[11px] text-slate-400 font-medium">
+              <span class="text-slate-600">${r.stock}</span>
+              <span>·</span>
+              <span>${r.tag}</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between mt-5 pt-3.5 border-t border-slate-100 text-[11px] text-slate-400">
+            <span class="flex items-center gap-1 font-medium"><i data-lucide="git-fork" class="w-3.5 h-3.5"></i> 증거 ${r.evid}건</span>
+            <span class="num">${r.date}</span>
+          </div>
+        </div>
+      `).join('')}
+      
+      <!-- Empty State -->
+      ${filtered.length === 0 ? `
+        <div class="col-span-full py-16 bg-white border border-dashed border-slate-200 rounded-2xl text-center">
+          <div class="w-12 h-12 bg-slate-50 border border-slate-100 text-slate-300 grid place-items-center rounded-xl mx-auto mb-3">
+            ${icon('search-x', 'w-6 h-6')}
+          </div>
+          <p class="text-xs font-semibold text-slate-500">검색 조건에 부합하는 리포트가 없습니다.</p>
+        </div>
+      ` : ''}
+    </div>
+  </div>`;
+
+  mount(shell('library', content));
+  $('#header-stock-name').textContent = '리포트 보관함';
+}
+
+function renderReports(params = {}) {
+  const reportId = params.reportId || (DATA.reports[0] && DATA.reports[0].id) || 'r1';
+  renderReportDetail(reportId);
+}
+
+function filterType(type) {
+  selectedType = type;
+  renderLibrary();
+}
+
+function searchReports(val) {
+  searchKeyword = val.trim();
+  renderLibrary();
+}
+
+function openReport(id) {
+  navigate('reports', { reportId: id, from: 'library' });
+}
+
+/* ============================================================ REPORT DETAIL VIEW */
+function renderReportDetail(id) {
+  const r = DATA.reports.find(x => x.id === id) || DATA.reports[0];
+  const s = DATA.byTicker[r.t] || { n: r.stock, t: r.t, price: 0, chg: 0 };
+  const content = REPORT_CONTENTS[id] || REPORT_CONTENTS['r1'];
+
+  // Parse narrative text to replace {cite-N} with citation buttons
+  let narrativeParsed = content.executive;
+  content.citations.forEach(c => {
+    narrativeParsed = narrativeParsed.replace(`{cite-${c.id}}`, `
+      <sup class="inline-block align-super -mt-1 mx-0.5">
+        <button onclick="showCitationTooltip(event, ${c.id})" class="w-4 h-4 rounded bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-[9.5px] font-bold text-indigo-600 inline-flex items-center justify-center transition-colors">
+          ${c.id}
+        </button>
+      </sup>
+    `);
+  });
+
+  const detailHtml = `
+  <div class="p-8 max-w-5xl mx-auto space-y-6 screen-enter">
+    <button onclick="navigate(STATE.params.from || 'library')" class="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition">
+      ${icon('chevron-left', 'w-4 h-4')} 리포트 목록으로 돌아가기
+    </button>
+
+    <!-- Report Header Box -->
+    <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-5">
+      <div class="flex items-start justify-between flex-wrap gap-4">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full">${r.tag}</span>
+            <span class="text-[11px] text-slate-400 font-semibold num">${r.date}</span>
+          </div>
+          <h1 class="text-2xl font-extrabold tracking-tight text-slate-900 leading-snug">${r.title}</h1>
+          <div class="flex items-center gap-2.5 pt-1">
+            <span class="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 font-extrabold flex items-center justify-center text-[10.5px]">${s.n.slice(0, 2)}</span>
+            <span class="text-xs font-bold text-slate-800">${s.n}</span>
+            <span class="text-xs text-slate-400 num">${s.t}</span>
+            <span class="text-slate-300">·</span>
+            <span class="text-xs font-bold text-slate-800 num">${won(s.price)}</span>
+            <span class="text-xs font-bold num ${chgColor(s.chg)}">${pct(s.chg)}</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button onclick="shareReport('${r.id}')" class="flex items-center gap-1.5 px-3.5 py-2.5 border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 rounded-xl transition">
+            ${icon('share-2', 'w-4 h-4')} 공유
+          </button>
+          <button onclick="downloadPDF()" class="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition">
+            ${icon('download', 'w-4 h-4')} PDF 다운로드
+          </button>
+        </div>
+      </div>
+
+      <!-- Key Trust Metrics -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-5 border-t border-slate-100">
+        <div class="space-y-1">
+          <div class="text-[11px] font-semibold text-slate-400">AI 신뢰도 (Confidence)</div>
+          <div class="flex items-baseline gap-0.5">
+            <span class="text-2xl font-black text-emerald-600 num">${r.conf}</span>
+            <span class="text-xs font-bold text-emerald-500">%</span>
+          </div>
+          <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1.5">
+            <div class="h-full bg-emerald-500 rounded-full" style="width: ${r.conf}%"></div>
+          </div>
+        </div>
+        
+        <div class="space-y-1">
+          <div class="text-[11px] font-semibold text-slate-400">검증된 증거 노드</div>
+          <div class="flex items-center gap-1 text-slate-800">
+            ${icon('git-fork', 'w-5 h-5 text-indigo-500')}
+            <span class="text-xl font-extrabold num">${r.evid}건</span>
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <div class="text-[11px] font-semibold text-slate-400">출처 연결률</div>
+          <div class="flex items-center gap-1 text-slate-800">
+            ${icon('link-2', 'w-5 h-5 text-indigo-500')}
+            <span class="text-xl font-extrabold num">100%</span>
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <div class="text-[11px] font-semibold text-slate-400">검증 게이트 상태</div>
+          <div class="flex items-center gap-1.5 text-emerald-600 font-extrabold text-sm pt-0.5">
+            <span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center">
+              ${icon('shield-check', 'w-4 h-4')}
+            </span>
+            <span>PASS (적합)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-3.5 bg-emerald-50/50 border border-emerald-100/80 rounded-xl flex gap-2.5 items-center">
+        <span class="text-emerald-600">${icon('shield-alert', 'w-4.5 h-4.5')}</span>
+        <p class="text-xs text-emerald-800 leading-snug font-medium">이 리포트에 언급된 모든 수치적 사실과 데이터는 원본 문서(공시 및 보도)의 검증을 거친 증거 노드입니다. 출처가 확인되지 않은 가공 수치는 리포트에 진입이 차단됩니다.</p>
+      </div>
+    </div>
+
+    <!-- Content Sections layout -->
+    <div class="grid lg:grid-cols-[1fr_240px] gap-6 items-start">
+      
+      <!-- Report Body -->
+      <div class="space-y-6">
+        
+        <!-- Summary Section -->
+        <section id="sec-summary" class="scroll-mt-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-4">
+          <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <span class="text-indigo-600">${icon('file-text', 'w-5 h-5')}</span>
+            <h2 class="text-sm font-bold text-slate-800">Executive Summary (핵심 요약)</h2>
+          </div>
+          <p class="text-slate-600 text-[14px] leading-relaxed font-medium">
+            ${narrativeParsed}
+          </p>
+          <div class="grid grid-cols-3 gap-3 pt-2">
+            <div class="p-3 bg-slate-50 border border-slate-200/60 rounded-xl">
+              <span class="text-[10px] font-semibold text-slate-400">투자 포인트</span>
+              <div class="text-[12px] font-bold text-slate-700 mt-1">${r.sec === '반도체' ? 'HBM 점유율 수혜' : 'HEV 믹스 개선 수혜'}</div>
+            </div>
+            <div class="p-3 bg-slate-50 border border-slate-200/60 rounded-xl">
+              <span class="text-[10px] font-semibold text-slate-400">핵심 드라이버</span>
+              <div class="text-[12px] font-bold text-slate-700 mt-1">${r.sec === '반도체' ? '수율 및 패키징 기술' : '미국 관세 인센티브'}</div>
+            </div>
+            <div class="p-3 bg-slate-50 border border-slate-200/60 rounded-xl">
+              <span class="text-[10px] font-semibold text-slate-400">통합 리스크 등급</span>
+              <div class="text-[12px] font-bold text-red-500 mt-1">보통 (Medium)</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Financial Section -->
+        <section id="sec-financial" class="scroll-mt-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-5">
+          <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <span class="text-indigo-600">${icon('bar-chart-3', 'w-5 h-5')}</span>
+            <h2 class="text-sm font-bold text-slate-800">Financial Performance (재무 검증)</h2>
+          </div>
+          
+          <div class="grid md:grid-cols-[1fr_220px] gap-6">
+            <div class="h-56 bg-slate-50/50 rounded-xl border border-slate-100 p-3">
+              <canvas id="financial-canvas"></canvas>
+            </div>
+            
+            <div class="flex flex-col justify-between py-1">
+              <div class="space-y-3.5">
+                ${content.financial.stats.map(st => `
+                  <div class="flex justify-between items-start border-b border-slate-100 pb-1.5">
+                    <div>
+                      <div class="text-[11px] font-semibold text-slate-400">${st.label}</div>
+                      <div class="text-[10px] text-slate-400 mt-0.5 leading-none">${st.chg}</div>
+                    </div>
+                    <span class="text-xs font-bold text-slate-800 num">${st.val}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+          <div class="text-[10.5px] text-slate-400 flex items-center gap-1 pt-1.5 border-t border-slate-100">
+            ${icon('info', 'w-3.5 h-3.5')}
+            <span>데이터 소스: 금융감독원 OpenDART 정기 공시보고서 연계 검증 완료</span>
+          </div>
+        </section>
+
+        <!-- News Sentiment Section -->
+        <section id="sec-news" class="scroll-mt-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-4">
+          <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <span class="text-indigo-600">${icon('newspaper', 'w-5 h-5')}</span>
+            <h2 class="text-sm font-bold text-slate-800">Market Sentiment & News (시장 센티먼트 분류)</h2>
+          </div>
+          <div class="divide-y divide-slate-100">
+            ${content.news.map(n => {
+              const bg = n.sent === '긍정' ? 'bg-emerald-50 text-emerald-600' : (n.sent === '부정' ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500');
+              return `
+                <div class="py-3 flex items-center justify-between gap-4">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span class="px-2 py-0.5 rounded text-[9.5px] font-extrabold shrink-0 ${bg}">${n.sent}</span>
+                    <span class="text-xs font-semibold text-slate-700 truncate leading-snug">${n.text}</span>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0 text-[10.5px] text-slate-400 font-medium">
+                    <span>${n.src}</span>
+                    <span>·</span>
+                    <span>${n.date}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </section>
+
+        <!-- Risk Scanner Section -->
+        <section id="sec-risk" class="scroll-mt-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-4">
+          <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <span class="text-indigo-600">${icon('alert-triangle', 'w-5 h-5')}</span>
+            <h2 class="text-sm font-bold text-slate-800">Risk Assessment Gate (리스크 분석 검증)</h2>
+          </div>
+          <div class="space-y-4 pt-1">
+            ${content.risks.map(r => {
+              const col = r.val >= 70 ? 'text-rose-500 bg-rose-50' : (r.val >= 45 ? 'text-amber-500 bg-amber-50' : 'text-emerald-500 bg-emerald-50');
+              const barCol = r.val >= 70 ? 'bg-rose-500' : (r.val >= 45 ? 'bg-amber-500' : 'bg-emerald-500');
+              return `
+                <div class="p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl space-y-2">
+                  <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                      <span class="px-2 py-0.5 rounded text-[9.5px] font-extrabold ${col}">${r.level}</span>
+                      <h4 class="text-xs font-bold text-slate-800">${r.title}</h4>
+                    </div>
+                    <span class="text-[11px] font-bold num ${r.val >= 70 ? 'text-rose-500' : (r.val >= 45 ? 'text-amber-500' : 'text-emerald-500')}">${r.val}%</span>
+                  </div>
+                  <p class="text-[11px] text-slate-500 leading-snug">${r.desc}</p>
+                  <div class="h-1.5 bg-slate-200/60 rounded-full overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-500 ${barCol}" style="width: ${r.val}%"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </section>
+
+        <!-- Evidence Graph Section -->
+        <section id="sec-evidence" class="scroll-mt-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-2">
+              <span class="text-indigo-600">${icon('git-fork', 'w-5 h-5')}</span>
+              <h2 class="text-sm font-bold text-slate-800">Evidence Graph (GraphRAG 증거 연결 지도)</h2>
+            </div>
+            <span class="text-[10px] text-slate-400 font-semibold bg-slate-50 px-2 py-1 rounded">노드 호버 시 연동 관계 하이라이트</span>
+          </div>
+          <p class="text-xs text-slate-500 leading-relaxed">추론 결과(결론)에 도달하기 위해 분석 수집된 다차원 데이터 노드의 연동 관계망입니다. 각 노드를 마우스오버해 보실 수 있습니다.</p>
+          
+          <div class="relative bg-slate-900 border border-slate-950 shadow-inner rounded-xl p-5 overflow-hidden">
+            <!-- Node Detail Tooltip -->
+            <div id="graph-tooltip" class="absolute top-4 left-4 right-4 bg-slate-800/90 backdrop-blur border border-slate-700/80 text-white rounded-lg p-3 transition-opacity duration-200 opacity-0 z-10 pointer-events-none"></div>
+            
+            <div id="evidence-graph-container" class="h-52 w-full flex items-center justify-center"></div>
+          </div>
+          
+          <div class="flex justify-center items-center gap-4 text-[10.5px] font-semibold text-slate-500 pt-2">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+              <span>수집 원본 (Source)</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              <span>팩트 인자 (Fact)</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+              <span>최종 결론 (Conclusion)</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Citation directory -->
+        <section id="sec-citations" class="scroll-mt-6 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-card space-y-4">
+          <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <span class="text-indigo-600">${icon('quote', 'w-5 h-5')}</span>
+            <h2 class="text-sm font-bold text-slate-800">Verified Citations (검증된 원본 출처 명부)</h2>
+          </div>
+          <div class="space-y-3">
+            ${content.citations.map(c => `
+              <div class="p-3.5 bg-white border border-slate-200 rounded-xl flex gap-3.5 items-start">
+                <span class="w-6 h-6 rounded bg-indigo-50 text-indigo-600 font-extrabold flex items-center justify-center text-[10.5px] shrink-0 mt-0.5">
+                  ${c.id}
+                </span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center justify-between">
+                    <h4 class="text-xs font-bold text-slate-800 leading-snug">${c.text}</h4>
+                    <span class="text-[9.5px] font-bold text-slate-400 bg-slate-100 rounded px-1.5 py-0.5 shrink-0 ml-2">${c.type}</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-1 leading-snug">${c.desc}</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      </div>
+
+      <!-- Sidebar Contents Table / Timeline Logs -->
+      <aside class="lg:sticky lg:top-4 space-y-4">
+        <!-- Navigation Menu -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-card">
+          <h4 class="text-[11.5px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 px-1">리포트 목차</h4>
+          <nav class="space-y-0.5">
+            <a href="#sec-summary" onclick="event.preventDefault(); scrollToTab('sec-summary')" class="block px-2.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition">핵심 요약 (Summary)</a>
+            <a href="#sec-financial" onclick="event.preventDefault(); scrollToTab('sec-financial')" class="block px-2.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition">재무 실적 (Financial)</a>
+            <a href="#sec-news" onclick="event.preventDefault(); scrollToTab('sec-news')" class="block px-2.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition">센티먼트 검증 (News)</a>
+            <a href="#sec-risk" onclick="event.preventDefault(); scrollToTab('sec-risk')" class="block px-2.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition">리스크 게이트 (Risk)</a>
+            <a href="#sec-evidence" onclick="event.preventDefault(); scrollToTab('sec-evidence')" class="block px-2.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition">증거 연결 지도 (Graph)</a>
+            <a href="#sec-citations" onclick="event.preventDefault(); scrollToTab('sec-citations')" class="block px-2.5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition">원본 출처 명부 (Citations)</a>
+          </nav>
+        </div>
+
+        <!-- Verification Timeline Log -->
+        <div class="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-card">
+          <h4 class="text-[11.5px] font-bold text-slate-400 uppercase tracking-wider mb-3 px-1">검증 타임라인 로그</h4>
+          <div class="space-y-3.5 pl-1.5">
+            ${[
+              ['질의 분석 완료', '09:41:02'],
+              ['공시/재무 크롤링 패스', '09:41:05'],
+              ['실시간 뉴스 감성 분류', '09:41:09'],
+              ['GraphRAG 38개 노드 연결', '09:41:12'],
+              ['검증 게이트 최종 통과', '09:41:14']
+            ].map(([lbl, time], idx, arr) => `
+              <div class="flex gap-3">
+                <div class="flex flex-col items-center">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15 shrink-0"></span>
+                  ${idx < arr.length - 1 ? `<span class="w-px flex-1 bg-slate-200 my-1"></span>` : ''}
+                </div>
+                <div class="-mt-0.5 pb-0.5">
+                  <div class="text-[11.5px] font-bold text-slate-700 leading-none">${lbl}</div>
+                  <div class="text-[10px] text-slate-400 mt-1 font-semibold num">${time}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>`;
+
+  mount(shell('reports', detailHtml));
+  $('#header-stock-name').textContent = `${s.n} 검증 리포트`;
+
+  // Draw chart and graph
+  setTimeout(() => {
+    // 1. SVG Knowledge Graph
+    renderSVGGraph(content.graph);
+    
+    // 2. Financial Chart
+    const ctx = $('#financial-canvas');
+    if (ctx) {
+      const isSales = content.financial.profit[0] > 0;
+      const c = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: content.financial.labels,
+          datasets: [
+            {
+              label: '매출액 (조원)',
+              data: content.financial.sales,
+              backgroundColor: 'rgba(99, 102, 241, 0.4)',
+              borderColor: 'rgba(99, 102, 241, 0.8)',
+              borderWidth: 1.5,
+              borderRadius: 5,
+              barPercentage: 0.55
+            },
+            {
+              label: '영업이익 (조원)',
+              data: content.financial.profit,
+              backgroundColor: 'rgba(79, 70, 229, 0.95)',
+              borderColor: 'rgba(79, 70, 229, 1)',
+              borderWidth: 1.5,
+              borderRadius: 5,
+              barPercentage: 0.55
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                boxWidth: 8,
+                padding: 12,
+                font: { size: 10, weight: 'bold', family: 'Pretendard' },
+                color: '#64748b'
+              }
+            },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              titleFont: { size: 11, weight: 'bold', family: 'Pretendard' },
+              bodyFont: { size: 10, family: 'Pretendard' },
+              padding: 10,
+              cornerRadius: 8,
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label.split(' ')[0] + ': ' + context.parsed.y + '조원';
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 10, family: 'Pretendard', weight: 'bold' } }
+            },
+            y: {
+              grid: { color: '#f1f5f9' },
+              ticks: { color: '#94a3b8', font: { size: 10, family: 'Pretendard' } }
+            }
+          }
+        }
+      });
+      STATE.charts.push(c);
+    }
+
+    // 3. Scroll to active section if specified
+    if (STATE.params.activeType) {
+      const typeMap = {
+        1: 'sec-financial',
+        2: 'sec-news',
+        3: 'sec-risk',
+        4: 'sec-evidence',
+        5: 'sec-summary'
+      };
+      const secId = typeMap[STATE.params.activeType];
+      if (secId) {
+        scrollToTab(secId);
+        
+        // Add a temporary highlight border
+        const targetSec = document.getElementById(secId);
+        if (targetSec) {
+          targetSec.className += ' ring-2 ring-indigo-600 ring-offset-2';
+          setTimeout(() => {
+            targetSec.className = targetSec.className.replace(' ring-2 ring-indigo-600 ring-offset-2', '');
+          }, 3000);
+        }
+      }
+    }
+  }, 40);
+}
+
+function scrollToTab(id) {
+  const el = document.getElementById(id);
+  const main = $('#main');
+  if (el && main) {
+    main.scrollTo({
+      top: el.offsetTop - 16,
+      behavior: 'smooth'
+    });
+  }
+}
+
+function shareReport(reportId) {
+  const mockLink = `https://verith.app/r/${reportId}`;
+  
+  $('#overlay-root').innerHTML = `
+    <div class="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-[2px] flex items-center justify-center p-4" onclick="if(event.target===this)closeOverlay()">
+      <div class="bg-white rounded-2xl shadow-float w-full max-w-sm overflow-hidden border border-slate-200 p-6 space-y-4" style="animation: pop 0.25s cubic-bezier(0.16, 1, 0.3, 1);">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 grid place-items-center">
+            ${icon('share-2', 'w-5 h-5')}
+          </span>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">리포트 공유 링크</h3>
+            <p class="text-[10.5px] text-slate-400">링크가 있는 인원은 이 리포트 조회가 가능합니다.</p>
+          </div>
+        </div>
+        
+        <div class="flex gap-2">
+          <input type="text" readonly value="${mockLink}" class="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 outline-none num" />
+          <button onclick="navigator.clipboard.writeText('${mockLink}'); toast('링크가 복사되었습니다'); closeOverlay();" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition">
+            복사
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  refreshIcons();
+}
+
+function downloadPDF() {
+  toast('PDF 변환 및 내보내기를 시작합니다...', 'info');
+  setTimeout(() => {
+    toast('리포트 다운로드가 완료되었습니다.');
+  }, 1200);
+}
+
+/* ============================================================ INTERACTIVE SVG KNOWLEDGE GRAPH */
+function renderSVGGraph(graphData) {
+  const container = document.getElementById('evidence-graph-container');
+  if (!container) return;
+
+  let html = `<svg viewBox="0 0 460 200" class="w-full h-full">`;
+
+  // Draw Edges (Links)
+  graphData.edges.forEach(e => {
+    const fromNode = graphData.nodes.find(n => n.id === e.from);
+    const toNode = graphData.nodes.find(n => n.id === e.to);
+    if (fromNode && toNode) {
+      html += `<line x1="${fromNode.x}" y1="${fromNode.y}" x2="${toNode.x}" y2="${toNode.y}" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="3,3" class="edge" id="edge-${e.from}-${e.to}"></line>`;
+    }
+  });
+
+  // Draw Nodes
+  graphData.nodes.forEach(n => {
+    html += `
+    <g class="node-group cursor-pointer" id="node-${n.id}" data-id="${n.id}" onmouseover="highlightNode('${n.id}')" onmouseout="clearHighlight()">
+      <circle cx="${n.x}" cy="${n.y}" r="22" fill="${n.color}" opacity="0.1" class="node-glow transition-all duration-200"></circle>
+      <circle cx="${n.x}" cy="${n.y}" r="6.5" fill="${n.color}" class="node-dot"></circle>
+      <text x="${n.x}" y="${n.y + 34}" text-anchor="middle" font-size="11" font-weight="700" fill="#475569">${n.label}</text>
+    </g>
+    `;
+  });
+
+  html += `</svg>`;
+  container.innerHTML = html;
+}
+
+function highlightNode(nodeId) {
+  const container = $('#evidence-graph-container');
+  if (!container) return;
+
+  const reportId = STATE.params.reportId || 'r1';
+  const content = REPORT_CONTENTS[reportId] || REPORT_CONTENTS['r1'];
+  const graph = content.graph;
+  const node = graph.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+
+  // Connected node ids
+  const connectedIds = new Set([nodeId]);
+  
+  // Highlighting edges
+  graph.edges.forEach(e => {
+    const line = $(`#edge-${e.from}-${e.to}`, container);
+    if (line) {
+      if (e.from === nodeId || e.to === nodeId) {
+        connectedIds.add(e.from);
+        connectedIds.add(e.to);
+        line.setAttribute('stroke', '#4f46e5');
+        line.setAttribute('stroke-width', '2.5');
+        line.removeAttribute('stroke-dasharray');
+      } else {
+        line.setAttribute('stroke', '#f1f5f9');
+        line.setAttribute('stroke-width', '1');
+      }
+    }
+  });
+
+  // Dim other nodes, enlarge target and neighbors
+  graph.nodes.forEach(n => {
+    const g = $(`#node-${n.id}`, container);
+    if (g) {
+      if (connectedIds.has(n.id)) {
+        g.style.opacity = '1';
+        const glow = g.querySelector('.node-glow');
+        glow.setAttribute('r', '26');
+        glow.setAttribute('opacity', '0.2');
+      } else {
+        g.style.opacity = '0.25';
+      }
+    }
+  });
+
+  // Display description card
+  const tooltip = $('#graph-tooltip');
+  if (tooltip) {
+    let desc = '';
+    if (node.type === 'source') desc = '공시 문서 및 유력 저널의 검증 완료된 원본 데이터 소스 노드입니다.';
+    else if (node.type === 'fact') desc = '데이터 소스로부터 추출 정제된 수치 및 수율 관련 팩트 인자 노드입니다.';
+    else desc = '여러 신뢰 팩트 노드들을 GraphRAG 추론하여 도출한 최종 핵심 결론 노드입니다.';
+    
+    tooltip.innerHTML = `
+      <div class="flex items-center justify-between text-xs font-bold border-b border-slate-700/60 pb-1.5 mb-1.5">
+        <span class="flex items-center gap-1.5" style="color: ${node.color}">
+          <span class="w-2 h-2 rounded-full" style="background: ${node.color}"></span>
+          ${node.label}
+        </span>
+        <span class="text-[10px] text-slate-400 capitalize">${node.type} node</span>
+      </div>
+      <p class="text-[11px] text-slate-300 leading-normal font-medium">${desc}</p>
+    `;
+    tooltip.style.opacity = '1';
+  }
+}
+
+function clearHighlight() {
+  const container = $('#evidence-graph-container');
+  if (!container) return;
+
+  const reportId = STATE.params.reportId || 'r1';
+  const content = REPORT_CONTENTS[reportId] || REPORT_CONTENTS['r1'];
+  const graph = content.graph;
+
+  // Reset edges
+  graph.edges.forEach(e => {
+    const line = $(`#edge-${e.from}-${e.to}`, container);
+    if (line) {
+      line.setAttribute('stroke', '#cbd5e1');
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-dasharray', '3,3');
+    }
+  });
+
+  // Reset nodes
+  graph.nodes.forEach(n => {
+    const g = $(`#node-${n.id}`, container);
+    if (g) {
+      g.style.opacity = '1';
+      const glow = g.querySelector('.node-glow');
+      glow.setAttribute('r', '22');
+      glow.setAttribute('opacity', '0.1');
+    }
+  });
+
+  // Hide description card
+  const tooltip = $('#graph-tooltip');
+  if (tooltip) {
+    tooltip.style.opacity = '0';
+  }
+}
+
+/* ============================================================ CITATION INTERACTIVE TOOLTIP */
+function showCitationTooltip(event, citeId) {
+  event.stopPropagation();
+  const reportId = STATE.params.reportId || 'r1';
+  const content = REPORT_CONTENTS[reportId] || REPORT_CONTENTS['r1'];
+  const cite = content.citations.find(c => c.id === citeId);
+  if (!cite) return;
+
+  // Clear existing popovers
+  closeOverlay();
+
+  const rect = event.target.getBoundingClientRect();
+  const top = rect.bottom + window.scrollY + 8;
+  const left = Math.min(rect.left + window.scrollX - 100, window.innerWidth - 320);
+
+  $('#overlay-root').innerHTML = `
+    <!-- Click catcher -->
+    <div class="fixed inset-0 z-40" onclick="closeOverlay()"></div>
+    
+    <div class="absolute z-50 w-72 bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-2xl p-4 text-left"
+         style="top: ${top}px; left: ${left}px; animation: pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);">
+      <div class="flex items-center justify-between mb-2">
+        <span class="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+          ${icon('shield-check', 'w-3 h-3')} 출처 적합
+        </span>
+        <span class="text-[9.5px] font-bold text-slate-400 bg-slate-100 rounded px-1.5 py-0.5">${cite.type}</span>
+      </div>
+      <h4 class="font-extrabold text-slate-800 text-[13px] leading-snug">${cite.text}</h4>
+      <p class="text-[11px] text-slate-500 mt-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100/60 leading-normal font-medium">${cite.desc}</p>
+      <div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-[10px] text-slate-400">
+        <span>최종 동기화: 2026.07.01</span>
+        <button onclick="toast('외부 출처 사이트 연계 (Mock)'); closeOverlay();" class="flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 font-bold">
+          원본 서류 검증 <i data-lucide="external-link" class="w-3 h-3"></i>
+        </button>
+      </div>
+    </div>
+  `;
+  refreshIcons();
+}
+
+/* ============================================================ ROUTER & INITIALIZATION */
+const ROUTES = {
+  research: renderResearch,
+  library: renderLibrary,
+  reports: renderReports
+};
+
+function navigate(screen, params = {}) {
+  destroyCharts();
+  STATE.screen = screen;
+  STATE.params = params;
+  const renderer = ROUTES[screen];
+  if (renderer) {
+    renderer(params);
+    const mainEl = $('#main');
+    if (mainEl) {
+      mainEl.classList.add('screen-enter');
+      mainEl.scrollTo(0, 0);
+    }
+    refreshIcons();
+  }
+}
+
+// Initial entry directly to the research workspace
+navigate('research');
+</script>
+</body>
+</html>
