@@ -10,12 +10,10 @@ import type { NextConfig } from "next";
 const BACKEND_API_URL =
   process.env.BACKEND_API_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:8000";
+  "http://127.0.0.1:8000";
 
-// 슈퍼바이저는 AI 서비스(내부 endpoint)에 있다. 지금은 프론트가 프록시로 직접 호출한다
-// (백엔드에 supervisor 전달 라우트가 생기면 이 대상만 백엔드로 바꾼다).
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? "http://localhost:9000";
-
+// 프론트가 붙는 곳은 백엔드(:8000) 하나뿐이다. 슈퍼바이저(AI 서비스)는 백엔드가 대신 호출한다
+// (POST /api/research → 백엔드 → /internal/supervisor/analyze). 프론트는 AI 를 직접 호출하지 않는다.
 const nextConfig: NextConfig = {
   async rewrites() {
     return [
@@ -27,11 +25,6 @@ const nextConfig: NextConfig = {
         // 뉴스 라우터는 백엔드에서 /news prefix 를 쓴다(/api 아님).
         source: "/news/:path*",
         destination: `${BACKEND_API_URL}/news/:path*`,
-      },
-      {
-        // 슈퍼바이저(및 기타 AI internal endpoint) — AI 서비스로 프록시.
-        source: "/internal/:path*",
-        destination: `${AI_SERVICE_URL}/internal/:path*`,
       },
     ];
   },

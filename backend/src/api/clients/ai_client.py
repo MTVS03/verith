@@ -13,6 +13,7 @@ import httpx
 
 _ANALYZE_PATH = "/internal/technical/analyze"
 _FUNDAMENTAL_ANALYZE_PATH = "/internal/fundamental/analyze"
+_SUPERVISOR_ANALYZE_PATH = "/internal/supervisor/analyze"
 
 
 class AIClientError(Exception):
@@ -69,6 +70,36 @@ class AIClient:
             raise AITimeoutError("AI 서버 응답 timeout") from exc
         except httpx.HTTPError as exc:
             # 연결 실패 등 — 메시지에 payload/URL 세부는 싣지 않는다.
+            raise AIUnavailableError(f"AI 서버 연결 실패: {type(exc).__name__}") from exc
+
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 422:
+            raise AIValidationError("AI 요청 검증 실패(422)")
+        if resp.status_code == 504:
+            raise AITimeoutError("AI 서버 timeout(504)")
+        if resp.status_code in (502, 503):
+            raise AIUnavailableError(f"AI 서버 사용 불가({resp.status_code})")
+        raise AIUnavailableError(f"AI 서버 오류({resp.status_code})")
+
+    async def analyze_supervisor(
+        self, payload: dict, *, timeout_seconds: float | None = None
+    ) -> dict:
+        """`/internal/supervisor/analyze` 호출 → 통합 응답 JSON(dict) 반환.
+
+        payload 는 SupervisorAnalyzeRequest 형태({"query": ...}). supervisor 는 서브에이전트
+        여러 개를 돌려 오래 걸리므로 호출부가 더 긴 timeout 을 주입할 수 있다(없으면 기본값).
+        """
+        url = self._base_url + _SUPERVISOR_ANALYZE_PATH
+        timeout = timeout_seconds if timeout_seconds is not None else self._timeout
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout, transport=self._transport
+            ) as client:
+                resp = await client.post(url, json=payload)
+        except httpx.TimeoutException as exc:
+            raise AITimeoutError("AI 서버 응답 timeout") from exc
+        except httpx.HTTPError as exc:
             raise AIUnavailableError(f"AI 서버 연결 실패: {type(exc).__name__}") from exc
 
         if resp.status_code == 200:

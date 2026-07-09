@@ -58,3 +58,31 @@ async def test_connect_error_raises_unavailable():
 
     with pytest.raises(AIUnavailableError):
         await _client(_raise).analyze_technical({})
+
+
+async def test_supervisor_success_hits_supervisor_path_and_returns_json():
+    seen: dict[str, str] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        seen["path"] = req.url.path
+        return httpx.Response(200, json={"results": []})
+
+    out = await _client(_handler).analyze_supervisor({"query": "삼성전자 최근 뉴스"})
+    assert out == {"results": []}
+    assert seen["path"] == "/internal/supervisor/analyze"
+
+
+async def test_supervisor_422_raises_validation():
+    with pytest.raises(AIValidationError):
+        await _client(lambda req: httpx.Response(422, json={})).analyze_supervisor({})
+
+
+async def test_supervisor_504_raises_timeout():
+    with pytest.raises(AITimeoutError):
+        await _client(lambda req: httpx.Response(504)).analyze_supervisor({})
+
+
+@pytest.mark.parametrize("code", [502, 503, 500])
+async def test_supervisor_5xx_raises_unavailable(code: int):
+    with pytest.raises(AIUnavailableError):
+        await _client(lambda req: httpx.Response(code)).analyze_supervisor({})
