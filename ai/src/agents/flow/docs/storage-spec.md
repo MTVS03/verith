@@ -33,7 +33,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
   "interpretation": "LLM 해석 (게이트3 통과분만, 아니면 null)",
   "interpretation_meta": { "source": "llm | fallback",
                            "provider": "openai | null",
-                           "model": "gpt-4o-mini | null" }
+                           "model": "gpt-5.4-mini | null" }
 }
 ```
 
@@ -74,7 +74,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 | `interpretation` | payload.interpretation (null이면 게이트3 통과 해석 없음) |
 | `interpretation_source` | payload.`interpretation_meta.source` ("llm"/"fallback") ✅ |
 | `provider` | payload.`interpretation_meta.provider` ("openai", 해석 실릴 때만) ✅ |
-| `model` | payload.`interpretation_meta.model` ("gpt-4o-mini", 해석 실릴 때만) ✅ |
+| `model` | payload.`interpretation_meta.model` ("gpt-5.4-mini", 해석 실릴 때만) ✅ |
 
 **`flow_report_verifications`** (1:1, FK→flow_reports.id CASCADE)
 | 컬럼 | 매핑 원천 |

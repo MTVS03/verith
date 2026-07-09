@@ -5,7 +5,7 @@
 디자인·표시 내용이 쓸 만한지. technical lab 과 같은 관행을 따른다.
 
   KIS  : real 호출 (core/kis_client — 조회 GET 만, 주문 API 는 코드에 없음)
-  LLM  : real 호출 (gpt-4o-mini — 게이트3 포함 전 구간을 실제 경로로 확인)
+  LLM  : real 호출 (gpt-5.4-mini — 게이트3 포함 전 구간을 실제 경로로 확인)
   진입점: production 진입점인 agent.run() 을 그대로 호출한다(우회 없음).
         supervisor 미구현은 장애물이 아니다 — lab 은 에이전트를 직접 부른다.
   저장  : 디스크 미기록. st.download_button 으로 HTML/JSON 만 내려받는다.
