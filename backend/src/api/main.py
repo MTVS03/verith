@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from db.graph import close_driver, ensure_constraints
-from src.api.routes import news, reports, stocks, technical_reports
+from src.api.routes import industry_reports, news, reports, stocks, technical_reports
 from src.api.routes import fundamental_reports
 
 
@@ -21,6 +21,7 @@ app = FastAPI(title="verith-backend", lifespan=lifespan)
 
 app.include_router(technical_reports.router)
 app.include_router(fundamental_reports.router)
+app.include_router(industry_reports.router)
 app.include_router(reports.router)
 app.include_router(news.router)
 app.include_router(stocks.router)

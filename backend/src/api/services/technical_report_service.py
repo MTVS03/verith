@@ -572,7 +572,7 @@ _ARCHIVE_TYPE_LABEL = {
 }
 _ARCHIVE_DETAIL_BASE = {
     "technical": "/api/technical/reports", "fundamental": "/api/fundamental/reports",
-    "news": "/api/news/reports",
+    "news": "/api/news/reports", "industry": "/api/industry/reports",
 }
 
 

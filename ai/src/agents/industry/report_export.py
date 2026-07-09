@@ -572,14 +572,14 @@ def _question_label(label: str | None) -> str:
     }.get(label or "", label or "Unknown")
 
 
-def export_question(question: str, *, graph=None) -> dict[str, Any]:
+def export_question(question: str, *, graph=None, report_id: str | None = None) -> dict[str, Any]:
     """Run the live agent for ``question`` and return a report payload."""
     owns_graph = graph is None
     graph = graph or get_neo4j_graph()
     try:
         final_state = build_agent(graph).invoke({"question": question})
         snapshot = _graph_snapshot(graph)
-        return build_report_payload(final_state, graph_snapshot=snapshot)
+        return build_report_payload(final_state, graph_snapshot=snapshot, report_id=report_id)
     finally:
         if owns_graph:
             graph.close()
