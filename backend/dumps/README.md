@@ -103,3 +103,66 @@ docker exec -i verith-neo4j cypher-shell -u neo4j -p verith1234 < backend/dumps/
   전용). 완전 보존이 필요하면 `snapshot_news.ps1` 상단 `$IncludeEmbedding = $true`
   (또는 `python -m scripts.export_news_pg --include-embedding`).
 - 복원은 뉴스 관련 테이블/그래프만 다룬다(주식 마스터 dump 와 독립).
+
+---
+
+# 산업 스냅샷 (industry_reports + Neo4j 그래프 + DART 청크 벡터)
+
+산업 에이전트의 DB 자산도 뉴스와 같은 방식으로 공유한다.
+
+> `ai/src/agents/industry/data/` (raw·structured·extracted) 는 **이미 git 이 추적**한다. 스냅샷 대상이
+> 아니다 — 그냥 `git add`. 스냅샷이 나르는 건 **DB 안의 것**뿐이다.
+
+## 파일
+
+- `shared_industry_pg.sql` — PostgreSQL `industry_reports` + `agent_reports`(`agent_type='industry'` 한정).
+  `industry_reports` 는 `TRUNCATE` 후 주입한다(uuid PK 라 시퀀스/`setval` 없음). **`agent_reports` 는
+  전 에이전트 공용 인덱스 테이블이라 `TRUNCATE` 하지 않고** `DELETE ... WHERE agent_type='industry'`
+  로만 스코프 리셋한다 — 뉴스/기술/재무/수급 인덱스 행을 보존하기 위함.
+- `shared_industry_neo4j.cypher` — 산업 그래프(`Company`/`Industry`/`Product`/`Policy`/`Person` +
+  5종 관계) + `:Chunk`(DART 원문 청크, **임베딩 포함**) + `FROM_FILING`. 전부 MERGE 문이라 멱등.
+  제약·인덱스·벡터인덱스를 파일이 스스로 만들므로 **복원 전 backend 선기동이 필요 없다**(뉴스와 다름).
+
+## 스냅샷 뜨기 (데이터 소유자)
+
+repo 루트에서:
+
+```powershell
+./snapshot_industry.ps1     # bash: ./snapshot_industry.sh
+```
+
+내부적으로 `python -m scripts.export_industry_pg` 와 `python -m scripts.export_industry_graph` 를 돌린다.
+
+## 복원 (팀원)
+
+```powershell
+docker compose up -d
+cd backend
+.venv\Scripts\python.exe -m alembic upgrade head
+cmd /c "docker exec -i verith-postgres psql -U verith -d verith < dumps\shared_verith_snapshot.sql"
+cd ..
+./restore_news.ps1          # 뉴스 스냅샷도 쓴다면 — 반드시 산업보다 먼저 (아래 주의)
+./restore_industry.ps1
+```
+
+## 주의
+
+- **⚠ 복원 순서: 뉴스 → 산업.** 두 그래프는 단일 `verith-neo4j` 에 `Company`/`Person` 레이블을
+  공유하는데 정체성 키가 다르다(뉴스 `key`, 산업 `name`). 뉴스 노드는 **전부 `name` 도 함께 갖고**
+  회사명 **28개가 겹친다**(LG화학·삼성SDI·SK이노베이션 …). 산업을 먼저 복원하면 뉴스의
+  `MERGE (n:Company {key:...}) SET n += {name:...}` 이 같은 이름의 노드를 새로 만들어
+  `Company.name` 유니크 제약(`ai/.../industry/ingest.py` 가 생성)을 위반한다 —
+  `Neo.ClientError.Schema.ConstraintValidationFailed` 로 뉴스 복원이 죽는다.
+- 같은 이유로 **산업 노드는 속성으로 판별할 수 없다**(`n.name IS NOT NULL` 은 뉴스 노드에도 참).
+  exporter 는 `ai/src/agents/industry/data/extracted/graph_documents.json` 을 **allowlist** 로 쓴다.
+  이 파일이 산업 그래프의 정본이므로, ai 쪽에서 그래프를 갱신하면 이 파일도 함께 커밋해야 한다.
+- 복원 시 `:Chunk` 는 전량 삭제 후 재생성한다(산업 전용 레이블이라 안전). 본체 관계 5종은
+  **양끝이 모두 allowlist 안에 있을 때만** 삭제 대상이다 — 뉴스도 `BELONGS_TO` 사용을 계획 중이라
+  (`ai/src/agents/news/tasks/07_graph_builder.md`) 타입만으로는 스코프가 안 되기 때문.
+- **`shared_industry_neo4j.cypher` 는 `:Chunk.embedding`(1024d)을 기본 포함**한다(파일 ~10MB).
+  뉴스 embedding 은 배치 병합 전용이라 뺐지만, 산업의 청크 임베딩은 `vector_retrieve.py` 하이브리드
+  검색의 **조회 경로**다. 빼면 팀원이 GPU 로 `vectorize.py` 를 다시 돌려야 한다.
+  굳이 빼려면 `python -m scripts.export_industry_graph --no-embedding`.
+- `shared_verith_snapshot.sql`(주식 마스터)을 **먼저** 복원해야 한다 — `agent_reports.stock_code` 가
+  `stocks.stock_code` 로 FK 를 건다. 종목 context 있는 산업 리포트가 있으면 FK 위반이 난다.
+- 스키마는 이 dump 에 없다. 항상 `alembic upgrade head` 를 먼저.
