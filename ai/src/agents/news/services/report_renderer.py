@@ -57,7 +57,7 @@ def build_report_model(understanding: QueryUnderstanding,
     data_limited = (not response.subject_found) or (not top_events) or answer.data_limited
     note = _limit_note(response, top_events, answer)
 
-    return ReportModel(
+    model = ReportModel(
         subject=subject,
         generated_at=datetime.now(KST),
         period_days=understanding.period_days,
@@ -72,6 +72,8 @@ def build_report_model(understanding: QueryUnderstanding,
         data_limited=data_limited,
         note=note,
     )
+    model.html = render_to_html(model)
+    return model
 
 
 def _dedup_articles(articles: list) -> list:
@@ -122,4 +124,89 @@ def fallback_report_json(understanding: QueryUnderstanding) -> dict:
         data_limited=True,
         note="리포트를 생성하지 못했습니다 (데이터 제한).",
     )
+    model.html = render_to_html(model)
     return model.model_dump(mode="json")
+
+
+def render_to_html(model: ReportModel) -> str:
+    """templates/report.html 템플릿을 Jinja2로 렌더링하여 HTML 문자열 반환."""
+    from pathlib import Path
+    template_path = Path(__file__).parent.parent / "templates" / "report.html"
+    if not template_path.exists():
+        logger.warning("template not found: %s", template_path)
+        return ""
+
+    try:
+        import jinja2
+        template_content = template_path.read_text(encoding="utf-8")
+        template = jinja2.Template(template_content)
+
+        overall = {
+            "score": model.overall_gauge.score,
+            "pos_pct": model.overall_gauge.positive_pct,
+            "neu_pct": model.overall_gauge.neutral_pct,
+            "neg_pct": model.overall_gauge.negative_pct,
+            "pos": model.overall_gauge.positive,
+            "neu": model.overall_gauge.neutral,
+            "neg": model.overall_gauge.negative,
+        }
+
+        chips = []
+        for i, ev in enumerate(model.top_events):
+            if ev.canonical_id in model.cited_event_ids:
+                chips.append({
+                    "rank": i + 1,
+                    "title": ev.canonical_title,
+                })
+
+        events = []
+        for i, ev in enumerate(model.top_events):
+            events.append({
+                "rank": i + 1,
+                "title": ev.canonical_title,
+                "importance": ev.importance,
+                "article_count": ev.article_count,
+                "gauge": {
+                    "label": ev.gauge.label,
+                    "pos_pct": ev.gauge.positive_pct,
+                    "neu_pct": ev.gauge.neutral_pct,
+                    "neg_pct": ev.gauge.negative_pct,
+                    "pos": ev.gauge.positive,
+                    "neu": ev.gauge.neutral,
+                    "neg": ev.gauge.negative,
+                },
+                "articles": [
+                    {"url": a.url, "summary": a.summary}
+                    for a in ev.articles
+                ]
+            })
+
+        import re
+        processed_answer = re.sub(
+            r"\*\*(.*?)\*\*",
+            r'<b class="font-bold text-ink-900">\1</b>',
+            model.answer_text or ""
+        )
+
+        context = {
+            "subject": model.subject,
+            "period_days": model.period_days,
+            "generated_at": model.generated_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "analyzed_count": model.overall_gauge.total,
+            "data_limited": model.data_limited,
+            "note": model.note,
+            "overall": overall,
+            "answer_text": processed_answer,
+            "chips": chips,
+            "events": events,
+            "daily_counts": [
+                {"date": d.date, "count": d.count}
+                for d in model.daily_counts
+            ],
+            "max_count": max([d.count for d in model.daily_counts] or [1]),
+        }
+        return template.render(context)
+    except Exception as exc:
+        logger.error("Failed to render report HTML: %s", exc)
+        return ""
+

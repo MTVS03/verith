@@ -63,6 +63,8 @@ class SentimentGauge(BaseModel):
             return "대체로 긍정"
         if self.negative / self.total >= 0.6:
             return "대체로 부정"
+        if self.neutral / self.total >= 0.6:
+            return "중립"
         return "의견 갈림"
 
 
@@ -117,3 +119,5 @@ class ReportModel(BaseModel):
     evidence_news_ids: list[int] = Field(default_factory=list)  # 근거 news_id(Article.id, §0.2)
     data_limited: bool = False         # 데이터 부족 시 True("데이터 제한" 표기, 절대규칙 5)
     note: str | None = None            # 제한 사유 등
+    html: str = ""                     # 렌더링된 HTML 리포트(보관함/프론트엔드 호환용)
+

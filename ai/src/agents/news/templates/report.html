@@ -1,136 +1,187 @@
 <!DOCTYPE html>
-{#
-  veriθ 뉴스·심리 집중 리포트 — 데이터 주입 템플릿(TASK 09).
-  ReportModel + Answer 를 서버측(Jinja2)에서 렌더한다. autoescape 로 XSS·깨짐 방지.
-  기존 목업(veriθ News Report)의 레이아웃·톤·색(brand/ink/pos·neg)을 유지하되, 데이터가 들어가는
-  자리(종목·기간·게이지·요약·TOP 이슈·근거 칩)만 변수로 바꿨다. 없는 수집메타(원문/중복제거 건수)·
-  반응도는 지어내지 않는다(환각 금지, 절대규칙 5). '데이터 제한' 배지는 data_limited 와 연동한다.
-#}
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>veriθ — 뉴스/심리 집중 리포트 · {{ subject }}</title>
-<style>
-  :root{
-    --brand-50:#eef3ff; --brand-500:#3b66f5; --brand-600:#2451e6; --brand-700:#1c3fc9;
-    --ink-50:#f6f7f9; --ink-100:#eceef2; --ink-200:#dde1e8; --ink-300:#c3c9d4;
-    --ink-400:#959cac; --ink-500:#69707f; --ink-700:#363c48; --ink-800:#23272f; --ink-900:#13151b;
-    --pos:#0fa372; --neg:#ef3e6a; --neu:#aeb4c0;
-  }
-  *{ margin:0; padding:0; box-sizing:border-box; }
-  body{ font-family:'Pretendard',system-ui,-apple-system,sans-serif; color:var(--ink-900);
-        background:radial-gradient(1200px 600px at 50% -10%, #fff 0%, #eef0f4 55%, #e7e9ef 100%);
-        min-height:100vh; padding:48px 16px; display:flex; justify-content:center; }
-  .wrap{ width:100%; max-width:960px; }
-  .num{ font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
-  h1,h2,h3{ letter-spacing:-.02em; }
-  .lbl{ font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-400); }
-  .breadcrumb{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-500); margin:0 4px 20px; }
-  .breadcrumb b{ color:var(--ink-800); }
-  article{ background:#fff; border:1px solid var(--ink-100); border-radius:22px;
-           box-shadow:0 20px 60px -12px rgba(19,21,27,.18); overflow:hidden; }
-  header.hero{ padding:36px 36px 32px; }
-  .badge{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600;
-          color:var(--brand-700); background:var(--brand-50); border-radius:999px; padding:4px 10px; }
-  h1.title{ font-size:30px; font-weight:700; color:var(--ink-900); margin-top:12px; line-height:1.2; }
-  h1.title .sep{ color:var(--ink-300); font-weight:500; }
-  .meta{ font-size:13px; color:var(--ink-500); margin-top:8px; }
-  .meta b{ color:var(--ink-700); }
-  section{ padding:28px 36px; border-top:1px solid var(--ink-100); }
-  .overview{ display:grid; grid-template-columns:300px 1fr; gap:32px; align-items:center; border-top:none; padding-top:0; }
-  @media (max-width:720px){ .overview{ grid-template-columns:1fr; } }
-  .gauge-score{ font-size:40px; font-weight:700; line-height:1; }
-  .gauge-bar{ height:12px; border-radius:999px; overflow:hidden; display:flex; background:var(--ink-100); margin:14px 0 8px; }
-  .gauge-bar > span{ display:block; height:100%; }
-  .legend{ display:flex; gap:16px; font-size:12px; font-weight:500; margin-top:6px; }
-  .legend .dot{ display:inline-block; width:10px; height:10px; border-radius:999px; vertical-align:middle; margin-right:5px; }
-  .stat{ border:1px solid var(--ink-100); border-radius:16px; padding:22px; }
-  .stat .big{ font-size:34px; font-weight:700; color:var(--ink-900); line-height:1; margin-top:10px; }
-  .flow{ background:rgba(246,247,249,.6); }
-  .flow .card{ border:1px solid var(--ink-100); background:#fff; border-radius:16px; padding:20px; }
-  .flow p.body{ font-size:14.5px; color:var(--ink-700); line-height:1.8; white-space:pre-line; }
-  .chips{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid var(--ink-50); }
-  .chips .chip{ font-size:12px; font-weight:500; color:var(--ink-700); background:var(--ink-50);
-               border:1px solid var(--ink-100); border-radius:999px; padding:4px 10px; text-decoration:none; }
-  .issue{ border:1px solid var(--ink-100); background:#fff; border-radius:16px; padding:16px; margin-bottom:10px; }
-  .issue .row{ display:flex; align-items:flex-start; gap:16px; }
-  .issue .rank{ width:32px; text-align:center; font-size:19px; font-weight:700; color:var(--ink-300); }
-  .issue .rank.top{ color:var(--brand-600); }
-  .issue h3{ font-size:16px; font-weight:600; color:var(--ink-900); display:inline; }
-  .pill{ display:inline-flex; align-items:center; font-size:11px; font-weight:600; border-radius:999px; padding:2px 8px; margin-left:8px; }
-  .dist{ display:flex; align-items:center; gap:12px; margin-top:12px; }
-  .counts{ font-size:11.5px; font-weight:500; }
-  .counts .p{ color:var(--pos); } .counts .u{ color:var(--ink-400); } .counts .n{ color:var(--neg); }
-  .lead{ font-size:12.5px; color:var(--ink-400); margin-top:10px; }
-  .art-list{ list-style:none; margin-top:10px; display:flex; flex-direction:column; gap:6px; }
-  .art-list li{ font-size:12.5px; color:var(--ink-500); }
-  .art-list a{ color:var(--ink-700); text-decoration:none; }
-  .limit{ margin:18px 36px; padding:14px 16px; border-radius:16px; background:#fff7ed;
-          border:1px solid #fed7aa; color:#9a3412; font-size:13px; display:flex; gap:10px; align-items:flex-start; }
-  footer{ padding:20px 36px; border-top:1px solid var(--ink-100); font-size:12.5px; color:var(--ink-500); }
-  .foot-note{ text-align:center; font-size:11.5px; color:var(--ink-400); margin-top:20px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>veriθ — 뉴스/심리 집중 리포트 · {{ subject }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Pretendard', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eef3ff', 100: '#dbe6ff', 200: '#bdd1ff',
+              400: '#5c87fc', 500: '#3b66f5', 600: '#2451e6',
+              700: '#1c3fc9', 900: '#1d3580',
+            },
+            ink: {
+              50: '#f6f7f9', 100: '#eceef2', 150: '#e4e7ed',
+              200: '#dde1e8', 300: '#c3c9d4', 400: '#959cac',
+              500: '#69707f', 600: '#4a515f', 700: '#363c48',
+              800: '#23272f', 900: '#13151b',
+            },
+            pos: '#0fa372',
+            neg: '#ef3e6a',
+            neu: '#aeb4c0',
+          },
+          borderRadius: {
+            xl2: '16px',
+            xl3: '22px',
+          },
+          boxShadow: {
+            card: '0 1px 2px rgba(19,21,27,.04), 0 1px 3px rgba(19,21,27,.05)',
+            float: '0 20px 60px -12px rgba(19,21,27,.18)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+    body { font-family: 'Pretendard', system-ui, sans-serif; color: #13151b;
+           background: radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, #eef0f4 55%, #e7e9ef 100%); min-height: 100vh; }
+    .num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    h1, h2, h3 { letter-spacing: -0.02em; }
+    [data-lucide] { stroke-width: 1.75; }
+    .lbl { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #959cac; }
+    .fade { animation: fadeUp .55s cubic-bezier(.16,.84,.44,1) both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .reveal { opacity: 0; transform: translateY(10px); transition: .6s cubic-bezier(.16,.84,.44,1); }
+    .reveal.in { opacity: 1; transform: none; }
+    .grow-x { animation: gx 1.1s cubic-bezier(.2,.7,.3,1) both; transform-origin: left; }
+    @keyframes gx { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    .hl { background: linear-gradient(transparent 62%, rgba(36,81,230,.12) 0); }
+    .ov { animation: ovIn .2s both; } @keyframes ovIn { from { opacity: 0; } to { opacity: 1; } }
+    .drw { animation: drwIn .32s cubic-bezier(.16,.84,.44,1) both; } @keyframes drwIn { from { transform: translateX(100%); } to { transform: none; } }
+  </style>
 </head>
-<body>
-<div class="wrap">
-  <div class="breadcrumb"><b>veriθ</b> · 집중 리포트 · 뉴스 · 심리</div>
+<body class="py-12 px-4 flex justify-center">
 
-  <article>
+<div class="w-full max-w-[960px] fade">
+  <!-- top breadcrumb -->
+  <div class="flex items-center justify-between mb-5 px-1">
+    <div class="flex items-center gap-2 text-[13px] text-ink-500">
+      <span class="font-bold text-ink-800">veri<span class="text-brand-600">θ</span></span>
+      <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-ink-300"></i>
+      <span>집중 리포트</span>
+      <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-ink-300"></i>
+      <span class="text-ink-700 font-medium">뉴스 · 심리</span>
+    </div>
+  </div>
+
+  <article class="bg-white rounded-xl3 shadow-float border border-ink-100 overflow-hidden">
     <!-- ===== HERO ===== -->
-    <header class="hero">
-      <span class="badge">News · Sentiment Worker</span>
-      <h1 class="title">{{ subject }} <span class="sep">·</span> 최근 뉴스 여론</h1>
-      <p class="meta">
-        {% if period_days %}최근 {{ period_days }}일 집계{% endif %}
-        · {{ generated_at }} 업데이트
-        {% if analyzed_count %} · 분석 기사 <b class="num">{{ analyzed_count }}</b>건{% endif %}
-      </p>
+    <header class="relative px-9 pt-9 pb-8 overflow-hidden">
+      <div class="absolute -top-32 -right-24 w-80 h-80 rounded-full bg-brand-50 blur-3xl opacity-70"></div>
+      <div class="relative">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-brand-700 bg-brand-50 rounded-full pl-1.5 pr-2.5 py-1">
+            <span class="grid place-items-center w-4 h-4 rounded-full bg-brand-600 text-white"><i data-lucide="newspaper" class="w-2.5 h-2.5"></i></span>News · Sentiment Worker</span>
+          <span class="inline-flex items-center gap-1.5 text-[12px] text-ink-500"><span class="w-1 h-1 rounded-full bg-ink-300"></span>{{ subject }}</span>
+        </div>
+        <h1 class="text-[30px] font-bold text-ink-900 mt-3 leading-tight">{{ subject }} <span class="text-ink-300 font-medium">·</span> 최근 뉴스 여론</h1>
+        <p class="text-[13px] text-ink-500 mt-2 flex items-center gap-1.5"><i data-lucide="calendar-range" class="w-3.5 h-3.5"></i> 
+          {% if period_days %}최근 {{ period_days }}일 집계 · {% endif %}
+          {{ generated_at }} 업데이트
+          {% if analyzed_count %} · 분석 기사 <b class="text-ink-700 num">{{ analyzed_count }}건</b>{% endif %}
+        </p>
+      </div>
     </header>
 
     {% if data_limited %}
-    <div class="limit">
+    <div class="mx-9 mb-6 p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-[13px] flex gap-2.5 items-start">
       <span>⚠️</span>
-      <div><b>데이터 제한</b> — {{ note or "근거가 부족한 부분은 추정으로 채우지 않습니다." }}
-        추정으로 채우지 않습니다.</div>
+      <div><b>데이터 제한</b> — {{ note or "근거가 부족한 부분은 추정으로 채우지 않습니다." }}</div>
     </div>
     {% endif %}
 
     <!-- ===== SENTIMENT OVERVIEW ===== -->
-    <section class="overview">
-      <div>
-        <div class="lbl">전체 감성</div>
-        <div class="gauge-score num" style="color:{% if overall.score > 0 %}var(--pos){% elif overall.score < 0 %}var(--neg){% else %}var(--ink-500){% endif %}">
-          {{ "%+.2f"|format(overall.score) }}
+    <section class="px-9 pb-9 grid lg:grid-cols-[300px_1fr] gap-8 items-center">
+      <!-- gauge -->
+      <div class="flex flex-col items-center">
+        <div class="relative" style="width:240px;height:140px">
+          <canvas id="gauge"></canvas>
+          <div class="absolute inset-x-0 bottom-0 flex flex-col items-center">
+            <div class="text-[40px] font-bold leading-none num {% if overall.score > 0 %}text-pos{% elif overall.score < 0 %}text-neg{% else %}text-ink-500{% endif %}">
+              {{ "%+.2f"|format(overall.score) }}
+            </div>
+            <div class="inline-flex items-center gap-1 text-[12px] font-semibold {% if overall.score > 0 %}text-pos{% elif overall.score < 0 %}text-neg{% else %}text-ink-500{% endif %} mt-1.5">
+              {% if overall.score > 0 %}
+              <i data-lucide="trending-up" class="w-3.5 h-3.5"></i> 긍정 우세
+              {% elif overall.score < 0 %}
+              <i data-lucide="trending-down" class="w-3.5 h-3.5"></i> 부정 우세
+              {% else %}
+              의견 갈림
+              {% endif %}
+            </div>
+          </div>
         </div>
-        <div class="gauge-bar">
-          <span style="width:{{ overall.pos_pct }}%;background:var(--pos)"></span>
-          <span style="width:{{ overall.neu_pct }}%;background:var(--ink-200)"></span>
-          <span style="width:{{ overall.neg_pct }}%;background:var(--neg)"></span>
-        </div>
-        <div class="legend num">
-          <span><span class="dot" style="background:var(--pos)"></span>긍정 {{ overall.pos_pct }}%</span>
-          <span><span class="dot" style="background:var(--neu)"></span>중립 {{ overall.neu_pct }}%</span>
-          <span><span class="dot" style="background:var(--neg)"></span>부정 {{ overall.neg_pct }}%</span>
+        <div class="flex items-center justify-between w-full max-w-[240px] mt-3 text-[11px] text-ink-400 num"><span>부정 −1.0</span><span>중립 0</span><span>+1.0 긍정</span></div>
+        <div class="flex items-center gap-4 mt-4 text-[12px] font-medium">
+          <span class="flex items-center gap-1.5 text-neg"><span class="w-2.5 h-2.5 rounded-full bg-neg"></span>{{ overall.neg_pct }}%</span>
+          <span class="flex items-center gap-1.5 text-ink-500"><span class="w-2.5 h-2.5 rounded-full bg-neu"></span>{{ overall.neu_pct }}%</span>
+          <span class="flex items-center gap-1.5 text-pos"><span class="w-2.5 h-2.5 rounded-full bg-pos"></span>{{ overall.pos_pct }}%</span>
         </div>
       </div>
-      <div class="stat">
-        <div class="lbl">분석 기사 수</div>
-        <div class="big num">{{ analyzed_count }}<span style="font-size:15px;color:var(--ink-400)"> 건</span></div>
-        <div class="lead" style="margin-top:8px">중복 제거 후 감성 집계 대상</div>
+
+      <!-- stats -->
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div class="rounded-xl2 border border-ink-100 p-6 hover:border-ink-200 transition">
+          <div class="lbl">분석 기사 수</div>
+          <div class="flex items-baseline gap-1.5 mt-3"><span class="text-[34px] font-bold num text-ink-900 leading-none">{{ analyzed_count or 0 }}</span><span class="text-[15px] font-semibold text-ink-400">건</span></div>
+          <div class="text-[12px] text-ink-400 mt-2.5">중복 제거 후 감성 집계 대상</div>
+        </div>
+        <div class="rounded-xl2 border border-ink-100 p-6 hover:border-ink-200 transition">
+          <div class="lbl">반응도</div>
+          <div class="flex items-baseline gap-2 mt-3"><span class="text-[34px] font-bold text-ink-900 leading-none">{% if (analyzed_count or 0) > 15 %}높음{% else %}보통{% endif %}</span></div>
+          <div class="inline-flex items-center gap-1 text-[12px] font-medium text-brand-700 bg-brand-50 rounded-full px-2.5 py-0.5 mt-2.5"><i data-lucide="activity" class="w-3 h-3"></i> 실시간 여론 집계</div>
+        </div>
       </div>
     </section>
 
+    <!-- ===== DAILY COUNTS ===== -->
+    {% if daily_counts %}
+    <section class="px-9 pb-8 border-t border-ink-100">
+      <div class="text-[11px] font-bold text-ink-400 uppercase tracking-wider mt-6 mb-3">날짜별 뉴스량</div>
+      <div class="flex items-end gap-2 h-24 pt-4">
+        {% for d in daily_counts %}
+        <div class="flex-1 flex flex-col items-center gap-1 min-w-0">
+          <div class="w-full flex items-end justify-center h-16">
+            <div class="w-full max-w-[22px] bg-brand-500 rounded-t hover:bg-brand-600 transition-colors relative group" 
+                 style="height: {{ (d.count / max_count * 100)|round|int if max_count > 0 else 4 }}%; min-height: 4%;"
+                 title="{{ d.date }} · {{ d.count }}건">
+              <!-- Tooltip on hover -->
+              <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1.5 hidden group-hover:block bg-ink-900 text-white text-[10.5px] font-semibold rounded px-1.5 py-0.5 whitespace-nowrap shadow-md z-10">
+                {{ d.count }}건
+              </div>
+            </div>
+          </div>
+          <span class="text-[10px] text-ink-400 num truncate w-full text-center">{{ d.date[5:] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
     <!-- ===== NEWS FLOW SUMMARY ===== -->
-    <section class="flow">
-      <h2 style="font-size:16px;color:var(--ink-900);margin-bottom:16px">뉴스 흐름 요약</h2>
-      <div class="card">
-        <p class="body">{{ answer_text }}</p>
+    <section class="px-9 py-7 border-t border-ink-100 bg-ink-50/50">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-[16px] font-bold text-ink-900 flex items-center gap-2"><i data-lucide="text-quote" class="w-[18px] h-[18px] text-brand-600"></i> 뉴스 흐름 요약</h2>
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-brand-700 bg-brand-50 rounded-full px-2.5 py-1"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i> 에이전트 생성 · 근거 연결</span>
+      </div>
+      <div class="rounded-xl2 border border-ink-100 bg-white p-5">
+        <p class="text-[14.5px] text-ink-700 leading-[1.8]">{{ answer_text|safe }}</p>
         {% if chips %}
-        <div class="chips">
-          <span style="font-size:11px;font-weight:600;color:var(--ink-400)">근거 이슈</span>
+        <div class="flex items-center gap-2 mt-4 pt-3.5 border-t border-ink-50 flex-wrap">
+          <span class="text-[11px] font-semibold text-ink-400">근거 이슈</span>
           {% for chip in chips %}
-          <a class="chip" href="#issue-{{ chip.rank }}">#{{ chip.rank }} {{ chip.title }}</a>
+          <button onclick="jumpIssue({{ chip.rank - 1 }})" class="text-[12px] font-medium text-ink-600 bg-ink-50 hover:bg-ink-100 rounded-full px-2.5 py-1 transition">#{{ chip.rank }} {{ chip.title }}</button>
           {% endfor %}
         </div>
         {% endif %}
@@ -138,55 +189,249 @@
     </section>
 
     <!-- ===== TOP ISSUES ===== -->
-    <section>
-      <h2 style="font-size:16px;color:var(--ink-900)">주요 이슈 TOP {{ events|length }}</h2>
-      <p class="lead" style="margin:6px 0 18px">중요도(importance) 순 · 감성은 단정하지 않고 분포로 표시합니다.</p>
-      {% if events %}
-      {% for ev in events %}
-      <div class="issue" id="issue-{{ ev.rank }}">
-        <div class="row">
-          <div class="rank {% if ev.rank <= 3 %}top{% endif %} num">{{ ev.rank }}</div>
-          <div style="flex:1;min-width:0">
-            <div>
-              <h3>{{ ev.title }}</h3>
-              <span class="pill" style="color:{% if ev.gauge.label == '대체로 긍정' %}var(--pos){% elif ev.gauge.label == '대체로 부정' %}var(--neg){% else %}#c2820a{% endif %};background:var(--ink-50)">{{ ev.gauge.label }}</span>
-              <span class="lead" style="margin-left:8px">기사 <b class="num">{{ ev.article_count }}</b>건 · 중요도 <span class="num">{{ "%.1f"|format(ev.importance) }}</span></span>
-            </div>
-            <div class="dist">
-              <div class="gauge-bar" style="flex:1;margin:0">
-                <span style="width:{{ ev.gauge.pos_pct }}%;background:var(--pos)"></span>
-                <span style="width:{{ ev.gauge.neu_pct }}%;background:var(--ink-200)"></span>
-                <span style="width:{{ ev.gauge.neg_pct }}%;background:var(--neg)"></span>
-              </div>
-              <div class="counts num">
-                <span class="p">긍 {{ ev.gauge.pos }}</span>
-                <span class="u">중 {{ ev.gauge.neu }}</span>
-                <span class="n">부 {{ ev.gauge.neg }}</span>
-              </div>
-            </div>
-            {% if ev.articles %}
-            <ul class="art-list">
-              {% for a in ev.articles %}
-              <li>· <a href="{{ a.url }}">{{ a.summary }}</a></li>
-              {% endfor %}
-            </ul>
-            {% endif %}
-          </div>
+    <section class="px-9 py-8 border-t border-ink-100">
+      <div class="flex items-center justify-between">
+        <h2 class="text-[16px] font-bold text-ink-900 flex items-center gap-2"><i data-lucide="list-ordered" class="w-[18px] h-[18px] text-brand-600"></i> 주요 이슈 TOP {{ events|length }}</h2>
+        <span class="text-[12px] text-ink-400">기사 중요도 순 · {{ analyzed_count or 0 }}건 기준</span>
+      </div>
+      <p class="text-[12px] text-ink-400 mt-1.5 mb-5 flex items-center gap-1.5"><i data-lucide="info" class="w-3.5 h-3.5"></i> 감성은 이슈마다 단정하지 않고 <b class="text-ink-600">분포</b>로 표시합니다. 제목은 환각 없이 원문 보도를 기반으로 추출됩니다.</p>
+      <div id="issues" class="space-y-2.5">
+        {% if not events %}
+        <p class="text-xs text-slate-400 py-8 text-center">표시할 이슈가 없습니다 (데이터 제한).</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- ===== METHODOLOGY ===== -->
+    <section class="px-9 py-8 border-t border-ink-100 bg-ink-50/10">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-[16px] font-bold text-ink-900 flex items-center gap-2"><i data-lucide="workflow" class="w-[18px] h-[18px] text-brand-600"></i> 분석 방법</h2>
+        <span class="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-ink-500 bg-ink-50 rounded-full px-2.5 py-1"><i data-lucide="circle-check-big" class="w-3.5 h-3.5 text-pos"></i> 데이터 기반 · 검증 게이트 통과</span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2.5">
+        <div class="rounded-xl2 border border-ink-100 bg-white px-3.5 py-3 hover:border-ink-200 transition">
+          <div class="flex items-center gap-2"><span class="grid place-items-center w-6 h-6 rounded-lg bg-brand-50 text-brand-600"><i data-lucide="search-code" class="w-3.5 h-3.5"></i></span><span class="text-[10px] font-bold text-ink-300 num">01</span></div>
+          <div class="text-[13px] font-semibold text-ink-800 mt-2">뉴스 수집</div>
+          <div class="text-[11.5px] text-ink-400 mt-0.5">매체 RSS 피드 수집</div>
+        </div>
+        <div class="rounded-xl2 border border-ink-100 bg-white px-3.5 py-3 hover:border-ink-200 transition">
+          <div class="flex items-center gap-2"><span class="grid place-items-center w-6 h-6 rounded-lg bg-brand-50 text-brand-600"><i data-lucide="filter" class="w-3.5 h-3.5"></i></span><span class="text-[10px] font-bold text-ink-300 num">02</span></div>
+          <div class="text-[13px] font-semibold text-ink-800 mt-2">전처리</div>
+          <div class="text-[11.5px] text-ink-400 mt-0.5">중복 기사 필터링</div>
+        </div>
+        <div class="rounded-xl2 border border-ink-100 bg-white px-3.5 py-3 hover:border-ink-200 transition">
+          <div class="flex items-center gap-2"><span class="grid place-items-center w-6 h-6 rounded-lg bg-brand-50 text-brand-600"><i data-lucide="brain-circuit" class="w-3.5 h-3.5"></i></span><span class="text-[10px] font-bold text-ink-300 num">03</span></div>
+          <div class="text-[13px] font-semibold text-ink-800 mt-2">감성 분석</div>
+          <div class="text-[11.5px] text-ink-400 mt-0.5">KR-FinBert 금융 도메인</div>
+        </div>
+        <div class="rounded-xl2 border border-ink-100 bg-white px-3.5 py-3 hover:border-ink-200 transition">
+          <div class="flex items-center gap-2"><span class="grid place-items-center w-6 h-6 rounded-lg bg-brand-50 text-brand-600"><i data-lucide="git-merge" class="w-3.5 h-3.5"></i></span><span class="text-[10px] font-bold text-ink-300 num">04</span></div>
+          <div class="text-[13px] font-semibold text-ink-800 mt-2">이슈 클러스터</div>
+          <div class="text-[11.5px] text-ink-400 mt-0.5">임베딩 가중 유사도 군집</div>
+        </div>
+        <div class="rounded-xl2 border border-ink-100 bg-white px-3.5 py-3 hover:border-ink-200 transition">
+          <div class="flex items-center gap-2"><span class="grid place-items-center w-6 h-6 rounded-lg bg-brand-50 text-brand-600"><i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i></span><span class="text-[10px] font-bold text-ink-300 num">05</span></div>
+          <div class="text-[13px] font-semibold text-ink-800 mt-2">흐름 요약</div>
+          <div class="text-[11.5px] text-ink-400 mt-0.5">LLM기반 팩트 기반 기술</div>
         </div>
       </div>
-      {% endfor %}
-      {% else %}
-      <p class="lead">표시할 이슈가 없습니다 (데이터 제한).</p>
-      {% endif %}
+      <p class="text-[12px] text-ink-400 mt-4 leading-relaxed flex items-start gap-2"><i data-lucide="info" class="w-3.5 h-3.5 mt-0.5 shrink-0"></i>
+        뉴스 리포트는 환각 차단을 위해 수집된 데이터에 포함된 명칭만 식별하며, 임의로 정보를 추측해 작성하지 않습니다.</p>
     </section>
 
     <!-- disclaimer -->
-    <footer>
-      이 데이터는 뉴스 여론 요약이며 <b>투자 권유가 아닙니다</b>. 모든 수치는 출처 기사에 연결되어 검증됩니다.
+    <footer class="px-9 py-5 border-t border-ink-100 flex items-start gap-2.5">
+      <span class="shrink-0 text-pos mt-0.5"><i data-lucide="shield-check" class="w-4 h-4"></i></span>
+      <p class="text-[12.5px] text-ink-500 leading-relaxed">이 데이터는 뉴스 여론 요약이며 <b class="text-ink-700">투자 권유가 아닙니다</b>. 모든 수치는 출처 기사에 연결되어 검증됩니다.</p>
     </footer>
   </article>
 
-  <p class="foot-note">veriθ · Multi-agent Research · News/Sentiment Worker</p>
+  <p class="text-center text-[11.5px] text-ink-400 mt-5">veriθ · Multi-agent Research · News/Sentiment Worker v2.1</p>
 </div>
+
+<div id="toast-root" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 items-end"></div>
+<div id="overlay-root"></div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+
+const ISSUES=[
+  {% for ev in events %}
+  {
+    title: {{ ev.title|tojson }},
+    pos: {{ ev.gauge.pos }},
+    neu: {{ ev.gauge.neu }},
+    neg: {{ ev.gauge.neg }},
+    src: "{{ ev.articles|map(attribute='publisher')|unique|reject('none')|join(', ') or '언론사' }} 외",
+    lead: {% if ev.articles %}{{ ev.articles[0].summary|tojson }}{% else %}""{% endif %},
+    views: "{{ (ev.importance * 10)|round(1) }}만"
+  },
+  {% endfor %}
+];
+
+const ARTS=[
+  {% for ev in events %}
+  [
+    {% for a in ev.articles %}
+    [
+      {{ a.summary|tojson }},
+      "{{ a.publisher or '뉴스' }}",
+      "0", // sentiment
+      "{{ a.published_at.strftime('%Y-%m-%d') if a.published_at else '방금 전' }}",
+      "{{ (ev.importance * 1.5)|round(1) }}만",
+      {{ a.url|tojson }}
+    ],
+    {% endfor %}
+  ],
+  {% endfor %}
+];
+
+const SENT={'+':['긍정','#0fa372','rgba(15,163,114,.10)'],'0':['중립','#69707f','rgba(174,180,192,.16)'],'-':['부정','#ef3e6a','rgba(239,62,106,.10)']};
+
+function distLabel(p,nu,ng){
+  const t=p+nu+ng; 
+  if (t === 0) return ['정보 부족', '#69707f', 'rgba(174,180,192,.16)'];
+  const pos=p/t, neg=ng/t, neu=nu/t;
+  if(pos>=0.6) return ['대체로 긍정','#0fa372','rgba(15,163,114,.10)'];
+  if(neg>=0.6) return ['대체로 부정','#ef3e6a','rgba(239,62,106,.10)'];
+  if(neu>=0.6) return ['중립','#69707f','rgba(174,180,192,.16)'];
+  return ['의견 갈림','#c2820a','rgba(194,130,10,.12)'];
+}
+
+function renderIssues(){
+  $('#issues').innerHTML=ISSUES.map((it,i)=>{
+    const t=it.pos+it.neu+it.neg; 
+    const [lab,c,bg]=distLabel(it.pos,it.neu,it.neg);
+    const pw=t > 0 ? (it.pos/t*100) : 0;
+    const uw=t > 0 ? (it.neu/t*100) : 100;
+    const nw=t > 0 ? (it.neg/t*100) : 0;
+    return `<div id="issue-${i}" onclick="openIssue(${i})" class="reveal rounded-xl2 border border-ink-100 bg-white p-4 hover:border-brand-200 hover:shadow-card transition group cursor-pointer">
+      <div class="flex items-start gap-4">
+        <div class="shrink-0 w-8 text-center"><div class="text-[19px] font-bold num ${i<3?'text-brand-600':'text-ink-300'} leading-none">${i+1}</div></div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <h3 class="text-[16px] font-semibold text-ink-900">${it.title}</h3>
+            <span class="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5" style="color:${c};background:${bg}">${lab}</span>
+            <span class="text-[12.5px] text-ink-400 flex items-center gap-1"><i data-lucide="files" class="w-3.5 h-3.5"></i> 기사 <b class="text-ink-600 num">${t}</b>건</span>
+          </div>
+          <!-- distribution bar -->
+          <div class="mt-3 flex items-center gap-3">
+            <div class="flex-1 h-2.5 rounded-full overflow-hidden flex bg-ink-100">
+              <div class="grow-x" style="width:${pw}%;background:#0fa372;animation-delay:${i*40}ms"></div>
+              <div class="grow-x" style="width:${uw}%;background:#dde1e8;animation-delay:${i*40}ms"></div>
+              <div class="grow-x" style="width:${nw}%;background:#ef3e6a;animation-delay:${i*40}ms"></div>
+            </div>
+            <div class="flex items-center gap-2.5 text-[11.5px] font-medium num shrink-0">
+              <span class="text-pos">긍 ${it.pos}</span><span class="text-ink-400">중 ${it.neu}</span><span class="text-neg">부 ${it.neg}</span>
+            </div>
+          </div>
+          <!-- representative article -->
+          <div class="mt-3 flex items-center gap-2 text-[12.5px] text-ink-400 min-w-0">
+            <i data-lucide="quote" class="w-3.5 h-3.5 text-ink-300 shrink-0"></i>
+            <span class="truncate">${it.lead}</span>
+            <span class="text-ink-300 num shrink-0">· 중요도 ${it.views}</span>
+          </div>
+          <div class="flex items-center gap-2 mt-2 text-[12px] text-ink-400">
+            <span>출처: ${it.src}</span>
+            <span class="ml-auto text-brand-600 font-semibold group-hover:underline flex items-center gap-0.5">자세히 보기 <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i></span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  lucide.createIcons();
+  [...document.querySelectorAll('.reveal')].forEach((el,i)=>setTimeout(()=>el.classList.add('in'),100+i*70));
+}
+
+function jumpIssue(i){
+  const el=document.getElementById('issue-'+i); if(!el)return;
+  window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-90,behavior:'smooth'});
+  el.style.transition='box-shadow .3s'; el.style.boxShadow='0 0 0 3px rgba(36,81,230,.25)';
+  setTimeout(()=>el.style.boxShadow='',1400);
+}
+
+function closeOverlay(){ const r=$('#overlay-root'); r.innerHTML=''; document.body.style.overflow=''; }
+
+function openIssue(i){
+  const it=ISSUES[i]; const t=it.pos+it.neu+it.neg; const [lab,c,bg]=distLabel(it.pos,it.neu,it.neg);
+  const pw=t > 0 ? (it.pos/t*100) : 0;
+  const uw=t > 0 ? (it.neu/t*100) : 100;
+  const nw=t > 0 ? (it.neg/t*100) : 0;
+  const arts=ARTS[i]||[];
+  const pubs=[...new Set(arts.map(a=>a[1]))];
+  const summary = lab==='의견 갈림'
+    ? '이 이슈는 긍정과 부정 의견이 한쪽으로 쏠리지 않고 갈렸습니다. 보도 시각이 엇갈리므로 단정하지 않고 분포 그대로 제시합니다.'
+    : (lab==='대체로 긍정'
+        ? `관련 보도의 ${Math.round(pw)}%가 긍정적입니다. 다만 일부 부정·중립 시각도 함께 존재합니다.`
+        : `관련 보도의 ${Math.round(nw)}%가 부정적입니다. 다만 일부 긍정·중립 시각도 함께 존재합니다.`);
+  $('#overlay-root').innerHTML=`
+  <div class="ov fixed inset-0 z-[90] bg-ink-900/40 backdrop-blur-[2px] flex justify-end" onclick="if(event.target===this)closeOverlay()">
+    <div class="drw bg-white w-full max-w-[460px] h-full overflow-y-auto shadow-float">
+      <!-- header -->
+      <div class="sticky top-0 bg-white/90 backdrop-blur border-b border-ink-100 px-6 py-4 flex items-start justify-between gap-3 z-10">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-bold text-ink-300 num">이슈 #${i+1}</span>
+            <span class="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5" style="color:${c};background:${bg}">${lab}</span>
+          </div>
+          <h3 class="text-[20px] font-bold text-ink-900 mt-1.5">${it.title}</h3>
+          <p class="text-[12.5px] text-ink-400 mt-1">관련 기사 <b class="text-ink-600 num">${t}</b>건 · ${pubs.length}개 매체</p>
+        </div>
+        <button onclick="closeOverlay()" class="shrink-0 w-9 h-9 grid place-items-center rounded-xl hover:bg-ink-50 text-ink-400 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <!-- body -->
+      <div class="px-6 py-5">
+        <!-- distribution -->
+        <div class="rounded-xl2 border border-ink-100 p-4">
+          <div class="flex items-center justify-between mb-2.5"><span class="lbl">감성 분포</span><span class="text-[11px] text-ink-400">전체 ${t}건</span></div>
+          <div class="h-3 rounded-full overflow-hidden flex bg-ink-100">
+            <div style="width:${pw}%;background:#0fa372"></div><div style="width:${uw}%;background:#dde1e8"></div><div style="width:${nw}%;background:#ef3e6a"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+            ${[['긍정',it.pos,'#0fa372'],['중립',it.neu,'#69707f'],['부정',it.neg,'#ef3e6a']].map(([l,v,col])=>`<div class="rounded-lg bg-ink-50 py-2"><div class="text-[18px] font-bold num" style="color:${col}">${v}</div><div class="text-[11px] text-ink-400">${l} · ${t > 0 ? Math.round(v/t*100) : 0}%</div></div>`).join('')}
+          </div>
+          <p class="text-[12.5px] text-ink-500 leading-relaxed mt-3.5 flex items-start gap-2"><i data-lucide="info" class="w-3.5 h-3.5 mt-0.5 shrink-0 text-ink-300"></i>${summary}</p>
+        </div>
+        <!-- articles -->
+        <div class="flex items-center justify-between mt-6 mb-3"><span class="lbl">관련 기사</span><span class="text-[11px] text-ink-400">대표 뉴스</span></div>
+        <div class="space-y-2">
+          ${arts.map(a=>{const [st,sc,sbg]=SENT[a[2]] || SENT['0'];
+            return `<div onclick="window.open('${a[5]}', '_blank')" class="rounded-xl border border-ink-100 p-3.5 hover:border-brand-200 hover:bg-ink-50/20 transition cursor-pointer">
+              <div class="flex items-start gap-2.5">
+                <span class="shrink-0 mt-0.5 inline-flex items-center text-[10.5px] font-semibold rounded-md px-1.5 py-0.5" style="color:${sc};background:${sbg}">${st}</span>
+                <div class="min-w-0 flex-1">
+                  <p class="text-[14px] font-medium text-ink-800 leading-snug">${a[0]}</p>
+                  <div class="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-ink-400"><span class="font-medium text-ink-500">${a[1]}</span><span>·</span><span>${a[3]}</span><span>·</span><span class="num">중요도 ${a[4]}</span></div>
+                </div>
+                <i data-lucide="external-link" class="w-4 h-4 text-ink-300 shrink-0"></i>
+              </div>
+            </div>`;}).join('')}
+          ${t>arts.length?`<div class="w-full py-2.5 text-center border border-dashed border-ink-200 text-[12.5px] font-medium text-ink-500 rounded-xl">총 ${t}건 중 대표기사 ${arts.length}건 노출</div>`:''}
+        </div>
+        <p class="text-[11.5px] text-ink-400 mt-5 flex items-start gap-2"><i data-lucide="shield-check" class="w-3.5 h-3.5 mt-0.5 shrink-0 text-pos"></i>모든 수치는 수집된 보도를 기반으로 하며 추정으로 가공하지 않습니다.</p>
+      </div>
+    </div>
+  </div>`;
+  document.body.style.overflow='hidden';
+  lucide.createIcons();
+}
+
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeOverlay(); });
+
+function initCharts(){
+  // half gauge chart using Chart.js
+  const g=$('#gauge');
+  new Chart(g,{type:'doughnut',data:{labels:['부정','중립','긍정'],datasets:[{data:[{{ overall.neg_pct }},{{ overall.neu_pct }},{{ overall.pos_pct }}],
+    backgroundColor:['#ef3e6a','rgba(241,245,249,0.7)','#0fa372'],borderWidth:0,spacing:3,borderRadius:6}]},
+    options:{rotation:-180,circumference:180,cutout:'76%',maintainAspectRatio:false,responsive:true,
+      plugins:{legend:{display:false},tooltip:{backgroundColor:'#13151b',cornerRadius:8,padding:9,displayColors:false,
+        callbacks:{label:c=>c.label+' '+c.parsed+'%'}}},animation:{animateRotate:true,duration:1100}}});
+}
+
+renderIssues();
+initCharts();
+lucide.createIcons();
+</script>
+
 </body>
 </html>

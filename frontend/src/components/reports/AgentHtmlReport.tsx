@@ -28,7 +28,7 @@ export function AgentHtmlReport({ html }: { html: string }) {
       ref={ref}
       srcDoc={html}
       onLoad={onLoad}
-      sandbox="allow-same-origin"
+      sandbox="allow-same-origin allow-scripts allow-popups"
       title="agent-report"
       className="w-full rounded-2xl border border-slate-200/80 bg-white"
       style={{ height }}
