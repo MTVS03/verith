@@ -35,7 +35,7 @@ MAX_EXPLAIN_RETRIES: int = 2
 # 저장 계약(payload)에 같은 값을 싣는다 — "정의는 한 곳"이라 '실제 호출한 모델'과
 # 'payload에 기록한 모델'이 어긋날 수 없다(둘을 따로 두면 모델 교체 시 기록이 낡음).
 INTERPRETER_PROVIDER: str = "openai"
-INTERPRETER_MODEL: str = "gpt-4o-mini"
+INTERPRETER_MODEL: str = "gpt-5.4-mini"
 
 # ── 표시 창 ───────────────────────────────────────────────
 # 날짜별 시세 표(종가·전일비·등락률·거래량)의 행 수. 네이버식 표의 "기준점"
