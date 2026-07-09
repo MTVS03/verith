@@ -493,6 +493,70 @@ def test_indicator_cards_backward_safe_empty_payload():
     assert rm.indicator_cards == []                                # 구버전/빈 payload → 빈 배열
 
 
+def test_calc_basis_series_empty_when_no_chart_series():
+    # _raw_cards 는 annotations 만(candles/overlays/subcharts 없음) → 시계열/파생 모두 빈값(무크래시).
+    rm = build_read_model(report_id=_RID, raw=_raw_cards(), stock=None)
+    cards = {c.indicator: c for c in rm.indicator_cards}
+    assert cards["moving_average"].calc_basis.recent_ma == []
+    assert cards["moving_average"].calc_basis.disparity_20_pct is None
+    assert cards["rsi"].calc_basis.rsi_recent_points == []
+    assert cards["volume"].calc_basis.volume_recent_bars == []
+    assert cards["volume"].calc_basis.current_volume is None and cards["volume"].calc_basis.avg_volume is None
+
+
+def _raw_cards_series() -> dict:
+    """카드 시계열 projection용 — 1y 일봉 chart_data 에 overlays/subcharts/candles 를 채운다."""
+    raw = _raw_cards()
+    dates = ["2026-06-25", "2026-06-26", "2026-06-27", "2026-06-30"]
+    ma5 = [82300, 82500, 82700, 82900]
+    ma20 = [80900, 81050, 81200, 81400]
+    ma60 = [80500, 80550, 80580, 80600]
+    vols = [10500000, 11000000, 10800000, 11800000]
+    raw["charts"] = [{"period": "1y", "chart_data": {
+        "candle_unit": "D",
+        "candles": [{"date": d, "close": (83200 if i == len(dates) - 1 else 82000), "volume": v}
+                    for i, (d, v) in enumerate(zip(dates, vols))],
+        "overlays": {"moving_average": [
+            {"window": 5, "points": [{"date": d, "value": v} for d, v in zip(dates, ma5)]},
+            {"window": 20, "points": [{"date": d, "value": v} for d, v in zip(dates, ma20)]},
+            {"window": 60, "points": [{"date": d, "value": v} for d, v in zip(dates, ma60)]},
+        ]},
+        "subcharts": {"rsi": {"period": 14, "points": [
+            {"date": d, "value": v} for d, v in zip(dates, [55.1, 56.4, 57.0, 58.2])]}},
+        "annotations": [],
+    }}]
+    # 상대거래량 1.10 (avg 역산 확인용)
+    for s in raw["technical_signals"]:
+        if s["indicator"] == "volume":
+            s["metrics"] = ["거래량비 1.10"]
+    return raw
+
+
+def test_calc_basis_ma_table_and_disparity():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards_series(), stock=None)
+    cb = next(c for c in rm.indicator_cards if c.indicator == "moving_average").calc_basis
+    assert len(cb.recent_ma) == 4                                  # 날짜 union, 최근 N(<8)
+    assert cb.recent_ma[-1] == {"date": "2026-06-30", "ma5": 82900, "ma20": 81400, "ma60": 80600}
+    # 20일 이격도 = (현재종가 83200 − 20MA 81400)/81400 ×100
+    assert cb.disparity_20_pct == round((83200 - 81400) / 81400 * 100, 2)
+
+
+def test_calc_basis_rsi_recent_points():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards_series(), stock=None)
+    cb = next(c for c in rm.indicator_cards if c.indicator == "rsi").calc_basis
+    assert len(cb.rsi_recent_points) == 4
+    assert cb.rsi_recent_points[-1] == {"date": "2026-06-30", "value": 58.2}
+
+
+def test_calc_basis_volume_bars_and_avg():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards_series(), stock=None)
+    cb = next(c for c in rm.indicator_cards if c.indicator == "volume").calc_basis
+    assert len(cb.volume_recent_bars) == 4
+    assert cb.volume_recent_bars[-1] == {"date": "2026-06-30", "volume": 11800000}
+    assert cb.current_volume == 11800000
+    assert cb.avg_volume == round(11800000 / 1.10, 1)             # 당일/상대거래량 역산
+
+
 # ── 1d intraday 조건부 계약 잠금 (best-effort — 있으면 흐른다) ────────────────
 def _raw_with_1d() -> dict:
     raw = _raw()

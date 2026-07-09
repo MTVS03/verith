@@ -139,8 +139,18 @@
 | `llm_detail`·`detail_source` | 지표 설명 문장·출처(llm/template_fallback) |
 | `verified` | **리포트 전체 verification 통과 여부**(지표별 세부 검증 아님 — 후속) |
 | `code_metrics[]` | raw 계산 칩(예: "5MA 449300.0") |
-| `calc_basis` | 지표별 구조화 근거(**metrics 방어적 파싱**, 실패 시 null): MA `ma{5,20,60}`·`alignment`(정/역배열) / RSI `rsi_period`·`oversold`·`overbought` / volume `relative_volume` / S·R `support`·`resistance`·`position` / 공통 `related_annotations[]`(관련 이벤트 **최근 3개**) |
+| `calc_basis` | 지표별 구조화 근거(**metrics 방어적 파싱**, 실패 시 null): MA `ma{5,20,60}`·`alignment`(정/역배열) / RSI `rsi_period`·`oversold`·`overbought` / volume `relative_volume` / S·R `support`·`resistance`·`position` / 공통 `related_annotations[]`(관련 이벤트 **최근 3개**) + **시계열/파생**(아래) |
 | `pattern_candidates[]` | **패턴 카드만** — chart annotations 중 `cup_handle_candidate`·`box_breakout_candidate`·`box_range_candidate` 요약(최근 6개) |
+
+**calc_basis 시계열·파생값(카드 내 표·스파크라인·바 용 — 일봉 chart_data projection, 계산 재실행 없음).** 원천은
+`1y` 일봉 차트(없으면 최장 일봉 `candle_unit:"D"`)의 저장된 `overlays`/`subcharts`/`candles`. 시계열 없으면 빈 배열/`null`:
+| 필드 | 지표 | 의미 / 렌더 |
+|---|---|---|
+| `recent_ma[]` | 이동평균 | `[{date, ma5, ma20, ma60}]` 최근 8행 — **일자별 MA 표**(overlays.moving_average window별 zip). 결측 window 는 그 키가 `null` |
+| `disparity_20_pct` | 이동평균 | `(현재종가−20MA)/20MA ×100` — **20일 이격도** |
+| `rsi_recent_points[]` | RSI | `[{date, value}]` 최근 30 — **RSI 추이 스파크라인**(subcharts.rsi.points) |
+| `volume_recent_bars[]` | 거래량 | `[{date, volume}]` 최근 8 — **거래량 바**(candles[].volume) |
+| `current_volume` / `avg_volume` | 거래량 | 당일 거래량(최근 candle) / 20일 평균(= 당일 ÷ `relative_volume`, 신호가 쓴 비율 역산 → drift 없음) |
 
 > **컵앤핸들(중요):** `technical_signals.pattern` 은 최신 캔들 성격 요약이고, **컵앤핸들은 annotation-only** 다
 > (`cup_handle_candidate`). 그래서 signals 만 보면 안 보인다 — **패턴 카드의 `pattern_candidates`** 에서 읽는다

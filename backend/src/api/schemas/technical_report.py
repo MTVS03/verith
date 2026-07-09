@@ -246,6 +246,13 @@ class IndicatorCalcBasis(BaseModel):
     support: float | None = None
     resistance: float | None = None
     position: str | None = None           # 지지 근접 | 저항 근접 | 중간
+    # 시계열/파생(차트 chart_data projection — 저장값, 계산 재실행 없음). 카드 내 표·스파크라인·바 용.
+    disparity_20_pct: float | None = None                          # (현재가−20MA)/20MA ×100
+    recent_ma: list[dict] = Field(default_factory=list)            # [{date, ma5?, ma20?, ma60?}] (최근 N)
+    rsi_recent_points: list[dict] = Field(default_factory=list)    # [{date, value}] (스파크라인)
+    current_volume: float | None = None
+    avg_volume: float | None = None
+    volume_recent_bars: list[dict] = Field(default_factory=list)   # [{date, volume}] (최근 N)
     metrics: list[str] = Field(default_factory=list)               # raw 계산 칩(프론트 fallback)
     related_annotations: list[AnnotationBrief] = Field(default_factory=list)
 

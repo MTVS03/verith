@@ -527,6 +527,9 @@ _INDICATOR_ANNOTATION_KINDS = {
 # pattern 카드의 pattern_candidates 로 노출할 annotation kind(annotation-only 정책 — signal_score 무반영).
 _PATTERN_CANDIDATE_KINDS = {"cup_handle_candidate", "box_breakout_candidate", "box_range_candidate"}
 _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_MA_ROWS = 8       # 카드 MA 표 최근 행 수
+_RSI_POINTS = 30   # RSI 스파크라인 포인트 수
+_VOL_BARS = 8      # 거래량 바 개수
 
 
 def _metric_num(metrics: list, prefix: str) -> float | None:
@@ -558,9 +561,48 @@ def _annotation_briefs(charts: list, kinds: set[str], *, limit: int | None = Non
     return out[:limit] if limit is not None else out
 
 
+def _daily_chart_data(charts: list) -> dict:
+    """카드 시계열의 원천 = 일봉 차트 chart_data(저장값). '1y' 우선, 없으면 최장 일봉(candle_unit 'D')."""
+    best: dict = {}
+    best_n = -1
+    for c in charts:
+        cd = _d(_d(c).get("chart_data"))
+        if cd.get("candle_unit") != "D":
+            continue
+        if _d(c).get("period") == "1y":
+            return cd
+        n = len(_list(cd.get("candles")))
+        if n > best_n:
+            best, best_n = cd, n
+    return best
+
+
+def _ma_series(cd: dict) -> tuple[list[dict], float | None]:
+    """overlays.moving_average(window별 points) → 최근 N행 [{date, ma5?, ma20?, ma60?}] + 20일 이격도(%)."""
+    series = _list(_d(cd.get("overlays")).get("moving_average"))
+    by_window: dict[int, dict[str, float]] = {}
+    for s in series:
+        s = _d(s)
+        w = s.get("window")
+        if isinstance(w, int):
+            by_window[w] = {str(_d(p).get("date")): _d(p).get("value") for p in _list(s.get("points"))}
+    dates = sorted({d for w in by_window.values() for d in w})[-_MA_ROWS:]
+    rows = [{"date": dt, "ma5": by_window.get(5, {}).get(dt),
+             "ma20": by_window.get(20, {}).get(dt), "ma60": by_window.get(60, {}).get(dt)}
+            for dt in dates]
+    disparity = None
+    candles = _list(cd.get("candles"))
+    cur_close = _d(candles[-1]).get("close") if candles else None
+    ma20_now = by_window.get(20, {}).get(dates[-1]) if dates else None
+    if isinstance(cur_close, (int, float)) and isinstance(ma20_now, (int, float)) and ma20_now:
+        disparity = round((cur_close - ma20_now) / ma20_now * 100, 2)
+    return rows, disparity
+
+
 def _calc_basis(indicator: str, value, metrics: list, charts: list) -> IndicatorCalcBasis:
     cb = IndicatorCalcBasis(kind=indicator, current_value=value if isinstance(value, (int, float)) else None,
                             metrics=[str(m) for m in metrics])
+    cd = _daily_chart_data(charts)
     if indicator == "moving_average":
         ma = {k: v for k, v in (("5", _metric_num(metrics, "5MA")), ("20", _metric_num(metrics, "20MA")),
                                 ("60", _metric_num(metrics, "60MA"))) if v is not None}
@@ -568,6 +610,7 @@ def _calc_basis(indicator: str, value, metrics: list, charts: list) -> Indicator
         if len(ma) == 3:
             m5, m20, m60 = ma["5"], ma["20"], ma["60"]
             cb.alignment = "정배열" if m5 > m20 > m60 else "역배열" if m5 < m20 < m60 else "혼조"
+        cb.recent_ma, cb.disparity_20_pct = _ma_series(cd)   # 일자별 MA 표 + 20일 이격도(저장값)
     elif indicator == "rsi":
         p = _metric_num(metrics, "RSI(")
         cb.rsi_period = int(p) if p is not None else None
@@ -577,8 +620,18 @@ def _calc_basis(indicator: str, value, metrics: list, charts: list) -> Indicator
                 nums = _NUM_RE.findall(m)
                 if len(nums) >= 2:
                     cb.oversold, cb.overbought = float(nums[0]), float(nums[1])
+        pts = _list(_d(_d(cd.get("subcharts")).get("rsi")).get("points"))[-_RSI_POINTS:]
+        cb.rsi_recent_points = [{"date": _d(p).get("date"), "value": _d(p).get("value")} for p in pts]
     elif indicator == "volume":
         cb.relative_volume = _metric_num(metrics, "거래량비")
+        candles = _list(cd.get("candles"))
+        bars = candles[-_VOL_BARS:]
+        cb.volume_recent_bars = [{"date": _d(c).get("date"), "volume": _d(c).get("volume")} for c in bars]
+        cur_vol = _d(candles[-1]).get("volume") if candles else None
+        cb.current_volume = cur_vol if isinstance(cur_vol, (int, float)) else None
+        # 20일 평균 = 당일/상대거래량(신호가 쓴 비율 그대로 역산 → 재계산 drift 없음)
+        if cb.current_volume is not None and cb.relative_volume:
+            cb.avg_volume = round(cb.current_volume / cb.relative_volume, 1)
     elif indicator == "support_resistance":
         cb.support = _metric_num(metrics, "지지")
         cb.resistance = _metric_num(metrics, "저항")
