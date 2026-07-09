@@ -147,6 +147,17 @@
 > (`kind`·`label`·`period`·`date`·`importance`·`meta`(cup_depth_pct·candidate_stage·volume_confirmed…)). 이는
 > **읽기 전용 노출**이며 `signal_score`·`final_regime`·`consensus` 에 **반영하지 않는다**(기존 정책 유지). 없으면 `[]`.
 
+### 5.5 1d 인트라데이 탭 (조건부 — best-effort)
+**`1d`(장중 분봉) 탭은 항상 있는 게 아니다.** intraday 분봉 fetch가 성공한 리포트에만 생성된다(best-effort:
+실패 시 D/W/M 는 그대로, 1d 만 생략 — 리포트 전체가 실패하지 않는다). 따라서 프론트는:
+- **`charts.available_periods` 에 `"1d"` 가 있을 때만** 1d 탭을 렌더한다(항상 띄우지 말 것).
+- 보조 신호로 `trace_summary.data_quality.intraday_available`(= `flags.has_intraday_context`)를 쓸 수 있다.
+- 1d full payload 는 다른 기간과 동일하게 `GET .../{id}/charts` 의 `charts[]`(period=`"1d"`, candle_unit=`"1min"`)에서 읽는다.
+
+> **현재 상태:** 생성 파이프라인은 구현돼 있으나 **기본 비활성**(`INTRADAY_FETCH_ENABLED=false`)이고 라이브 1d 는
+> KIS 분봉 크레덴셜이 필요하다. 활성화는 ops(플래그+크레덴셜) 단계이며, 백엔드 계약은 "**있으면 흐른다**"로
+> 고정돼 있다(1d 차트가 payload 에 들어오면 available_periods·intraday_available·/charts 에 자동 노출).
+
 ### 5.2 차트 full — `GET /api/technical/reports/{id}/charts`
 **기본 정책(잠금): all-period eager load.** 이 endpoint 는 `available_periods` 전부(3m/1y/5y…)의 full payload 를
 **한 번에** 반환한다. 프론트는 상세 진입 시 이 응답 하나로 **3m/1y/5y 탭 전환까지 즉시 가능**해야 한다(이미 생성된

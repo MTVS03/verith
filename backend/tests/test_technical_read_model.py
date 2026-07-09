@@ -491,3 +491,39 @@ def test_pattern_card_empty_when_no_candidate():
 def test_indicator_cards_backward_safe_empty_payload():
     rm = build_read_model(report_id=_RID, raw={}, stock=None)
     assert rm.indicator_cards == []                                # 구버전/빈 payload → 빈 배열
+
+
+# ── 1d intraday 조건부 계약 잠금 (best-effort — 있으면 흐른다) ────────────────
+def _raw_with_1d() -> dict:
+    raw = _raw()
+    raw["charts"] = [
+        {"period": "3m", "chart_data": {"candle_unit": "D", "candles": [], "annotations": []}},
+        {"period": "1y", "chart_data": {"candle_unit": "D", "candles": [], "annotations": []}},
+        {"period": "5y", "chart_data": {"candle_unit": "W", "candles": [], "annotations": []}},
+        {"period": "1d", "chart_data": {"candle_unit": "1min", "candles": [{"o": 1}], "annotations": []}},
+    ]
+    raw["intraday_context"] = {"as_of": "x"}
+    return raw
+
+
+def test_read_model_includes_1d_when_present():
+    rm = build_read_model(report_id=_RID, raw=_raw_with_1d(), stock=None)
+    assert "1d" in rm.charts.available_periods                       # 있으면 available_periods 에 포함
+    assert rm.trace_summary.data_quality.intraday_available is True  # 보조 신호 true
+    assert rm.trace_summary.flags.has_intraday_context is True
+    assert any(c.period == "1d" and c.candle_unit == "1min" for c in rm.charts.items)
+
+
+def test_read_model_omits_1d_when_absent():
+    # 기본(3m/1y/5y만) — 1d 조건부라 없으면 available_periods 에도 없고 intraday_available=false.
+    rm = build_read_model(report_id=_RID, raw=_raw(), stock=None)
+    assert "1d" not in rm.charts.available_periods
+    assert rm.trace_summary.data_quality.intraday_available is False
+
+
+def test_charts_endpoint_model_passes_1d_full():
+    from src.api.services.technical_report_service import build_charts_read_model
+    cm = build_charts_read_model(report=_report(output_payload=_raw_with_1d()), stock=None)
+    assert "1d" in cm.available_periods
+    intraday = next(c for c in cm.charts if c.period == "1d")
+    assert intraday.candle_unit == "1min" and intraday.chart_data["candles"] == [{"o": 1}]
