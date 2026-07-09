@@ -96,6 +96,29 @@ def test_storage_fields_follow_gate3_rule():
         "source": "fallback", "provider": None, "model": None}
 
 
+def test_data_status_reflects_price_daily_availability():
+    """data_status = 데이터 가용성(ok|data_limited) — price_daily 유무의 재표현.
+
+    검증(게이트) 축과 분리: 게이트2 통과여도 일별시세가 없으면 data_limited 다.
+    어휘는 백엔드 공통 lexicon("data_limited") 재사용(flow 신조어 금지)."""
+    from agents.flow.export.to_json import derive_data_status
+
+    # 일별시세(price_daily) 결측 → 시세표·소진율 동반 상실 → data_limited
+    assert derive_data_status({"price_daily": None}) == "data_limited"
+    assert derive_data_status({}) == "data_limited"
+    assert derive_data_status(None) == "data_limited"
+    # 일별시세 있음 → ok
+    assert derive_data_status({"price_daily": [{"date": "2026-07-03"}]}) == "ok"
+
+    # build_payload 는 항상 data_status 를 싣는다(null 아님, always-fill).
+    p = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_PASS, "해석", uuid4())
+    assert p["data_status"] == "data_limited"   # 픽스처 signals 는 quotes 없이 계산 = price_daily None
+
+    enriched = {**_SIGNALS, "price_daily": [{"종가": 70000}]}
+    p_ok = build_payload(enriched, _META, _GATE1, _GATE2, _G3_PASS, "해석", uuid4())
+    assert p_ok["data_status"] == "ok"
+
+
 def test_payload_round_trips_through_json():
     """전 필드가 JSON 왕복 가능 + 한글 키가 이스케이프 없이 그대로."""
     p = build_payload(_SIGNALS, _META, _GATE1, _GATE2, _G3_PASS, "해석", uuid4())

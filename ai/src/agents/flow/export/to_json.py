@@ -28,6 +28,24 @@ from ..schemas import GateResult
 PAYLOAD_VERSION = 1
 
 
+def derive_data_status(signals: dict | None) -> str:
+    """데이터 가용성 상태 — 공통 lexicon(ok | data_limited). 옮겨 담기지 새 판정 아님.
+
+    코어(매매동향)는 리포트가 존재하면 항상 있다: 수집 실패면 예외로 멈춰
+    저장될 리포트가 없다(graph.collect_node). 따라서 저장되는 리포트의
+    "제한"은 심화 데이터 결측으로만 생긴다. 정직한 단일 신호는 `price_daily`
+    (일별시세)의 유무다 — 없으면 시세표와 한도소진율이 함께 빠진 축소 리포트다.
+
+    검증(게이트) 축과 분리한다: 게이트2 실패는 verification.gate2_passed·
+    outcome 가 이미 표현하므로 data_status 로 중복 인코딩하지 않는다(데이터
+    가용성 ≠ 검증 결과). inst_detail None 은 다수 종목의 정상 상태라 신호로
+    쓰지 않는다. 값 어휘는 백엔드 공통 관례(technical·news 가 저장하는
+    "data_limited")를 그대로 재사용한다 — flow 전용 신조어를 만들지 않는다.
+    """
+    price_daily = (signals or {}).get("price_daily")
+    return "data_limited" if price_daily is None else "ok"
+
+
 def build_payload(
     signals: dict,
     meta: dict,
@@ -57,6 +75,8 @@ def build_payload(
     - verification.regen_count: state.explain_retries(게이트3 재시도 횟수).
     - interpretation_meta.provider/model: 해석 LLM 식별. 해석이 실린 경우에만
       싣는다(interpretation null 이면 provider/model 도 null — 출처와 정합).
+    - data_status: 데이터 가용성(ok|data_limited). derive_data_status 참조 —
+      signals 유무의 재표현이지 새 계산이 아니다.
     """
     passed3 = gate3 is not None and gate3.passed
     rid = str(report_id) if report_id else None
@@ -65,6 +85,7 @@ def build_payload(
         "version": PAYLOAD_VERSION,
         "report_id": rid,                # UUID→str (유일한 실변환)
         "trace_id": tid,
+        "data_status": derive_data_status(signals),  # ok | data_limited (공통 lexicon)
         "meta": meta,                    # base_date 는 이미 ISO 문자열(호출부 책임)
         "signals": signals,              # compute_signals dict 그대로 (한글 키 포함)
         "verification": {
