@@ -6,11 +6,13 @@ import { GitBranch, Sparkles } from "lucide-react";
 
 import { analyzeQuery } from "@/api/supervisor";
 import { createTechnicalReport } from "@/api/technical-create";
+import { createNewsReport } from "@/api/news-create";
 import type { SupervisorAnalyzeResponse } from "@/types/supervisor";
+import type { AgentType } from "@/types/archive";
 import { AGENT_META, AGENT_ORDER } from "@/features/supervisor/lib/agents";
 import { PipelineBox, type PipelineStep, type StepState } from "./pipeline-box";
 import { Composer } from "./composer";
-import { ResultMessage } from "./result-message";
+import { ResultMessage, type CreatedReports } from "./result-message";
 
 type Phase = "intro" | "running" | "done";
 
@@ -60,9 +62,8 @@ export function ResearchView() {
   const [response, setResponse] = useState<SupervisorAnalyzeResponse | null>(null);
   const [live, setLive] = useState(true);
   const [stepsDone, setStepsDone] = useState(0);
-  // technical 만 실제 저장까지 연결 — 파이프라인이 backend create 로 진짜 리포트를 만든다.
-  const [technicalReportId, setTechnicalReportId] = useState<string | null>(null);
-  const [technicalCreating, setTechnicalCreating] = useState(false);
+  // 실제 저장까지 연결된 리포트 — agent 별 {report_id, 생성중}. (technical·news)
+  const [createdReports, setCreatedReports] = useState<CreatedReports>({});
   const timers = useRef<number[]>([]);
 
   const clearTimers = useCallback(() => {
@@ -79,24 +80,37 @@ export function ResearchView() {
       setQuery(q);
       setResponse(null);
       setStepsDone(0);
-      setTechnicalReportId(null);
-      setTechnicalCreating(false);
+      setCreatedReports({});
       setPhase("running");
 
       const { response: res, live: isLive } = await analyzeQuery(q);
       setResponse(res);
       setLive(isLive);
 
-      // technical 이 성공하고 종목이 확정되면, 실제 저장까지 연결한다(backend create → report_id).
-      // 애니메이션과 병렬로 진행 — 사용자가 결과를 읽는 동안 버튼이 활성화된다.
+      // 성공한 에이전트를 실제 저장까지 연결한다(→ report_id). 애니메이션과 병렬 —
+      // 사용자가 결과를 읽는 동안 버튼이 활성화된다.
+      const setCreated = (agent: AgentType, patch: { reportId?: string | null; creating?: boolean }) =>
+        setCreatedReports((prev) => ({ ...prev, [agent]: { ...prev[agent], ...patch } }));
+      const resultOf = (agent: AgentType) => res.results.find((r) => r.agent_type === agent);
       const stock = res.resolution.stock;
-      const techOk = res.results.find((r) => r.agent_type === "technical")?.status === "success";
-      if (stock && techOk) {
-        setTechnicalCreating(true);
+
+      // technical: backend create 가 AI 재호출→저장(입력은 ticker+query).
+      if (stock && resultOf("technical")?.status === "success") {
+        setCreated("technical", { creating: true, reportId: null });
         createTechnicalReport({ ticker: stock.stock_code, query: q })
-          .then((r) => setTechnicalReportId(r.report_id))
-          .catch(() => setTechnicalReportId(null))
-          .finally(() => setTechnicalCreating(false));
+          .then((r) => setCreated("technical", { reportId: r.report_id }))
+          .catch(() => setCreated("technical", { reportId: null }))
+          .finally(() => setCreated("technical", { creating: false }));
+      }
+
+      // news: supervisor 가 이미 만든 output(ReportModel)을 save-only 로 저장.
+      const newsResult = resultOf("news");
+      if (newsResult?.status === "success" && newsResult.output) {
+        setCreated("news", { creating: true, reportId: null });
+        createNewsReport({ report: newsResult.output, question: q })
+          .then((r) => setCreated("news", { reportId: r.report_id }))
+          .catch(() => setCreated("news", { reportId: null }))
+          .finally(() => setCreated("news", { creating: false }));
       }
 
       // 응답을 받은 뒤 스텝을 순차로 밝힌다(목업의 진행 연출과 동일 타이밍).
@@ -172,11 +186,7 @@ export function ResearchView() {
                 {phase === "running" ? (
                   <PipelineBox steps={steps} percent={percent} />
                 ) : response ? (
-                  <ResultMessage
-                    response={response}
-                    technicalReportId={technicalReportId}
-                    technicalCreating={technicalCreating}
-                  />
+                  <ResultMessage response={response} createdReports={createdReports} />
                 ) : null}
               </div>
             </div>

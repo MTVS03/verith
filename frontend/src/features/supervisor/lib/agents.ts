@@ -71,5 +71,6 @@ export const AGENT_ORDER: AgentType[] = ["fundamental", "technical", "news", "fl
 export function agentReportHref(type: AgentType, reportId: string | null): string | null {
   if (!reportId) return null;
   if (type === "technical") return `/reports/technical/${reportId}`;
+  if (type === "news") return `/reports/news/${reportId}`;
   return null;
 }

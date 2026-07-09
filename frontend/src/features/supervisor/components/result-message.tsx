@@ -2,20 +2,22 @@ import Link from "next/link";
 import { ShieldCheck, FileText, ArrowRight, Loader2 } from "lucide-react";
 
 import type { SupervisorAnalyzeResponse } from "@/types/supervisor";
+import type { AgentType } from "@/types/archive";
 import { AGENT_META, AGENT_ORDER, agentReportHref } from "@/features/supervisor/lib/agents";
+
+// 파이프라인이 실제 저장까지 연결한 리포트 — agent 별 {report_id, 생성중} 상태.
+export type CreatedReports = Partial<Record<AgentType, { reportId: string | null; creating: boolean }>>;
 
 // 파이프라인 완료 후 AI 최종 메시지 + "리포트 열기" 버튼 (목업 ai-final-message).
 // 목업은 전부 성공이었지만, 우리는 success 만 리포트 버튼으로 열고 failed/skipped 는
 // 아래 상태 줄에 정직하게 표시한다(검증 가능성 = 이 프로젝트 정체성).
-// technicalReportId: technical 만 실제 저장까지 연결돼 진짜 리포트를 연다(생성 중이면 로딩).
+// createdReports: technical·news 등 실제 저장까지 연결된 것은 진짜 리포트를 연다(생성 중이면 로딩).
 export function ResultMessage({
   response,
-  technicalReportId = null,
-  technicalCreating = false,
+  createdReports = {},
 }: {
   response: SupervisorAnalyzeResponse;
-  technicalReportId?: string | null;
-  technicalCreating?: boolean;
+  createdReports?: CreatedReports;
 }) {
   const stockName = response.resolution.stock?.stock_name ?? response.original_query;
   const byType = new Map(response.results.map((r) => [r.agent_type, r]));
@@ -50,9 +52,10 @@ export function ResultMessage({
           {succeeded.map((type) => {
             const meta = AGENT_META[type];
             const Icon = meta.icon;
+            const created = createdReports[type];
 
-            // technical 은 실제 저장까지 연결됨 — 생성 중이면 로딩, 끝나면 진짜 리포트로.
-            if (type === "technical" && technicalCreating && !technicalReportId) {
+            // 실제 저장까지 연결된 것(technical·news 등) — 생성 중이면 로딩, 끝나면 진짜 리포트로.
+            if (created?.creating && !created.reportId) {
               return (
                 <span
                   key={type}
@@ -65,9 +68,8 @@ export function ResultMessage({
             }
 
             const reportId =
-              type === "technical"
-                ? technicalReportId
-                : ((byType.get(type)?.output?.report_id as string | undefined) ?? null);
+              created?.reportId ??
+              ((byType.get(type)?.output?.report_id as string | undefined) ?? null);
             const href = agentReportHref(type, reportId);
             const inner = (
               <>
