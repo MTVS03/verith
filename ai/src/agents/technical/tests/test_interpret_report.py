@@ -208,6 +208,62 @@ def test_details_missing_indicator_falls_back():
     assert by_ind["volume"].detail_source == GenerationSource.TEMPLATE_FALLBACK
 
 
+# ── 지표별 설명 확장(additive): reason/caution/watchpoint ───────────────────────
+def test_details_from_llm_captures_additive_fields():
+    out = {"interpretation_text": "x", "details": [
+        {"indicator": "moving_average", "detail": "이동평균선 긍정.",
+         "detail_reason": "5MA가 20·60MA 위라 정배열입니다.",
+         "detail_caution": "이동평균은 후행 지표입니다.",
+         "detail_watchpoint": "배열 유지·크로스를 확인하세요."},
+        {"indicator": "rsi", "detail": "RSI 중립."},
+        {"indicator": "volume", "detail": "거래량 중립."},
+    ]}
+    by_ind = {d.indicator: d for d in
+              node.details_from_llm(out, signals=_signals(), source=GenerationSource.LLM)}
+    ma = by_ind["moving_average"]
+    assert ma.detail_source == GenerationSource.LLM
+    assert ma.detail_reason == "5MA가 20·60MA 위라 정배열입니다."
+    assert ma.detail_caution == "이동평균은 후행 지표입니다."
+    assert ma.detail_watchpoint == "배열 유지·크로스를 확인하세요."
+
+
+def test_details_from_llm_backfills_missing_additive():
+    # LLM이 detail만 주고 additive 필드를 생략해도, 결정론 백필로 3필드가 비지 않는다(카드 공백 방지).
+    out = node.parse_llm_output(VALID_OUTPUT)  # additive 필드 없음
+    by_ind = {d.indicator: d for d in
+              node.details_from_llm(out, signals=_signals(), source=GenerationSource.LLM)}
+    rsi = by_ind["rsi"]
+    assert rsi.detail_source == GenerationSource.LLM  # 본문 detail 은 LLM
+    assert rsi.detail == "RSI는 중립 구간입니다."
+    assert rsi.detail_reason and rsi.detail_caution and rsi.detail_watchpoint  # 백필됨(비지 않음)
+    assert "RSI" in rsi.detail_caution  # 지표별 결정론 hint
+
+
+def test_fallback_detail_fills_all_four_fields():
+    fb = node.fallback_detail(MA, Signal.POSITIVE, ["5MA 82900.0"])
+    assert fb.detail and fb.detail_reason and fb.detail_caution and fb.detail_watchpoint
+    assert fb.detail_source == GenerationSource.TEMPLATE_FALLBACK
+    assert "긍정" in fb.detail_reason  # 확정 signal 근거 설명
+    assert "이동평균" in fb.detail_caution  # 지표별 결정론 hint(MA)
+
+
+def test_parse_accepts_additive_detail_keys():
+    out = node.parse_llm_output(json.dumps({"interpretation_text": "x", "details": [
+        {"indicator": "rsi", "detail": "중립", "detail_reason": "r",
+         "detail_caution": "c", "detail_watchpoint": "w"}]}, ensure_ascii=False))
+    assert out["details"][0]["detail_reason"] == "r"
+
+
+def test_additive_fields_do_not_break_verify():
+    # additive 필드가 있어도 검증(③)은 detail 만 보므로 결과 불변(회귀 방지).
+    out = node.parse_llm_output(VALID_OUTPUT)
+    for e in out["details"]:
+        e["detail_reason"] = "설명"
+        e["detail_watchpoint"] = "관찰"
+    ev = node.verify(out, regime=_regime(), signal=_signal(), signals=_signals(), risks=())
+    assert not ev.details_structure_failed
+
+
 def test_interpretation_from_llm_source():
     out = node.parse_llm_output(VALID_OUTPUT)
     result = node.interpretation_from_llm(

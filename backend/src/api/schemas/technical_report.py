@@ -267,6 +267,10 @@ class IndicatorCard(BaseModel):
     weight: float | None = None
     llm_detail: str | None = None         # technical_signals[].detail (LLM/템플릿 문장)
     detail_source: str | None = None
+    # 지표별 설명 확장(AI additive projection — 없으면 null): 왜/주의/관찰
+    detail_reason: str | None = None       # 왜 이 신호인지
+    detail_caution: str | None = None      # 한계·과해석 금지
+    detail_watchpoint: str | None = None   # 다음 확인 포인트
     verified: bool = True                 # 리포트 verification 통과 기준(지표별 세부 검증 아님)
     code_metrics: list[str] = Field(default_factory=list)
     calc_basis: IndicatorCalcBasis

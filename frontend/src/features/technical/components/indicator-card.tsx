@@ -124,7 +124,7 @@ export function IndicatorCardComponent({
   index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const { indicator, title, signal, signal_label, weight, llm_detail, detail_source, verified, code_metrics, calc_basis } = card;
+  const { indicator, title, signal, signal_label, weight, llm_detail, detail_source, detail_reason, detail_caution, detail_watchpoint, verified, code_metrics, calc_basis } = card;
 
   // Signal color styling
   const getSignalStyle = (sig: string | null) => {
@@ -222,6 +222,29 @@ export function IndicatorCardComponent({
           <p className="text-[13.5px] leading-relaxed text-[#334155] m-0">
             {llm_detail}
           </p>
+          {/* 지표별 설명 확장(AI additive): 왜/주의/관찰 — 값 없으면 해당 줄 생략(null-safe) */}
+          {(detail_reason || detail_caution || detail_watchpoint) && (
+            <div className="mt-3 flex flex-col gap-2 border-t border-[rgba(79,70,229,0.08)] pt-3">
+              {detail_reason && (
+                <div className="flex gap-2 text-[12.5px] leading-relaxed">
+                  <span className="shrink-0 font-bold text-[#4f46e5]">왜</span>
+                  <span className="text-[#475569]">{detail_reason}</span>
+                </div>
+              )}
+              {detail_caution && (
+                <div className="flex gap-2 text-[12.5px] leading-relaxed">
+                  <span className="shrink-0 font-bold text-amber-600">주의</span>
+                  <span className="text-[#475569]">{detail_caution}</span>
+                </div>
+              )}
+              {detail_watchpoint && (
+                <div className="flex gap-2 text-[12.5px] leading-relaxed">
+                  <span className="shrink-0 font-bold text-[#0891b2]">관찰</span>
+                  <span className="text-[#475569]">{detail_watchpoint}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

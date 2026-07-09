@@ -122,6 +122,11 @@ class TechnicalSignal(_StrictModel):
     detail: str  # LLM 서술 (위 확정값을 자연어로 풀이)
     detail_source: GenerationSource  # detail 문장의 최종 출처
     weight: float = Field(ge=0.0, le=1.0)  # 코드 확정 (config.md INDICATOR_WEIGHTS)
+    # ── 지표별 설명 확장(additive·optional) — 기존 detail 은 그대로 두고, 프론트 카드가 "왜/주의/관찰"을
+    #    구조적으로 보여줄 수 있게 additive 서술만 더한다. 재판정 아님(signal/value/weight 불변).
+    detail_reason: str | None = None       # 왜 이 신호가 나왔는지(확정 수치 근거 설명)
+    detail_caution: str | None = None      # 한계·과해석 금지 포인트
+    detail_watchpoint: str | None = None   # 다음에 확인할 포인트
 
 
 class RiskItem(_StrictModel):

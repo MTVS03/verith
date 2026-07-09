@@ -73,7 +73,13 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
   "what_to_watch_next": "다음에 확인할 것 1문장(관찰 대상, 행동 지시 아님).",
   "invalidation_or_caution": "현재 해석이 무효화되는 조건/한계 1문장(risk와 분리, data_status 제한 포함).",
   "details": [
-    { "indicator": "moving_average", "detail": "해당 지표의 확정 signal·value·metrics를 자연어로 푼 한 문장." }
+    {
+      "indicator": "moving_average",
+      "detail": "해당 지표의 확정 signal·value·metrics를 자연어로 푼 한 문장.",
+      "detail_reason": "왜 이 신호가 나왔는지 확정 수치(metrics·value)를 근거로 설명하는 1문장.",
+      "detail_caution": "이 지표의 한계·과해석 금지 포인트 1문장(단독 판단 금지 등).",
+      "detail_watchpoint": "다음에 확인할 관찰 포인트 1문장(행동 지시 아님)."
+    }
   ]
 }
 ```
@@ -118,6 +124,23 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
 3. 순서는 무관하나 `indicator`로 짝짓습니다.
 4. 각 `detail`은 그 지표의 확정 `signal`과 **일치**해야 합니다. `signal=positive`인 지표를 부정 뉘앙스로 쓰면 왜곡입니다.
 5. 각 `detail` 문장에는 그 지표의 확정 `signal` 방향을 나타내는 표현을 담습니다 — `positive`면 "긍정", `neutral`이면 "중립", `negative`면 "부정"이 문장에 드러나야 합니다(반대 방향·강한 단정 표현 금지).
+
+# details 설명 확장 필드 (detail_reason·detail_caution·detail_watchpoint)
+
+각 `details[]` 항목에 아래 3개 필드를 함께 채웁니다. **모두 "설명"이며 재판정이 아닙니다** — 확정
+`signal`/`value`/`metrics`를 더 이해하기 쉽게 풀어줄 뿐, 방향을 바꾸거나 새 신호·패턴·가격 예측·투자
+조언을 만들지 않습니다.
+
+- `detail_reason`: **왜 이 신호가 나왔는지** — 그 지표의 확정 `metrics`·`value`를 근거로 설명(예: "5MA가
+  20MA·60MA 위에 있어 정배열이라 긍정"). 없는 수치를 지어내지 말고 입력값만 씁니다.
+- `detail_caution`: **한계·과해석 금지 포인트** — 이 지표를 단독으로 방향 판단에 쓰면 안 되는 이유,
+  후행성·거짓 신호 가능성 등.
+- `detail_watchpoint`: **다음에 확인할 관찰 포인트** — 무엇을 지켜봐야 하는지(관찰 대상이며 매수/매도
+  같은 행동 지시가 아님).
+
+규칙: 각 1문장, 한국어. `pattern` 지표의 후보(cup_handle 등)는 **관찰용 후보**로만 서술하고 방향 판정에
+반영하지 않습니다(annotation-only). 이 3개 필드는 additive라 **검증(③) 대상이 아니지만**, 확정 라벨과
+모순되면 안 됩니다. 값이 마땅치 않으면 생략해도 되고(시스템이 결정론 문구로 채웁니다), 지어내지 마세요.
 
 # confidence·risk 반영 규칙
 

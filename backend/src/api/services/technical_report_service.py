@@ -661,6 +661,9 @@ def build_indicator_cards(raw: dict, *, verified: bool) -> list[IndicatorCard]:
             weight=s.get("weight"),
             llm_detail=s.get("detail"),
             detail_source=s.get("detail_source"),
+            detail_reason=s.get("detail_reason"),        # AI additive(없으면 null passthrough)
+            detail_caution=s.get("detail_caution"),
+            detail_watchpoint=s.get("detail_watchpoint"),
             verified=verified,
             code_metrics=[str(m) for m in metrics],
             calc_basis=_calc_basis(ind, s.get("value"), metrics, charts),

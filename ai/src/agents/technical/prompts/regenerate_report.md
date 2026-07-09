@@ -49,9 +49,16 @@ supervisor/technical_supervisor.py 가 소유한다. 이 프롬프트는 재생�
 {
   "interpretation_text": "확정값을 바꾸지 않고 3~5문장으로 다시 작성한 한국어 종합 해석. 마지막 문장은 비추천형 안내로 맺습니다.",
   "details": [
-    { "indicator": "moving_average", "detail": "확정 signal·value·metrics와 일치하는 설명 한 문장." }
+    {
+      "indicator": "moving_average",
+      "detail": "확정 signal·value·metrics와 일치하는 설명 한 문장.",
+      "detail_reason": "왜 이 신호인지 확정 수치 근거 1문장.",
+      "detail_caution": "한계·과해석 금지 포인트 1문장.",
+      "detail_watchpoint": "다음에 확인할 관찰 포인트 1문장(행동 지시 아님)."
+    }
   ]
 }
 ```
 
-위 값을 바꾸지 말고 문장만 다시 작성하세요.
+`detail_reason`·`detail_caution`·`detail_watchpoint`는 additive 설명 필드입니다(재판정 아님, 확정 라벨과
+모순 금지, 없으면 생략 가능 — 시스템이 결정론 문구로 채웁니다). 위 확정값을 바꾸지 말고 문장만 다시 작성하세요.

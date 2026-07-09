@@ -210,6 +210,9 @@ def _to_technical_signals(
             detail=detail.detail,
             detail_source=detail.detail_source,
             weight=s.weight,
+            detail_reason=detail.detail_reason,
+            detail_caution=detail.detail_caution,
+            detail_watchpoint=detail.detail_watchpoint,
         ))
     return result
 

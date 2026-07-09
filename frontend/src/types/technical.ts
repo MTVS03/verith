@@ -219,6 +219,9 @@ export type IndicatorCard = {
   weight: number | null;
   llm_detail: string | null;
   detail_source: string | null;
+  detail_reason?: string | null;
+  detail_caution?: string | null;
+  detail_watchpoint?: string | null;
   verified: boolean;
   code_metrics: string[];
   calc_basis: IndicatorCalcBasis;

@@ -67,7 +67,9 @@ _STR_SECTION_KEYS = frozenset({
 })
 _LIST_SECTION_KEYS = frozenset({"key_drivers", "warning_points"})
 _ALLOWED_TOP_KEYS = frozenset({"interpretation_text", "details"}) | _STR_SECTION_KEYS | _LIST_SECTION_KEYS
-_ALLOWED_DETAIL_KEYS = frozenset({"indicator", "detail"})
+_ALLOWED_DETAIL_KEYS = frozenset(
+    {"indicator", "detail", "detail_reason", "detail_caution", "detail_watchpoint"}
+)
 
 # 결정론 파생용 라벨(fallback·기본 섹션 문구). regime/consensus/confidence/risk 라벨은 keyword_rules 재사용.
 _TREND_LABELS: dict[Trend, str] = {
@@ -97,10 +99,17 @@ class LlmOutputParseError(ValueError):
 
 @dataclass(frozen=True)
 class DetailResult:
-    """한 지표의 최종 설명 문장 + 출처. signal·value·weight는 여기에 없다(코드 확정값 불변)."""
+    """한 지표의 최종 설명 문장 + 출처. signal·value·weight는 여기에 없다(코드 확정값 불변).
+
+    detail_reason/caution/watchpoint 는 additive 설명 필드 — 프론트 카드가 "왜/주의/관찰"을 구조적으로
+    보여주기 위한 부가 서술이며, 재판정이 아니다(확정값 불변). LLM 성공 시 LLM 값, 누락/폴백 시 결정론 값.
+    """
     indicator: str
     detail: str
     detail_source: GenerationSource
+    detail_reason: str | None = None
+    detail_caution: str | None = None
+    detail_watchpoint: str | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -422,18 +431,27 @@ def details_from_llm(
     코드 확정 signals의 순서·개수를 그대로 따르며, LLM에 없거나 실패한 지표는 폴백 문장을 쓴다.
     signal·value·weight는 읽기만 하고 바꾸지 않는다.
     """
-    detail_map = {
-        e["indicator"]: str(e.get("detail", "")).strip()
+    entry_map = {
+        e["indicator"]: e
         for e in llm_output.get("details", []) or []
         if isinstance(e, dict) and "indicator" in e
     }
     results: list[DetailResult] = []
     for s in signals:
         code = s.indicator.value
-        if code in failed_indicators or code not in detail_map or not detail_map[code]:
-            results.append(fallback_detail(s.indicator, s.signal, s.metrics))
+        entry = entry_map.get(code)
+        detail_txt = _entry_field(entry, "detail")
+        # 결정론 폴백(4필드) — 실패/누락 시 대체, LLM 성공 시엔 누락 additive 필드만 백필.
+        fb = fallback_detail(s.indicator, s.signal, s.metrics)
+        if code in failed_indicators or not detail_txt:
+            results.append(fb)
         else:
-            results.append(DetailResult(code, detail_map[code], source))
+            results.append(DetailResult(
+                code, detail_txt, source,
+                detail_reason=_entry_field(entry, "detail_reason") or fb.detail_reason,
+                detail_caution=_entry_field(entry, "detail_caution") or fb.detail_caution,
+                detail_watchpoint=_entry_field(entry, "detail_watchpoint") or fb.detail_watchpoint,
+            ))
     return results
 
 
@@ -494,11 +512,59 @@ def unavailable_interpretation() -> InterpretationResult:
     )
 
 
+# 지표별 결정론 caution/watchpoint 템플릿(폴백·LLM 누락 백필). 새 판단 없이 지표 성격만 설명한다.
+_FALLBACK_DETAIL_HINTS: dict[str, tuple[str, str]] = {
+    "moving_average": (
+        "이동평균은 후행 지표라 방향 전환을 늦게 반영합니다. 단독으로 진입·청산 근거로 쓰지 마세요.",
+        "5·20·60일선의 배열(정배열·역배열)이 유지되는지, 골든/데드크로스가 나오는지 확인하세요.",
+    ),
+    "rsi": (
+        "RSI만으로 방향을 단정하기 어렵고, 과매수·과매도가 곧 반전을 뜻하지는 않습니다.",
+        "RSI가 과매수·과매도 기준선을 돌파하는지, 50선 위아래로 방향을 트는지 확인하세요.",
+    ),
+    "volume": (
+        "거래량은 방향이 아니라 강도 정보입니다. 가격 신호와 함께 봐야 의미가 있습니다.",
+        "거래 급증이 가격 상승·하락 어느 쪽을 뒷받침하는지, 급증이 이어지는지 확인하세요.",
+    ),
+    "support_resistance": (
+        "지지·저항은 절대선이 아니라 구간이며, 돌파·이탈 시 역할이 뒤바뀔 수 있습니다.",
+        "현재가가 지지·저항 부근에서 어떻게 반응하는지, 거래량을 동반해 돌파·이탈하는지 확인하세요.",
+    ),
+    "pattern": (
+        "패턴은 관찰용 후보이며 완성된 신호가 아닙니다. 방향 판정(신호 점수)에는 반영되지 않습니다.",
+        "패턴이 실제로 완성·확정되는지, 거래량이 이를 확인해 주는지 이어서 관찰하세요.",
+    ),
+}
+
+
+def _entry_field(entry: dict | None, key: str) -> str:
+    """LLM details 항목에서 문자열 필드를 안전하게 꺼낸다(없으면 빈 문자열)."""
+    if not entry:
+        return ""
+    return str(entry.get(key, "") or "").strip()
+
+
 def fallback_detail(indicator: IndicatorType, signal: Signal, metrics: Sequence[str]) -> DetailResult:
-    """지표별 detail 폴백. 확정 signal·metrics만 문장화하고 매수/매도·미래 단정을 쓰지 않는다."""
+    """지표별 detail 폴백 — 확정 signal·metrics만 문장화하고 매수/매도·미래 단정을 쓰지 않는다.
+
+    additive 설명 필드(reason/caution/watchpoint)도 **결정론적으로** 채운다 → LLM 이 죽어도 프론트
+    카드가 비지 않는다(새 판단 없이 지표 성격만 설명)."""
     indicator_label = INDICATOR_LABELS[indicator]
     signal_label = SIGNAL_LABELS[signal]
     text = f"{indicator_label} 지표는 {signal_label} 신호로 확인됩니다."
     if metrics:
         text += f" ({', '.join(metrics)})"
-    return DetailResult(indicator.value, text, GenerationSource.TEMPLATE_FALLBACK)
+    reason = f"코드가 확정한 {indicator_label} 수치를 기준으로 {signal_label} 신호가 산출됐습니다."
+    if metrics:
+        reason += f" ({', '.join(metrics)})"
+    caution, watchpoint = _FALLBACK_DETAIL_HINTS.get(
+        indicator.value,
+        (
+            f"{indicator_label} 단독으로 방향을 단정하기 어렵고 다른 지표와 함께 봐야 합니다.",
+            f"{indicator_label} 수치 변화와 다른 지표의 정합 여부를 이어서 확인하세요.",
+        ),
+    )
+    return DetailResult(
+        indicator.value, text, GenerationSource.TEMPLATE_FALLBACK,
+        detail_reason=reason, detail_caution=caution, detail_watchpoint=watchpoint,
+    )
