@@ -267,6 +267,10 @@ class IndicatorCard(BaseModel):
     weight: float | None = None
     llm_detail: str | None = None         # technical_signals[].detail (LLM/템플릿 문장)
     detail_source: str | None = None
+    # 지표별 설명 확장(AI additive projection — 없으면 null): 왜/주의/관찰
+    detail_reason: str | None = None       # 왜 이 신호인지
+    detail_caution: str | None = None      # 한계·과해석 금지
+    detail_watchpoint: str | None = None   # 다음 확인 포인트
     verified: bool = True                 # 리포트 verification 통과 기준(지표별 세부 검증 아님)
     code_metrics: list[str] = Field(default_factory=list)
     calc_basis: IndicatorCalcBasis
@@ -294,9 +298,13 @@ class TechnicalReportReadModel(BaseModel):
     trust_summary: TrustSummaryBlock                   # 상단 카드용 집계(신뢰도/데이터품질/검증게이트/출처연결)
     indicator_cards: list[IndicatorCard] = Field(default_factory=list)  # 지표 카드 UI용 projection
     followup_count: int = 0                            # 이 리포트에 이어진 후속 질문 수(스레드는 별도 endpoint)
+    # 차트 full payload — **`?include=charts` 일 때만** 채워진다(상세 페이지가 리포트+차트를 1 JSON 으로
+    # 받게). 기본(목록/미리보기 등)은 None → 응답이 가볍다. (전용 /charts 엔드포인트는 폐지 — 차트가
+    # 필요한 화면은 상세뿐이라 include 파라미터로 통합.)
+    charts_full: "TechnicalChartsReadModel | None" = None
 
 
-# ── full chart read model (전용 endpoint GET /{id}/charts — 차트 렌더용) ──────
+# ── full chart read model (상세 응답의 charts_full 에 임베드 — `?include=charts`) ──────
 class ChartItemFull(BaseModel):
     """period 별 차트 full payload. chart_data 는 AI ChartData 계약(candles/overlays/subcharts/annotations)."""
 
@@ -310,12 +318,17 @@ class ChartItemFull(BaseModel):
 
 
 class TechnicalChartsReadModel(BaseModel):
-    """GET /api/technical/reports/{id}/charts — 차트 탭 렌더용 full payload(detail 은 메타만 유지)."""
+    """차트 렌더용 full payload — 상세 응답 `charts_full`(`?include=charts`)에 임베드된다."""
 
     report_id: UUID
     stock: StockBlock
     available_periods: list[str] = Field(default_factory=list)
     charts: list[ChartItemFull] = Field(default_factory=list)
+
+
+# TechnicalReportReadModel.charts_full 이 TechnicalChartsReadModel(아래 정의)를 forward-ref 로 참조 →
+# 두 클래스가 모두 정의된 뒤 forward-ref 를 해석한다.
+TechnicalReportReadModel.model_rebuild()
 
 
 # ── detailed trace read model (전용 endpoint GET /{id}/trace — trace drawer) ──

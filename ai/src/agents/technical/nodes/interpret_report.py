@@ -48,6 +48,7 @@ from ..schemas.enums import (
     DirectionalBias,
     GenerationSource,
     IndicatorType,
+    RiskFlag,
     Signal,
     Trend,
 )
@@ -67,7 +68,9 @@ _STR_SECTION_KEYS = frozenset({
 })
 _LIST_SECTION_KEYS = frozenset({"key_drivers", "warning_points"})
 _ALLOWED_TOP_KEYS = frozenset({"interpretation_text", "details"}) | _STR_SECTION_KEYS | _LIST_SECTION_KEYS
-_ALLOWED_DETAIL_KEYS = frozenset({"indicator", "detail"})
+_ALLOWED_DETAIL_KEYS = frozenset(
+    {"indicator", "detail", "detail_reason", "detail_caution", "detail_watchpoint"}
+)
 
 # 결정론 파생용 라벨(fallback·기본 섹션 문구). regime/consensus/confidence/risk 라벨은 keyword_rules 재사용.
 _TREND_LABELS: dict[Trend, str] = {
@@ -97,10 +100,17 @@ class LlmOutputParseError(ValueError):
 
 @dataclass(frozen=True)
 class DetailResult:
-    """한 지표의 최종 설명 문장 + 출처. signal·value·weight는 여기에 없다(코드 확정값 불변)."""
+    """한 지표의 최종 설명 문장 + 출처. signal·value·weight는 여기에 없다(코드 확정값 불변).
+
+    detail_reason/caution/watchpoint 는 additive 설명 필드 — 프론트 카드가 "왜/주의/관찰"을 구조적으로
+    보여주기 위한 부가 서술이며, 재판정이 아니다(확정값 불변). LLM 성공 시 LLM 값, 누락/폴백 시 결정론 값.
+    """
     indicator: str
     detail: str
     detail_source: GenerationSource
+    detail_reason: str | None = None
+    detail_caution: str | None = None
+    detail_watchpoint: str | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -202,6 +212,17 @@ def build_payload(
             for s in signals
         ],
         "risk_items": [{"flag": r.flag.value, "note": r.note} for r in risks],
+        # risk_interpretation 을 '나열'이 아니라 '맥락 있는 해설'로 쓰도록 하는 설명 힌트(additive·새 계산 아님).
+        # label=사람 라벨, meaning=해석상 의미(왜 주의인지), watch=관찰 포인트. LLM 은 이 힌트로 조합을 설명한다.
+        "risk_hints": [
+            {
+                "flag": r.flag.value,
+                "label": RISK_LABELS[r.flag],
+                "meaning": _RISK_MEANING.get(r.flag, RISK_LABELS[r.flag]),
+                "watch": _RISK_WATCH.get(r.flag),
+            }
+            for r in risks
+        ],
         # 검증 통과에 필요한 한글 대표 표현(단일 출처 keyword_rules) — 영문 enum·모순어로 인한 fallback 방지.
         "verify_expressions": _verify_expressions(regime, signal, signals, risks),
     }
@@ -325,10 +346,49 @@ def _signal_text(signal: SignalSummary) -> str:
     )
 
 
+# flag별 "해석상 의미"(왜 주의 신호인지·오해 금지 포인트) — 단순 라벨 나열 대신 의미를 설명하기 위한
+# 결정론 문구. 새 판정이 아니라 확정 flag 를 사람 언어로 풀어 쓰는 힌트다(prompt·fallback 공용).
+_RISK_MEANING: dict[RiskFlag, str] = {
+    RiskFlag.VOLUME_NOT_CONFIRMED: "거래량 확인이 약해 가격 움직임을 뒷받침할 근거가 부족한 점",
+    RiskFlag.NEAR_SUPPORT: "지지 구간에 근접해 반등 가능성과 이탈 위험이 함께 열려 있는 점",
+    RiskFlag.NEAR_RESISTANCE: "저항 구간에 근접해 추가 상승보다 저항 반응 확인이 필요한 점",
+    RiskFlag.MIXED_SIGNALS: "지표 간 방향성이 엇갈려 단일 신호에 기대기 어려운 점",
+    RiskFlag.OVERHEATED_MOMENTUM: "상승 해석과 별개로 단기 과열 부담이 남아 있는 점",
+    RiskFlag.COUNTER_HIGHER_TREND: "단기 흐름이 상위 추세와 역행하는 점",
+    RiskFlag.LOW_LIQUIDITY: "유동성이 낮아 신호 신뢰도가 떨어질 수 있는 점",
+}
+# flag별 관찰 포인트(무엇을 더 확인해야 하는지 — 행동 지시 아님).
+_RISK_WATCH: dict[RiskFlag, str] = {
+    RiskFlag.VOLUME_NOT_CONFIRMED: "거래량 동반 여부",
+    RiskFlag.NEAR_SUPPORT: "지지선에서의 가격 반응",
+    RiskFlag.NEAR_RESISTANCE: "저항 구간에서의 반응",
+    RiskFlag.MIXED_SIGNALS: "지표 간 방향 정렬",
+    RiskFlag.OVERHEATED_MOMENTUM: "과열 완화 여부",
+    RiskFlag.COUNTER_HIGHER_TREND: "상위 추세와의 정합 회복",
+    RiskFlag.LOW_LIQUIDITY: "거래 활성도",
+}
+
+
 def _risk_text(risks: Sequence[RiskItem]) -> str:
+    """risk_interpretation 결정론 폴백 — flag 나열이 아니라 **의미 + 해석 제약 + 관찰 포인트** 2~3문장.
+
+    확정 flag 만 근거로 하며(새 판정 없음), 매수/매도·목표가·확률 예측·과장 표현은 쓰지 않는다.
+    LLM 이 죽어도 프론트 상단 '위험 해설'로 쓸 만한 문장이 되도록 한다."""
     if not risks:
         return "특이 위험 요인은 확인되지 않았습니다."
-    return "위험 요인으로 " + "·".join(RISK_LABELS[r.flag] for r in risks) + "이(가) 확인됩니다."
+    meanings = [_RISK_MEANING.get(r.flag, RISK_LABELS[r.flag]) for r in risks]
+    watches: list[str] = []
+    for r in risks:
+        w = _RISK_WATCH.get(r.flag)
+        if w and w not in watches:
+            watches.append(w)
+    s1 = "현재는 " + ", ".join(meanings) + "이 함께 확인됩니다."
+    s2 = ("이런 요인이 겹치면 개별 신호를 방향 전환의 근거로 단정하기보다, "
+          "종합 해석의 확신이 제한되는 구간으로 보는 것이 안전합니다.")
+    if watches:
+        s3 = "이 구간에서는 " + "·".join(f"**{w}**" for w in watches) + " 등을 추가로 확인하는 것이 중요합니다."
+        return f"{s1} {s2} {s3}"
+    return f"{s1} {s2}"
 
 
 def _timeframe_text(regime: RegimeResult) -> str:
@@ -353,11 +413,12 @@ def _key_drivers(
 
 
 def _what_to_watch(regime: RegimeResult, risks: Sequence[RiskItem]) -> str:
+    # 핵심 조건은 **bold**(프론트가 <strong> 로 렌더, verify 는 별표 제거 후 검사).
     if regime.alignment_flag == AlignmentFlag.COUNTER_TREND:
-        return "상위 추세와 단기 흐름의 정합 회복 여부"
+        return "상위 추세와 단기 흐름의 **정합 회복 여부**"
     if risks:
-        return f"확인된 위험({RISK_LABELS[risks[0].flag]})의 해소 여부와 거래량 동반"
-    return "현재 국면 유지 여부와 거래량 동반"
+        return f"확인된 위험({RISK_LABELS[risks[0].flag]})의 **해소 여부**와 **거래량 동반**"
+    return "**국면 유지 여부**와 **거래량 동반**"
 
 
 def _invalidation() -> str:
@@ -422,18 +483,27 @@ def details_from_llm(
     코드 확정 signals의 순서·개수를 그대로 따르며, LLM에 없거나 실패한 지표는 폴백 문장을 쓴다.
     signal·value·weight는 읽기만 하고 바꾸지 않는다.
     """
-    detail_map = {
-        e["indicator"]: str(e.get("detail", "")).strip()
+    entry_map = {
+        e["indicator"]: e
         for e in llm_output.get("details", []) or []
         if isinstance(e, dict) and "indicator" in e
     }
     results: list[DetailResult] = []
     for s in signals:
         code = s.indicator.value
-        if code in failed_indicators or code not in detail_map or not detail_map[code]:
-            results.append(fallback_detail(s.indicator, s.signal, s.metrics))
+        entry = entry_map.get(code)
+        detail_txt = _entry_field(entry, "detail")
+        # 결정론 폴백(4필드) — 실패/누락 시 대체, LLM 성공 시엔 누락 additive 필드만 백필.
+        fb = fallback_detail(s.indicator, s.signal, s.metrics)
+        if code in failed_indicators or not detail_txt:
+            results.append(fb)
         else:
-            results.append(DetailResult(code, detail_map[code], source))
+            results.append(DetailResult(
+                code, detail_txt, source,
+                detail_reason=_entry_field(entry, "detail_reason") or fb.detail_reason,
+                detail_caution=_entry_field(entry, "detail_caution") or fb.detail_caution,
+                detail_watchpoint=_entry_field(entry, "detail_watchpoint") or fb.detail_watchpoint,
+            ))
     return results
 
 
@@ -451,16 +521,32 @@ def fallback_interpretation(
 
     확정값(final_regime·consensus·confidence_level·risk flags·timeframe·signals)만 문장화한다. 새 판단 없음.
     LLM 이 죽어도 프론트가 같은 섹션 구조로 렌더할 수 있게 한다(확정 5)."""
-    parts = [
-        f"현재 기술적 상태는 {REGIME_LABELS[regime.final_regime]}로 분류됩니다.",
-        _signal_text(signal),
-        _timeframe_text(regime),
+    # 신호 흐름 요약 — 5구조(전체 판단/약세 근거/완충 신호/주의할 점/다음 관찰 기준)로 줄바꿈 분리.
+    # 프론트가 whitespace-pre-wrap 로 렌더하므로 라벨+개행이 그대로 보인다(빈약한 한 줄 착지 방지).
+    bearish = [INDICATOR_LABELS[s.indicator] for s in signals if s.signal == Signal.NEGATIVE]
+    supportive = [INDICATOR_LABELS[s.indicator] for s in signals if s.signal == Signal.POSITIVE]
+    lines = [
+        f"전체 판단: 현재 기술적 상태는 {REGIME_LABELS[regime.final_regime]}로 분류됩니다. "
+        f"{_signal_text(signal)} {_timeframe_text(regime)}",
     ]
-    if risks:
-        parts.append(_risk_text(risks))
-    parts.append("이 내용은 투자 판단을 대신하지 않으며, 기술적 지표 기반 참고 정보입니다.")
+    if bearish:
+        lines.append(
+            "약세 근거: " + "·".join(bearish)
+            + "이(가) 약세 쪽으로 읽혀 추세 복원 신호가 아직 충분하지 않은 상태입니다."
+        )
+    if supportive:
+        lines.append(
+            "완충 신호: " + "·".join(supportive)
+            + "이(가) 하락 압력을 다소 완화하지만, 방향 전환 확정으로 보기엔 이른 수준입니다."
+        )
+    lines.append(
+        "주의할 점: " + (_risk_text(risks) if risks
+                       else "두드러진 위험 요인은 없으나 단일 지표만으로 방향을 단정하는 것은 피하는 것이 안전합니다.")
+    )
+    lines.append("다음 관찰 기준: " + _what_to_watch(regime, risks))
+    lines.append("이 내용은 투자 판단을 대신하지 않으며, 기술적 지표 기반 참고 정보입니다.")
     return InterpretationResult(
-        text=" ".join(parts),
+        text="\n".join(lines),
         source=GenerationSource.TEMPLATE_FALLBACK,
         one_line_summary=_one_line(regime, signal),
         directional_bias=bias_from_consensus(signal.consensus),
@@ -494,11 +580,73 @@ def unavailable_interpretation() -> InterpretationResult:
     )
 
 
+# 지표별 결정론 caution/watchpoint 템플릿(폴백·LLM 누락 백필). 새 판단 없이 지표 성격만 설명한다.
+_FALLBACK_DETAIL_HINTS: dict[str, tuple[str, str]] = {
+    "moving_average": (
+        "이동평균은 후행 지표라 방향 전환을 늦게 반영합니다. 단독으로 진입·청산 근거로 쓰지 마세요.",
+        "**5·20·60일선 배열 유지 여부**와 **골든/데드크로스** 발생을 확인하세요.",
+    ),
+    "rsi": (
+        "RSI만으로 방향을 단정하기 어렵고, 과매수·과매도가 곧 반전을 뜻하지는 않습니다.",
+        "**RSI 기준선 돌파 여부**와 **50선 안착 여부**를 확인하세요.",
+    ),
+    "volume": (
+        "거래량은 방향이 아니라 강도 정보입니다. 가격 신호와 함께 봐야 의미가 있습니다.",
+        "**가격 방향과 동반된 거래량 확장**이 이어지는지 확인하세요.",
+    ),
+    "support_resistance": (
+        "지지·저항은 절대선이 아니라 구간이며, 돌파·이탈 시 역할이 뒤바뀔 수 있습니다.",
+        "**지지·저항 반응**과 **거래량 동반 돌파·이탈** 여부를 확인하세요.",
+    ),
+    "pattern": (
+        "패턴은 관찰용 후보이며 완성된 신호가 아닙니다. 방향 판정(신호 점수)에는 반영되지 않습니다.",
+        "**패턴 완성·확정 여부**와 **거래량 확인**을 이어서 관찰하세요.",
+    ),
+}
+
+
+# 지표별 "핵심 해석" 앞문장(결정론) — fallback reason 을 한 단계 더 설명적으로. 새 판정 없이 지표 성격만.
+_FALLBACK_DETAIL_REASON: dict[str, str] = {
+    "moving_average": "이동평균의 배열(정/역배열)과 현재가 위치가 추세 방향을 나타냅니다.",
+    "rsi": "RSI 값이 과매수·과매도 기준선 대비 어디에 있는지가 모멘텀 상태를 나타냅니다.",
+    "volume": "거래량이 가격 움직임을 확인해 주는 수준인지가 신호 강도를 좌우합니다.",
+    "support_resistance": "현재가가 지지·저항 구간 중 어디에 가까운지가 가격 반응 여부를 좌우합니다.",
+    "pattern": "최근 캔들 구조가 단기 방향의 힘을 나타내며, 패턴 후보는 관찰용입니다.",
+}
+
+
+def _entry_field(entry: dict | None, key: str) -> str:
+    """LLM details 항목에서 문자열 필드를 안전하게 꺼낸다(없으면 빈 문자열)."""
+    if not entry:
+        return ""
+    return str(entry.get(key, "") or "").strip()
+
+
 def fallback_detail(indicator: IndicatorType, signal: Signal, metrics: Sequence[str]) -> DetailResult:
-    """지표별 detail 폴백. 확정 signal·metrics만 문장화하고 매수/매도·미래 단정을 쓰지 않는다."""
+    """지표별 detail 폴백 — 확정 signal·metrics만 문장화하고 매수/매도·미래 단정을 쓰지 않는다.
+
+    additive 설명 필드(reason/caution/watchpoint)도 **결정론적으로** 채운다 → LLM 이 죽어도 프론트
+    카드가 비지 않는다(새 판단 없이 지표 성격만 설명)."""
     indicator_label = INDICATOR_LABELS[indicator]
     signal_label = SIGNAL_LABELS[signal]
     text = f"{indicator_label} 지표는 {signal_label} 신호로 확인됩니다."
     if metrics:
         text += f" ({', '.join(metrics)})"
-    return DetailResult(indicator.value, text, GenerationSource.TEMPLATE_FALLBACK)
+    meaning = _FALLBACK_DETAIL_REASON.get(indicator.value)
+    reason = (
+        (meaning + " " if meaning else "")
+        + f"코드가 확정한 {indicator_label} 수치를 기준으로 {signal_label} 신호로 확인됩니다."
+    )
+    if metrics:
+        reason += f" ({', '.join(metrics)})"
+    caution, watchpoint = _FALLBACK_DETAIL_HINTS.get(
+        indicator.value,
+        (
+            f"{indicator_label} 단독으로 방향을 단정하기 어렵고 다른 지표와 함께 봐야 합니다.",
+            f"{indicator_label} 수치 변화와 다른 지표의 정합 여부를 이어서 확인하세요.",
+        ),
+    )
+    return DetailResult(
+        indicator.value, text, GenerationSource.TEMPLATE_FALLBACK,
+        detail_reason=reason, detail_caution=caution, detail_watchpoint=watchpoint,
+    )

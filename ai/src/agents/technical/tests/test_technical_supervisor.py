@@ -316,9 +316,15 @@ def test_sup17_to_technical_signals_preserves_none():
     from src.agents.technical.schemas.enums import IndicatorType, Signal
     from src.agents.technical.synthesis.signal_score import IndicatorSignalResult
     isr = IndicatorSignalResult(IndicatorType.VOLUME, Signal.NEUTRAL, None, [], 0.20)
-    detail = DetailResult("volume", "거래량은 중립 신호로 확인됩니다.", GenerationSource.LLM)
+    detail = DetailResult("volume", "거래량은 중립 신호로 확인됩니다.", GenerationSource.LLM,
+                          detail_reason="근거", detail_caution="주의", detail_watchpoint="관찰")
     out = steps._to_technical_signals([isr], [detail])
     assert out[0].value is None  # None 보존(0.0 날조 없음)
+    # additive 설명 필드가 DetailResult → TechnicalSignal 로 그대로 전달되는지(신호/weight 불변).
+    assert out[0].detail_reason == "근거"
+    assert out[0].detail_caution == "주의"
+    assert out[0].detail_watchpoint == "관찰"
+    assert out[0].signal == Signal.NEUTRAL and out[0].weight == 0.20
 
 
 # ── SUP-18: M2 — 비-LLM 예외는 전파(broad catch 아님) ───────────────────────

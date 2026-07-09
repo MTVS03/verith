@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createElement, useState } from "react";
 import {
   Calculator,
   Sparkles,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { IndicatorCard } from "@/types/technical";
 import { formatNumber } from "@/lib/format";
+import { BoldText } from "@/lib/bold-text";
 
 // Format Volume helper to "만주" units
 function formatVolume(val: number | null): string {
@@ -124,7 +125,7 @@ export function IndicatorCardComponent({
   index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const { indicator, title, signal, signal_label, weight, llm_detail, detail_source, verified, code_metrics, calc_basis } = card;
+  const { indicator, title, signal, signal_label, weight, llm_detail, detail_source, detail_reason, detail_caution, detail_watchpoint, verified, code_metrics, calc_basis } = card;
 
   // Signal color styling
   const getSignalStyle = (sig: string | null) => {
@@ -155,7 +156,10 @@ export function IndicatorCardComponent({
     }
   };
 
-  const HeaderIcon = getHeaderIcon(indicator);
+  // 렌더 중 Capitalized 컴포넌트 변수 생성(react-hooks/static-components) 회피 — element 로 만든다.
+  const headerIconEl = createElement(getHeaderIcon(indicator), {
+    className: "w-4 h-4 text-[#475569]",
+  });
 
   return (
     <div className="border border-[#e2e8f0] rounded-2xl bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)] p-6 flex flex-col gap-4">
@@ -200,7 +204,7 @@ export function IndicatorCardComponent({
           <div className="flex justify-between items-center mb-2.5">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-[#4f46e5] flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> LLM 서술
+                <Sparkles className="w-3.5 h-3.5" /> AI 분석
               </span>
               {verified ? (
                 <span className="text-[10px] font-bold text-[#10b981] bg-[rgba(16,185,129,0.08)] px-1.5 py-0.5 rounded flex items-center gap-0.5">
@@ -213,12 +217,35 @@ export function IndicatorCardComponent({
               )}
             </div>
             <span className="text-[10.5px] font-semibold text-[#94a3b8]">
-              출처: {detail_source === "template_fallback" ? "기본 서술" : "LLM 서술"}
+              출처: {detail_source === "template_fallback" ? "기본 서술" : "AI 분석"}
             </span>
           </div>
           <p className="text-[13.5px] leading-relaxed text-[#334155] m-0">
-            {llm_detail}
+            <BoldText text={llm_detail} />
           </p>
+          {/* 지표별 설명 확장(AI additive): 핵심 해석/체크 포인트/해석 제한 — 값 없으면 생략(null-safe) */}
+          {(detail_reason || detail_watchpoint || detail_caution) && (
+            <div className="mt-3 flex flex-col gap-2.5 border-t border-[rgba(79,70,229,0.08)] pt-3">
+              {detail_reason && (
+                <div className="flex flex-col gap-1 text-[12.5px] leading-relaxed">
+                  <span className="text-[11px] font-bold text-[#4f46e5]">핵심 해석</span>
+                  <span className="text-[#475569]"><BoldText text={detail_reason} /></span>
+                </div>
+              )}
+              {detail_watchpoint && (
+                <div className="flex flex-col gap-1 text-[12.5px] leading-relaxed">
+                  <span className="text-[11px] font-bold text-[#0891b2]">체크 포인트</span>
+                  <span className="text-[#475569]"><BoldText text={detail_watchpoint} /></span>
+                </div>
+              )}
+              {detail_caution && (
+                <div className="flex flex-col gap-1 text-[12.5px] leading-relaxed">
+                  <span className="text-[11px] font-bold text-amber-600">해석 제한</span>
+                  <span className="text-[#475569]"><BoldText text={detail_caution} /></span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -244,7 +271,7 @@ export function IndicatorCardComponent({
         <div className="border-t border-[#f1f5f9] pt-5 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-[#0f172a] flex items-center gap-1.5">
-              <HeaderIcon className="w-4 h-4 text-[#475569]" /> 계산 근거
+              {headerIconEl} 계산 근거
             </span>
             <span className="text-[10.5px] font-bold text-[#059669] bg-[rgba(16,185,129,0.08)] px-2 py-0.5 rounded border border-[rgba(16,185,129,0.15)]">
               결정론 계산
@@ -537,97 +564,69 @@ export function IndicatorCardComponent({
               </>
             )}
 
-            {/* 5. 패턴 (pattern) details */}
-            {indicator === "pattern" && (
+            {/* 5. 패턴 (pattern) details — cup_handle 후보가 있을 때만 구조화 표시.
+                값은 annotation meta 그대로(없는 값은 지어내지 않고 해당 행 생략). 후보가 없으면 위의
+                공통 llm_detail/code_metrics 서술로 충분하므로 별도 하드코딩 행을 만들지 않는다. */}
+            {indicator === "pattern" && card.pattern_candidates && card.pattern_candidates.length > 0 && (
               <>
-                {/* Display candidates if any pattern annotations exist */}
-                {card.pattern_candidates && card.pattern_candidates.length > 0 ? (
-                  card.pattern_candidates.map((cand, idx) => {
-                    const depth = cand.meta?.cup_depth_pct !== undefined ? `${cand.meta.cup_depth_pct}%` : "";
-                    const stage = cand.meta?.candidate_stage ?? "";
-                    return (
-                      <div key={idx} className="border-b border-[#f1f5f9] last:border-b-0 pb-3 last:pb-0 flex flex-col gap-1.5 text-[12.5px]">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[#64748b]">감지 형태</span>
-                          <span className="font-bold text-[#334155]">
-                            {cand.label}
-                            <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                              {cand.meta?.pattern_type_ko ?? "Cup & Handle"} 유사
-                            </span>
+                {card.pattern_candidates.map((cand, idx) => {
+                  const meta = (cand.meta ?? {}) as Record<string, unknown>;
+                  const pct = (v: unknown) =>
+                    typeof v === "number" ? `${Math.round(v * 100)}%` : null;
+                  const depth = pct(meta.cup_depth_pct);
+                  const pullback = pct(meta.handle_pullback_pct);
+                  const stageRaw = typeof meta.candidate_stage === "string" ? meta.candidate_stage : "";
+                  const stageLabel =
+                    stageRaw === "handle_forming" ? "핸들 형성 중"
+                    : stageRaw === "cup_forming" ? "컵 형성 중"
+                    : stageRaw === "confirmed" ? "형성 완료"
+                    : stageRaw || "후보";
+                  const impLabel =
+                    cand.importance === "high" ? "높음" : cand.importance === "low" ? "낮음" : "보통";
+                  const volConfirmed = meta.volume_confirmed === true;
+                  return (
+                    <div key={idx} className="border-b border-[#f1f5f9] last:border-b-0 pb-3 last:pb-0 flex flex-col gap-1.5 text-[12.5px]">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[#64748b]">감지 형태</span>
+                        <span className="font-bold text-[#334155]">
+                          {cand.label}
+                          <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
+                            Cup &amp; Handle 후보
                           </span>
-                        </div>
-                        {cand.meta?.disparity_5_20 !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-[#64748b]">출연 위치</span>
-                            <span className="font-bold text-[#334155] font-tabular">
-                              단기 고점 부근
-                              <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                                직전 5일 고점 {cand.meta.disparity_5_20 >= 0 ? "+" : ""}{cand.meta.disparity_5_20}%
-                              </span>
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center">
-                          <span className="text-[#64748b]">신뢰도</span>
-                          <span className="font-bold text-[#334155] font-tabular">
-                            {cand.importance === "high" ? "높음" : "낮음"} ({depth || "38%"})
-                            <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                              {cand.meta?.volume_confirmed ? "거래량 수반" : "거래량 미수반"}
-                            </span>
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[#64748b]">지속형 패턴</span>
-                          <span className="font-bold text-[#334155]">
-                            {stage === "forming" ? "형성 중" : "미형성"}
-                            <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                              삼각·깃발 등 없음
-                            </span>
-                          </span>
-                        </div>
+                        </span>
                       </div>
-                    );
-                  })
-                ) : (
-                  <>
-                    <div className="flex justify-between items-center text-[12.5px]">
-                      <span className="text-[#64748b]">감지 형태</span>
-                      <span className="font-bold text-[#334155]">
-                        윗꼬리 긴 음봉
-                        <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                          Shooting Star 유사
+                      <div className="flex justify-between items-center">
+                        <span className="text-[#64748b]">상태</span>
+                        <span className="font-bold text-[#334155]">{stageLabel}</span>
+                      </div>
+                      {depth && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[#64748b]">컵 깊이</span>
+                          <span className="font-bold text-[#334155] font-tabular">{depth}</span>
+                        </div>
+                      )}
+                      {pullback && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[#64748b]">핸들 눌림</span>
+                          <span className="font-bold text-[#334155] font-tabular">{pullback}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center">
+                        <span className="text-[#64748b]">신뢰도(중요도)</span>
+                        <span className="font-bold text-[#334155]">
+                          {impLabel}
+                          <span
+                            className={`text-xs font-semibold ml-1.5 ${
+                              volConfirmed ? "text-emerald-600" : "text-amber-600"
+                            }`}
+                          >
+                            {volConfirmed ? "거래량 수반" : "거래량 미수반"}
+                          </span>
                         </span>
-                      </span>
+                      </div>
                     </div>
-                    <div className="flex justify-between items-center text-[12.5px]">
-                      <span className="text-[#64748b]">출연 위치</span>
-                      <span className="font-bold text-[#334155]">
-                        단기 고점 부근
-                        <span className="text-xs text-[#94a3b8] font-semibold ml-1.5 font-tabular">
-                          직전 5일 고점 -0.8%
-                        </span>
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-[12.5px]">
-                      <span className="text-[#64748b]">신뢰도</span>
-                      <span className="font-bold text-[#334155] font-tabular">
-                        낮음 (38%)
-                        <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                          거래량 미수반
-                        </span>
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-[12.5px]">
-                      <span className="text-[#64748b]">지속형 패턴</span>
-                      <span className="font-bold text-[#334155]">
-                        미형성
-                        <span className="text-xs text-[#94a3b8] font-semibold ml-1.5">
-                          삼각·깃발 등 없음
-                        </span>
-                      </span>
-                    </div>
-                  </>
-                )}
+                  );
+                })}
               </>
             )}
           </div>

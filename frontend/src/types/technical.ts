@@ -178,6 +178,8 @@ export type TechnicalReportReadModel = {
   };
   indicator_cards?: IndicatorCard[];
   followup_count: number;
+  // `?include=charts` 로 요청 시에만 채워지는 차트 full payload(상세 페이지용). 목록 등은 없음(null).
+  charts_full?: TechnicalChartsReadModel | null;
 };
 
 export type AnnotationBrief = {
@@ -219,6 +221,9 @@ export type IndicatorCard = {
   weight: number | null;
   llm_detail: string | null;
   detail_source: string | null;
+  detail_reason?: string | null;
+  detail_caution?: string | null;
+  detail_watchpoint?: string | null;
   verified: boolean;
   code_metrics: string[];
   calc_basis: IndicatorCalcBasis;

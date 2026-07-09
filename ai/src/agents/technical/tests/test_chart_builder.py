@@ -548,9 +548,12 @@ def test_box_breakout_schema_and_importance():
 
 # ── cup_handle_candidate (feat/technical-chart-patterns) ────────────────────────
 def _cup_series(n, *, top=110.0, bottom_v=85.0, right_top=109.0, handle_bottom=104.0,
-                step_days=1, start=date(2025, 1, 1)) -> list[OHLCV]:
-    """컵(좌 rim→둥근 저점→우 rim)+핸들 형태의 결정론 시계열. 파라미터로 조건 위반 케이스 구성."""
-    a, b, c = int(n * 0.05), int(n * 0.46), int(n * 0.88)
+                step_days=1, start=date(2025, 1, 1), b_frac=0.46, c_frac=0.88) -> list[OHLCV]:
+    """컵(좌 rim→둥근 저점→우 rim)+핸들 형태의 결정론 시계열. 파라미터로 조건 위반 케이스 구성.
+
+    b_frac=저점 위치, c_frac=우측 rim 위치(기본 대칭). b_frac 을 뒤로 밀면 좌팔이 길고 우팔이 짧은
+    비대칭 컵(대칭 gate 검증용)이 된다."""
+    a, b, c = int(n * 0.05), int(n * b_frac), int(n * c_frac)
     closes = []
     for i in range(n):
         if i <= a:
@@ -588,6 +591,17 @@ def test_cup_handle_5y_weekly():
     weekly = _cup_series(78, step_days=7)
     kinds = _cup_kinds(build_chart_payloads([], weekly, []), ChartPeriod.FIVE_YEARS)
     assert "cup_handle_candidate" in kinds
+
+
+def test_cup_handle_symmetric_arms_accepted():
+    # 기본(대칭, 좌팔≈우팔 폭) 컵은 계속 후보로 잡힌다(회귀 방지).
+    assert _cup_anns_1y(_cup_series(120))
+
+
+def test_cup_handle_rejects_lopsided_arms():
+    # 저점을 뒤로 밀어 좌팔이 우팔의 2배 넘게 긴 '찌그러진 컵' → 대칭 gate 에서 제외.
+    # (depth·rim·handle 등 다른 조건은 만족하므로 오직 대칭 때문에 걸러짐을 검증.)
+    assert _cup_anns_1y(_cup_series(120, b_frac=0.66)) == []
 
 
 def test_cup_handle_excluded_on_3m():

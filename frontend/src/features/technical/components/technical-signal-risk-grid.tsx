@@ -1,9 +1,10 @@
 "use client";
 
-import { Calculator, GitBranch, ShieldAlert } from "lucide-react";
+import { Calculator, GitBranch, ShieldAlert, Info, AlertTriangle } from "lucide-react";
 import type { TechnicalReportReadModel } from "@/types/technical";
 import { formatNumber } from "@/lib/format";
-import { signalLabel } from "@/lib/technical-labels";
+import { riskLabel, signalLabel } from "@/lib/technical-labels";
+import { BoldText } from "@/lib/bold-text";
 import { IndicatorCardComponent } from "./indicator-card";
 
 const INDICATOR_MAP: Record<string, { name: string; weight: string; icon: string }> = {
@@ -17,6 +18,14 @@ const INDICATOR_MAP: Record<string, { name: string; weight: string; icon: string
 export function TechnicalSignalRiskGrid({ report }: { report: TechnicalReportReadModel }) {
   const signalItems = report.signals.items;
   const risks = report.risks.items;
+
+  // 리스크 섹션 재료(이미 내려오는 값만 — 프론트 재판정/생성 없음).
+  const riskInterpretation = report.interpretation?.risk_interpretation ?? null;
+  const warningPoints = Array.from(
+    new Set((report.drivers?.warning_points ?? []).filter(Boolean))
+  ); // 문구 그대로, 중복만 제거
+  const hasRiskContent =
+    Boolean(riskInterpretation) || warningPoints.length > 0 || risks.length > 0;
 
   // Build the complete list of 5 indicators to guarantee standardized layout (fallback only)
   const allIndicators = ["moving_average", "rsi", "volume", "support_resistance", "pattern"];
@@ -51,8 +60,8 @@ export function TechnicalSignalRiskGrid({ report }: { report: TechnicalReportRea
           <GitBranch className="w-4 h-4 text-[#94a3b8] flex-shrink-0 mt-0.5" />
           <span>
             <b className="font-semibold text-[#059669]">판정·수치·가중치는 코드가 계산</b>하고,{" "}
-            <b className="font-semibold text-[#4f46e5]">설명 문장은 LLM이 그 값을 해석</b>합니다.
-            LLM은 판정을 바꿀 수 없으며, 검증을 통과한 문장만 표시됩니다.
+            <b className="font-semibold text-[#4f46e5]">AI는 그 결과를 바탕으로 분석 내용을 작성</b>합니다.
+            AI가 판정을 임의로 변경할 수는 없으며, 검증을 통과한 문장만 화면에 표시됩니다.
           </span>
         </p>
         <p className="text-[13.5px] text-[#64748b] m-0 mb-5 flex items-center gap-1.5">
@@ -136,34 +145,80 @@ export function TechnicalSignalRiskGrid({ report }: { report: TechnicalReportRea
         </div>
       </section>
 
-      {/* 2. 리스크 / 경고 Section (Clean layout insertion to prevent loss of backend warnings) */}
-      {risks.length > 0 && (
-        <section className="border border-rose-100 rounded-2xl p-5 bg-rose-50/20 shadow-xs">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-rose-800 mb-3 m-0">
-            <ShieldAlert className="w-4.5 h-4.5 text-rose-700" /> 리스크 / 경고 모니터링
+      {/* 2. 리스크 / 경고 모니터링 — 2층 구조: (상단) 에이전트 해설 + 요약 포인트 / (하단) 규칙 기반 근거 */}
+      {hasRiskContent && (
+        <section className="border border-amber-100 rounded-2xl p-5 bg-amber-50/20 shadow-xs">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-amber-800 mb-3 m-0">
+            <ShieldAlert className="w-4.5 h-4.5 text-amber-700" /> 리스크 / 경고 모니터링
           </h3>
-          <div className="flex flex-col gap-3">
-            {risks.map((risk) => (
-              <div
-                key={risk.flag}
-                className="rounded-xl border border-rose-100 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <p className="text-sm font-bold text-rose-800 m-0">
-                    {risk.flag === "volume_not_confirmed" ? "거래량 확인 부족" : risk.flag}
-                  </p>
-                  {risk.ref_price !== null && (
-                    <span className="text-xs font-bold text-rose-500 font-tabular">
-                      기준가: ₩{formatNumber(risk.ref_price)}
-                    </span>
+
+          {/* 2-1. 상단: 에이전트 위험 해설(risk_interpretation) — 문장 단위 블록으로 분리(가독성) */}
+          {riskInterpretation && (
+            <div className="rounded-xl border border-amber-100 bg-white p-4 mb-3">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 mb-2">
+                <Info className="w-3.5 h-3.5" /> 위험 해설
+              </div>
+              <div className="flex flex-col gap-2">
+                {riskInterpretation
+                  .split(/(?<=\.)\s+/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((sentence, idx) => (
+                    <div key={idx} className="flex gap-2 text-[13px] leading-relaxed text-[#475569]">
+                      <span className="shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-300" />
+                      <span><BoldText text={sentence} /></span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* 2-2. 상단: warning_points 요약 칩(문구 그대로·dedupe) — 있으면만 */}
+          {warningPoints.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+              <span className="text-[11px] font-bold text-[#94a3b8] mr-0.5">주의 포인트</span>
+              {warningPoints.map((point) => (
+                <span
+                  key={point}
+                  className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1"
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                  {point}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* 2-3. 하단: 규칙 기반 근거 카드(risks.items) — flag 는 사용자 라벨로 치환 */}
+          {risks.length > 0 ? (
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[11px] font-bold text-[#94a3b8] flex items-center gap-1">
+                <Calculator className="w-3 h-3" /> 규칙 기반 경고 근거
+              </span>
+              {risks.map((risk, idx) => (
+                <div
+                  key={`${risk.flag}-${idx}`}
+                  className="rounded-xl border border-[#f1f5f9] bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-sm font-bold text-[#334155] m-0">{riskLabel(risk.flag)}</p>
+                    {risk.ref_price !== null && (
+                      <span className="text-xs font-bold text-amber-600 font-tabular">
+                        기준가 ₩{formatNumber(risk.ref_price)}
+                      </span>
+                    )}
+                  </div>
+                  {risk.note && (
+                    <p className="mt-2 text-xs sm:text-sm leading-relaxed text-[#475569] m-0">
+                      {risk.note}
+                    </p>
                   )}
                 </div>
-                <p className="mt-2 text-xs sm:text-sm leading-relaxed text-[#475569] m-0">
-                  {risk.note ?? "설명이 없습니다."}
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[#94a3b8] m-0">확정된 규칙 기반 경고는 없습니다.</p>
+          )}
         </section>
       )}
     </div>

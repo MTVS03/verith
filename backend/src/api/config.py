@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     DART_API_KEY: str = ""
     DART_BASE_URL: str = "https://opendart.fss.or.kr/api"
 
+    # CORS 허용 origin(브라우저가 백엔드를 직접 호출할 때). 콤마 구분 — dev 기본은 프론트(3000),
+    # 배포 시 env(CORS_ORIGINS)로 실제 도메인을 넣는다. (프론트와 백엔드는 서로 다른 origin.)
+    CORS_ORIGINS: str = "http://localhost:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
 
 def _load_settings() -> Settings:
     """설정 로드 + DATABASE_URL 필수 검증.

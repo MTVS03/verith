@@ -5,9 +5,11 @@ import {
   Area,
   Bar,
   BarChart,
+  Brush,
   CartesianGrid,
   Cell,
   ComposedChart,
+  Customized,
   Line,
   ReferenceLine,
   ReferenceArea,
@@ -16,6 +18,8 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  useXAxisScale,
+  useYAxisScale,
 } from "recharts";
 import { MousePointerClick, Info, GitCommitHorizontal, History } from "lucide-react";
 
@@ -61,8 +65,57 @@ type PricePoint = {
   low?: number;
   volume: number;
   [key: `ma_${number}`]: number | null;
-  cup_curve?: number | null;
 };
+
+// 한국식 봉 색: 양봉(종가≥시가)=빨강, 음봉=파랑.
+const CANDLE_UP = "#ef4444";
+const CANDLE_DOWN = "#3b82f6";
+
+/**
+ * OHLC 봉차트 레이어 — recharts v3 훅(useXAxisScale/useYAxisScale)으로 값→픽셀 스케일을 얻어
+ * SVG 로 직접 그린다(recharts 는 캔들스틱 기본 미지원). <Customized> 로 감싸 SVG(Layer) 안에 배치한다.
+ * 각 봉: 고가~저가 심지(line) + 시가~종가 몸통(rect). candle_unit(분/일/주) 무관 — 데이터가 이미 그 단위의 OHLC.
+ */
+function CandleSeries({ candles }: { candles: PricePoint[] }) {
+  const xScale = useXAxisScale();
+  const yScale = useYAxisScale();
+  if (!xScale || !yScale || candles.length === 0) return null;
+  // 봉 너비 = 인접 카테고리 픽셀 간격 × 0.6 (point 스케일이라 xScale(date)=중심). 확대 시 화면 밖
+  // 날짜는 스케일에서 undefined 라, **둘 다 유효한 첫 인접쌍**으로 간격을 잡아 확대해도 폭이 맞는다.
+  let step = 6;
+  for (let i = 0; i < candles.length - 1; i++) {
+    const a = xScale(candles[i].date);
+    const b = xScale(candles[i + 1].date);
+    if (typeof a === "number" && typeof b === "number" && !Number.isNaN(a) && !Number.isNaN(b)) {
+      step = Math.abs(b - a);
+      break;
+    }
+  }
+  const bodyW = Math.max(1.5, step * 0.6);
+  return (
+    <g className="recharts-candles">
+      {candles.map((c) => {
+        if (c.open == null || c.high == null || c.low == null || c.close == null) return null;
+        const cx = xScale(c.date);
+        const yO = yScale(c.open);
+        const yC = yScale(c.close);
+        const yH = yScale(c.high);
+        const yL = yScale(c.low);
+        if ([cx, yO, yC, yH, yL].some((v) => typeof v !== "number" || Number.isNaN(v))) return null;
+        const up = c.close >= c.open;
+        const color = up ? CANDLE_UP : CANDLE_DOWN;
+        const bodyTop = Math.min(yO as number, yC as number);
+        const bodyH = Math.max(1, Math.abs((yO as number) - (yC as number)));
+        return (
+          <g key={c.date}>
+            <line x1={cx as number} x2={cx as number} y1={yH as number} y2={yL as number} stroke={color} strokeWidth={1} />
+            <rect x={(cx as number) - bodyW / 2} y={bodyTop} width={bodyW} height={bodyH} fill={color} />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
 
 // chart_data 는 일봉/주봉/월봉 ↔ 분봉 스키마가 달라(느슨하게) 접근한다. 값 의미는 백엔드 그대로 신뢰.
 type RawCandle = {
@@ -110,7 +163,22 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
     periods.includes("1y") ? "1y" : periods[0]
   );
 
+  // 확대(Brush) 구간 — null이면 전체. 계산엔 영향 없고 "보이는 구간"만 바뀐다.
+  // Brush 는 **uncontrolled**(startIndex/endIndex 미지정)로 두고, 리셋은 key 를 바꿔 remount 한다.
+  // (controlled 인덱스는 초기 레이아웃 폭 미확정 타이밍에 NaN x/width 를 던지는 recharts 이슈가 있음.)
+  const [brush, setBrush] = useState<{ start: number; end: number } | null>(null);
+  const [brushKey, setBrushKey] = useState(0);
+  const resetBrush = () => {
+    setBrush(null);
+    setBrushKey((k) => k + 1);
+  };
+  const selectPeriod = (period: string) => {
+    setActivePeriod(period);
+    resetBrush(); // 기간 바꾸면 전체 보기로 리셋
+  };
+
   // Layout toggles
+  const [showCandles, setShowCandles] = useState(true); // 봉차트(true) vs 종가선(false)
   const [showMa, setShowMa] = useState(true);
   const [showSr, setShowSr] = useState(true);
   const [showRsi, setShowRsi] = useState(true);
@@ -202,34 +270,25 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
       return point;
     });
 
-    // cup_handle 컵 곡선 — 1y/5y 에서 패턴 토글 켰을 때만. **실제 3점(좌림·바닥·우림)만** 찍고
-    // 나머지는 null(connectNulls + monotone 보간)로 잇는다. 파라볼라 3점 피팅은 좌우 팔 비대칭 시
-    // vertex(최소)가 실제 바닥과 다른 곳으로 밀려 "틀린 곳에 파이는" 문제가 있어 쓰지 않는다.
-    if (showPatternArea && patternRenderable) {
-      for (const cup of cupHandles) {
-        const idxLeft = findClosestDateIndex(cup.leftRimDate, points);
-        const idxBottom = findClosestDateIndex(cup.bottomDate, points);
-        const idxRight = findClosestDateIndex(cup.rightRimDate, points);
-        if (idxLeft === -1 || idxBottom === -1 || idxRight === -1) continue;
-        if (!(idxLeft < idxBottom && idxBottom < idxRight)) continue;
-        points[idxLeft].cup_curve = cup.leftRimPrice ?? points[idxLeft].close;
-        points[idxBottom].cup_curve = cup.bottomPrice ?? points[idxBottom].close;
-        points[idxRight].cup_curve = cup.rightRimPrice ?? points[idxRight].close;
-      }
-    }
-
     return points;
-  }, [activeData, showPatternArea, patternRenderable, cupHandles]);
-
-  // Part B: 최고/최저 — candles 로 계산(전 기간 공통, 백엔드 annotation 없음).
-  const highLow = useMemo(() => {
-    if (!activeData?.candles) return null;
-    return computeHighLow(activeData.candles);
   }, [activeData]);
 
+  // Part B: 최고/최저 — candles 로 계산(전 기간 공통). 봉차트면 고가/저가(심지), 종가선이면 종가 기준.
+  const highLow = useMemo(() => {
+    if (!activeData?.candles) return null;
+    return computeHighLow(activeData.candles, showCandles);
+  }, [activeData, showCandles]);
+
   // ReferenceDot 가장자리 클리핑 방지용 padded Y domain.
+  // 지지/저항 수평선 오버레이(레벨 라인). 분봉엔 overlays 없음 → [].
+  const srLines = useMemo<SrLine[]>(() => {
+    if (!showSr || !activeData?.overlays) return [];
+    return activeData.overlays.support_resistance || [];
+  }, [showSr, activeData]);
+
   const yDomain = useMemo<[number | string, number | string]>(() => {
     if (priceData.length === 0) return ["auto", "auto"];
+    // 봉차트는 고가/저가(wick)까지 그리므로 도메인도 high/low 기준(없으면 close). nice step 으로 눈금 정돈.
     let maxVal = -Infinity;
     let minVal = Infinity;
     for (const p of priceData) {
@@ -238,15 +297,29 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
       if (h > maxVal) maxVal = h;
       if (l < minVal) minVal = l;
     }
-    // S/R 레벨 마커가 캔들 밖(터치 tolerance)일 수 있으니 레벨값도 domain 에 포함해 안 잘리게.
-    for (const s of srMarkers) {
-      if (s.y > maxVal) maxVal = s.y;
-      if (s.y < minVal) minVal = s.y;
+    // 최고/최저 마커·S/R 레벨선/터치가 잘리지 않게 도메인에 포함.
+    if (highLow) {
+      maxVal = Math.max(maxVal, highLow.highest.value);
+      minVal = Math.min(minVal, highLow.lowest.value);
     }
-    const range = maxVal - minVal;
-    const padding = range * 0.08 || 1000;
-    return [Math.max(0, minVal - padding), maxVal + padding];
-  }, [priceData, srMarkers]);
+    for (const s of srMarkers) {
+      maxVal = Math.max(maxVal, s.y);
+      minVal = Math.min(minVal, s.y);
+    }
+    for (const line of srLines) {
+      maxVal = Math.max(maxVal, line.price);
+      minVal = Math.min(minVal, line.price);
+    }
+    // 눈금이 깔끔한 숫자로 떨어지도록 도메인 경계를 nice step 으로 반올림.
+    const range = maxVal - minVal || maxVal || 1000;
+    const rawStep = range / 4;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    const niceStep = (norm >= 5 ? 10 : norm >= 2 ? 5 : norm >= 1 ? 2 : 1) * mag;
+    const lo = Math.max(0, Math.floor((minVal - range * 0.05) / niceStep) * niceStep);
+    const hi = Math.ceil((maxVal + range * 0.05) / niceStep) * niceStep;
+    return [lo, hi];
+  }, [priceData, highLow, srMarkers, srLines]);
 
   // RSI 서브차트 시리즈 — x키 = 전체 날짜(annotation 정렬을 위해 통일). 분봉은 rsi 배열이 top-level.
   const rsiData = useMemo(() => {
@@ -276,12 +349,6 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
     return priceData.map((p) => ({ date: p.date, volume: p.volume, isSpike: false }));
   }, [activeData, priceData]);
 
-  // 지지/저항 수평선 오버레이(레벨 라인). 분봉엔 overlays 없음 → [].
-  const srLines = useMemo<SrLine[]>(() => {
-    if (!showSr || !activeData?.overlays) return [];
-    return activeData.overlays.support_resistance || [];
-  }, [showSr, activeData]);
-
   // 핸들 구간 밴드(1y/5y) — geometry 로 음영.
   const handleBands = useMemo(() => {
     if (!showPatternArea || !patternRenderable || priceData.length === 0) return [];
@@ -294,22 +361,40 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
       .filter((b) => b.x1 && b.x2);
   }, [showPatternArea, patternRenderable, priceData, cupHandles]);
 
-  // 컵 구간 밴드(좌림→우림) + 바닥 앵커 — geometry 좌표를 그대로 써서 "정확히 그 구간"을 표시.
+  // 컵 구간 밴드(좌림→우림) + 3개 앵커(좌림·바닥·우림) — geometry 좌표(림=고가·바닥=저가)를 봉 심지 끝에 표시.
   const cupRegions = useMemo(() => {
     if (!showPatternArea || !patternRenderable || priceData.length === 0) return [];
     return cupHandles
       .map((cup) => {
-        const x1 = priceData[findClosestDateIndex(cup.leftRimDate, priceData)]?.date;
-        const x2 = priceData[findClosestDateIndex(cup.rightRimDate, priceData)]?.date;
-        const bottomIdx = findClosestDateIndex(cup.bottomDate, priceData);
-        const bottomDate = priceData[bottomIdx]?.date;
-        const bottomY = cup.bottomPrice ?? priceData[bottomIdx]?.close;
-        return { key: cup.key, x1, x2, bottomDate, bottomY };
+        const li = findClosestDateIndex(cup.leftRimDate, priceData);
+        const bi = findClosestDateIndex(cup.bottomDate, priceData);
+        const ri = findClosestDateIndex(cup.rightRimDate, priceData);
+        const anchors = [
+          { role: "좌림", date: priceData[li]?.date, y: cup.leftRimPrice ?? priceData[li]?.high ?? priceData[li]?.close, pos: "top" as const },
+          { role: "바닥", date: priceData[bi]?.date, y: cup.bottomPrice ?? priceData[bi]?.low ?? priceData[bi]?.close, pos: "bottom" as const },
+          { role: "우림", date: priceData[ri]?.date, y: cup.rightRimPrice ?? priceData[ri]?.high ?? priceData[ri]?.close, pos: "top" as const },
+        ].filter((a) => a.date && a.y != null);
+        return { key: cup.key, x1: priceData[li]?.date, x2: priceData[ri]?.date, anchors };
       })
       .filter((b) => b.x1 && b.x2);
   }, [showPatternArea, patternRenderable, priceData, cupHandles]);
 
   const axisTick = (val: string) => formatChartDate(val, activePeriod);
+
+  // 확대 구간 경계(전체 priceData 인덱스) — 메인 차트는 Brush 가, RSI/거래량 서브차트는 같은 날짜창으로 슬라이스.
+  const isZoomed = brush != null;
+  const brushStart = brush?.start ?? 0;
+  const brushEnd = brush?.end ?? Math.max(0, priceData.length - 1);
+  const winStart = priceData[brushStart]?.date;
+  const winEnd = priceData[brushEnd]?.date;
+  const rsiView = useMemo(
+    () => (isZoomed ? rsiData.filter((p) => p.date >= (winStart ?? "") && p.date <= (winEnd ?? "￿")) : rsiData),
+    [rsiData, isZoomed, winStart, winEnd]
+  );
+  const volumeView = useMemo(
+    () => (isZoomed ? volumeData.filter((p) => p.date >= (winStart ?? "") && p.date <= (winEnd ?? "￿")) : volumeData),
+    [volumeData, isZoomed, winStart, winEnd]
+  );
 
   return (
     <section
@@ -321,21 +406,32 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
           <Info className="w-[19px] h-[19px] text-[#334155]" /> 가격 차트 · 기술 지표
         </h2>
         {/* Period toggles */}
-        <div className="flex items-center gap-1 bg-[#f1f5f9] rounded-xl p-1">
-          {periods.map((period) => (
+        <div className="flex items-center gap-2">
+          {isZoomed && (
             <button
-              key={period}
               type="button"
-              onClick={() => setActivePeriod(period)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
-                activePeriod === period
-                  ? "bg-white text-[#4f46e5] shadow-sm"
-                  : "text-[#64748b] hover:text-[#0f172a]"
-              }`}
+              onClick={resetBrush}
+              className="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-indigo-50 text-[#4f46e5] hover:bg-indigo-100 transition-colors"
             >
-              {PERIOD_MAP[period] ?? period}
+              전체 보기
             </button>
-          ))}
+          )}
+          <div className="flex items-center gap-1 bg-[#f1f5f9] rounded-xl p-1">
+            {periods.map((period) => (
+              <button
+                key={period}
+                type="button"
+                onClick={() => selectPeriod(period)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                  activePeriod === period
+                    ? "bg-white text-[#4f46e5] shadow-sm"
+                    : "text-[#64748b] hover:text-[#0f172a]"
+                }`}
+              >
+                {PERIOD_MAP[period] ?? period}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -349,6 +445,15 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
             {/* Layer Toggles Line 1 */}
             <div className="flex items-center justify-between flex-wrap gap-2.5 pb-3 border-b border-[#f8fafc] mb-3">
               <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={() => setShowCandles(!showCandles)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
+                    showCandles ? "bg-indigo-50 text-[#4f46e5]" : "bg-slate-50 text-slate-400"
+                  }`}
+                >
+                  {showCandles ? "봉차트" : "종가선"}
+                </button>
+                <div className="w-[1px] h-4 bg-slate-200 mx-1.5" />
                 <button
                   onClick={() => setShowMa(!showMa)}
                   className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
@@ -576,55 +681,44 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
                       />
                     ))}
 
-                  {/* Base Close Price Area */}
+                  {/* 종가 시리즈 — 선 모드면 보이는 라인/영역, 봉 모드면 투명(Tooltip 값 유지용) */}
                   <Area
                     type="monotone"
                     dataKey="close"
-                    stroke="#4f46e5"
+                    stroke={showCandles ? "transparent" : "#4f46e5"}
                     strokeWidth={2}
-                    fill="url(#priceGradient)"
+                    fill={showCandles ? "transparent" : "url(#priceGradient)"}
                     name="종가"
+                    dot={false}
+                    activeDot={!showCandles}
                     isAnimationActive={false}
                   />
 
-                  {/* Cup curve — 실제 3점(좌림·바닥·우림)만 지나는 U자(바닥이 정확히 bottom_date) */}
-                  {showPatternArea && (
-                    <Area
-                      type="monotone"
-                      dataKey="cup_curve"
-                      stroke="#6366f1"
-                      strokeWidth={2.2}
-                      strokeDasharray="4 4"
-                      fill="none"
-                      dot={false}
-                      activeDot={false}
-                      connectNulls
-                      name="컵 곡선"
-                      isAnimationActive={false}
-                    />
-                  )}
+                  {/* 봉차트 레이어(OHLC) — 스케일 확정 후 그려지도록 다른 시리즈 뒤에 배치 */}
+                  {showCandles && <Customized component={<CandleSeries candles={priceData} />} />}
 
-                  {/* Cup 바닥 앵커 마커(정확히 bottom_date/price) */}
+                  {/* Cup 앵커 마커(좌림·바닥·우림) — geometry 좌표 그대로. 스무스 U 곡선은 쓰지 않는다
+                      (탐지 후보를 '완성된 컵'처럼 과장하지 않기 위해 구간 밴드+앵커 중심으로만 표현). */}
                   {showPatternArea &&
-                    cupRegions.map((region) =>
-                      region.bottomDate && region.bottomY != null ? (
+                    cupRegions.flatMap((region) =>
+                      region.anchors.map((a) => (
                         <ReferenceDot
-                          key={`cupbottom-${region.key}`}
-                          x={region.bottomDate}
-                          y={region.bottomY}
+                          key={`cupanchor-${region.key}-${a.role}`}
+                          x={a.date}
+                          y={a.y}
                           r={4}
                           fill="#6366f1"
                           stroke="#fff"
                           strokeWidth={1.5}
                           label={{
-                            value: `컵 바닥 ${formatNumber(region.bottomY)}`,
+                            value: `${a.role} ${formatNumber(a.y)}`,
                             fill: "#4f46e5",
-                            fontSize: 9.5,
-                            position: "bottom",
+                            fontSize: 9,
+                            position: a.pos,
                             fontWeight: "bold",
                           }}
                         />
-                      ) : null
+                      ))
                     )}
 
                   {/* MA Overlays */}
@@ -758,6 +852,26 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
                         />
                       );
                     })}
+
+                  {/* 하단 Brush — 확대 구간 선택(계산 영향 없음, 보이는 구간만 변경). uncontrolled + key 리셋 */}
+                  {priceData.length > 1 && (
+                    <Brush
+                      key={brushKey}
+                      dataKey="date"
+                      height={22}
+                      stroke="#c7d2fe"
+                      fill="#f8fafc"
+                      travellerWidth={8}
+                      tickFormatter={(d) => formatChartDate(String(d), activePeriod)}
+                      onChange={(range: { startIndex?: number; endIndex?: number }) => {
+                        const s = range?.startIndex;
+                        const e = range?.endIndex;
+                        if (typeof s !== "number" || typeof e !== "number") return;
+                        if (s <= 0 && e >= priceData.length - 1) setBrush(null);
+                        else setBrush({ start: s, end: e });
+                      }}
+                    />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -773,7 +887,7 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
                 </div>
                 <div className="h-[92px] relative">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={rsiData}>
+                    <ComposedChart data={rsiView}>
                       <CartesianGrid stroke="#f8fafc" strokeWidth={1} vertical={false} />
                       <XAxis dataKey="date" hide />
                       <YAxis domain={[0, 100]} width={30} tick={{ fill: "#94a3b8", fontSize: 10 }} />
@@ -817,7 +931,7 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
                 <div className="text-xs font-bold text-[#64748b] mb-1.5">거래량</div>
                 <div className="h-[80px] relative">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={volumeData}>
+                    <BarChart data={volumeView}>
                       <CartesianGrid stroke="#f8fafc" strokeWidth={1} vertical={false} />
                       <XAxis dataKey="date" hide />
                       <YAxis
@@ -830,7 +944,7 @@ export function TechnicalChartPanel({ charts }: { charts: TechnicalChartsReadMod
                       />
                       <Tooltip labelFormatter={(val) => formatChartDate(String(val), activePeriod)} />
                       <Bar dataKey="volume" radius={[2, 2, 0, 0]} isAnimationActive={false}>
-                        {volumeData.map((d) => (
+                        {volumeView.map((d) => (
                           <Cell
                             key={`vbar-${d.date}`}
                             fill={showVolumeSpike && d.isSpike ? "#fb7185" : "#cbd5e1"}

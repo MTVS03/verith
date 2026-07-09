@@ -13,7 +13,7 @@ export function TechnicalHero({
   charts,
 }: {
   report: TechnicalReportReadModel;
-  charts?: TechnicalChartsReadModel;
+  charts?: TechnicalChartsReadModel | null;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -217,7 +217,7 @@ export function TechnicalHero({
       <div className="mt-5 p-3.5 bg-[rgba(16,185,129,0.06)] border border-[rgba(16,185,129,0.2)] rounded-xl flex gap-2.5 items-center">
         <ShieldAlert className="w-[18px] h-[18px] text-[#059669] flex-shrink-0" />
         <p className="text-[12.5px] leading-relaxed text-[#047857] font-medium m-0">
-          이 리포트의 모든 지표 수치는 결정론적 코드로 계산되고 KIS 시세에 연결되어 검증됩니다. LLM은 판정을 바꾸지 않고 검증된 값을 해석만 하며, 출처가 확인되지 않은 가공 수치는 리포트에 진입이 차단됩니다.
+          이 리포트의 모든 지표 수치는 결정론적 코드로 계산되고 KIS 시세에 연결되어 검증됩니다. AI는 판정을 바꾸지 않고 검증된 값을 해석만 하며, 출처가 확인되지 않은 가공 수치는 리포트에 진입이 차단됩니다.
         </p>
       </div>
     </div>

@@ -46,7 +46,7 @@ export function TechnicalTrustCards({ report }: { report: TechnicalReportReadMod
       title: "지표 출처 연결",
       value: formatPercent(report.trust_summary.source_linkage.source_coverage_ratio),
       meta: `${report.trust_summary.source_linkage.sourced_signal_items} / ${report.trust_summary.source_linkage.total_signal_items}`,
-      caption: "LLM 설명 커버리지",
+      caption: "AI 분석 커버리지",
       tone: "emerald" as const,
     },
   ];

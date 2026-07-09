@@ -32,6 +32,9 @@ supervisor/technical_supervisor.py 가 소유한다. 이 프롬프트는 재생�
 - `detail_must_include_any_by_indicator`: 각 지표 detail 에 지정된 표현(긍정/중립/부정 등) 중 하나를 포함하세요.
 - `must_mention_risk_any`: 비어있지 않으면 최소 하나(거래량·저항·지지 …)를 언급하세요.
 - `must_avoid`: 이 표현(반대·모순어)은 쓰지 마세요. `do_not_use_english_enum`: 영문 enum 값을 서술에 쓰지 마세요.
+- `risk_interpretation`: flag 를 한 줄로 나열하지 말고 **2~4문장**으로 — 리스크 조합의 **의미 + 왜 해석의
+  확신을 제한하는지 + (선택)관찰 포인트**를 씁니다. 근거는 `risk_items`·`risk_hints`(label·meaning·watch)만.
+  재생성에서도 다시 얇은 나열로 돌아가지 마세요. 투자 조언·가격/확률 예측·과장 금지.
 
 # 금지 표현 (부정문 안에서도 금지)
 
@@ -47,11 +50,20 @@ supervisor/technical_supervisor.py 가 소유한다. 이 프롬프트는 재생�
 
 ```json
 {
-  "interpretation_text": "확정값을 바꾸지 않고 3~5문장으로 다시 작성한 한국어 종합 해석. 마지막 문장은 비추천형 안내로 맺습니다.",
+  "interpretation_text": "신호 흐름 요약을 '전체 판단:/약세 근거:/완충 신호:/주의할 점:/다음 관찰 기준:' 5구조로 줄바꿈(\\n) 분리해 다시 작성(각 1~3문장, 설명적). **검증 필수 표현의 한글 라벨을 반드시 포함**하고, 핵심 판단 조건만 **...**(bold)로 감싸며(문장 전체 bold·# 금지), 마지막 줄은 비추천형 안내로 맺습니다.",
   "details": [
-    { "indicator": "moving_average", "detail": "확정 signal·value·metrics와 일치하는 설명 한 문장." }
+    {
+      "indicator": "moving_average",
+      "detail": "확정 signal·value·metrics와 일치하는 설명 한 문장.",
+      "detail_reason": "현재 상태와 왜 그 방향인지 확정 수치를 근거로 2~3문장.",
+      "detail_caution": "이 지표만으로 단정하면 안 되는 이유 1~2문장.",
+      "detail_watchpoint": "어떤 조건이 충족되면 해석이 바뀔 수 있는지 구체 조건 1~2문장(행동 지시 아님)."
+    }
   ]
 }
 ```
 
-위 값을 바꾸지 말고 문장만 다시 작성하세요.
+`detail_reason`·`detail_caution`·`detail_watchpoint`는 additive 설명 필드입니다(재판정 아님, 확정 라벨과
+모순 금지). **가능하면 각 2~3문장으로 설명적으로** 씁니다(단문 나열 금지). 지표별 초점: 이동평균=배열 구조,
+RSI=기준선 위치·반전 확인, 거래량=움직임 확인 여부, 지지·저항=근접이 곧 방향 아님, 패턴=관찰용 후보.
+**핵심 판단 조건/라벨만** `**...**`(bold)로 감쌉니다(문장 전체 bold·`#` 금지). 위 확정값을 바꾸지 말고 문장만 다시 작성하세요.

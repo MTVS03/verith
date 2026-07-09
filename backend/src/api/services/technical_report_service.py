@@ -661,6 +661,9 @@ def build_indicator_cards(raw: dict, *, verified: bool) -> list[IndicatorCard]:
             weight=s.get("weight"),
             llm_detail=s.get("detail"),
             detail_source=s.get("detail_source"),
+            detail_reason=s.get("detail_reason"),        # AI additive(없으면 null passthrough)
+            detail_caution=s.get("detail_caution"),
+            detail_watchpoint=s.get("detail_watchpoint"),
             verified=verified,
             code_metrics=[str(m) for m in metrics],
             calc_basis=_calc_basis(ind, s.get("value"), metrics, charts),
@@ -993,20 +996,27 @@ class TechnicalReportService:
         return allowlist_name(ticker) or req_name or ticker
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
-    async def get_report(self, report_id: UUID) -> TechnicalReportReadModel | None:
+    async def get_report(
+        self, report_id: UUID, *, include_charts: bool = False
+    ) -> TechnicalReportReadModel | None:
+        """단건 read model. `include_charts=True`(=`?include=charts`)면 차트 full payload 를 `charts_full`
+        에 임베드해 상세 페이지가 리포트+차트를 1 JSON 으로 받게 한다(목록 등 기본은 메타만·가볍게)."""
         report = await tr_repo.get_report(self._session, report_id)
         if report is None:
             return None
         stock = await tr_repo.get_stock(self._session, report.stock_code)
         interp = await tr_repo.get_interpretation(self._session, report_id)
         followup_count = await tr_repo.count_followups(self._session, report_id)
-        return build_read_model(
+        rm = build_read_model(
             report_id=report.id,
             raw=report.output_payload,
             stock=stock,
             model_name=(interp.model_name if interp else None),
             followup_count=followup_count,
         )
+        if include_charts:
+            rm.charts_full = build_charts_read_model(report=report, stock=stock)  # 계산 재실행 없음(projection)
+        return rm
 
     async def get_report_followups(
         self, report_id: UUID
@@ -1018,14 +1028,6 @@ class TechnicalReportService:
         stock = await tr_repo.get_stock(self._session, report.stock_code)
         followups = await tr_repo.list_followups(self._session, report_id)
         return build_followups_read_model(report=report, stock=stock, followups=followups)
-
-    async def get_report_charts(self, report_id: UUID) -> TechnicalChartsReadModel | None:
-        """차트 탭 렌더용 full payload(report 없으면 None → 404)."""
-        report = await tr_repo.get_report(self._session, report_id)
-        if report is None:
-            return None
-        stock = await tr_repo.get_stock(self._session, report.stock_code)
-        return build_charts_read_model(report=report, stock=stock)
 
     async def get_report_trace(self, report_id: UUID) -> TechnicalTraceDetailReadModel | None:
         """trace drawer 용 단계 재구성(report 없으면 None → 404). duration 은 미측정이라 null."""
@@ -1141,3 +1143,10 @@ class TechnicalReportService:
         deleted = await tr_repo.delete_root(self._session, report_id)
         await self._session.commit()
         return deleted > 0
+
+    async def delete_all_reports(self) -> int:
+        """technical 리포트 **전체** 삭제(목록 전체 삭제용). 삭제된 리포트 수 반환."""
+        await agent_repo.delete_all_technical(self._session)         # index 먼저(FK 없음)
+        deleted = await tr_repo.delete_all_roots(self._session)      # root 전체(자식 CASCADE)
+        await self._session.commit()
+        return deleted

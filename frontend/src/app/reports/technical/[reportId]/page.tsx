@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { getTechnicalCharts, getTechnicalFollowups, getTechnicalReport, getTechnicalTrace } from "@/api/technical";
+import { getTechnicalFollowups, getTechnicalReport, getTechnicalTrace } from "@/api/technical";
 import { BackendApiError } from "@/api/backend";
 import { TechnicalChartPanel } from "@/features/technical/components/technical-chart-panel";
 import { TechnicalFollowups } from "@/features/technical/components/technical-followups";
@@ -16,14 +16,13 @@ export default async function TechnicalReportPage({
 }) {
   const { reportId } = await params;
   let report;
-  let charts;
   let trace;
   let followups;
 
   try {
-    [report, charts, trace, followups] = await Promise.all([
-      getTechnicalReport(reportId),
-      getTechnicalCharts(reportId),
+    // 리포트 + 차트를 1 JSON 으로(`?include=charts`). 전용 /charts 콜은 폐지.
+    [report, trace, followups] = await Promise.all([
+      getTechnicalReport(reportId, { includeCharts: true }),
       getTechnicalTrace(reportId),
       getTechnicalFollowups(reportId),
     ]);
@@ -33,6 +32,8 @@ export default async function TechnicalReportPage({
     }
     throw error;
   }
+
+  const charts = report.charts_full ?? null;
 
   return (
     <div className="min-h-screen bg-[#eceff3] py-8 px-4 sm:px-6 lg:px-8 font-sans antialiased text-[#1e293b]">
@@ -65,7 +66,7 @@ export default async function TechnicalReportPage({
             {/* Left column */}
             <div className="flex flex-col gap-5 min-w-0">
               <TechnicalSummarySections report={report} />
-              <TechnicalChartPanel charts={charts} />
+              {charts && <TechnicalChartPanel charts={charts} />}
               <TechnicalSignalRiskGrid report={report} />
               <TechnicalTraceDrawer trace={trace} report={report} />
               <div className="p-4 border border-[#f1f5f9] rounded-2xl bg-[#f8fafc] flex items-center gap-2.5">
@@ -89,7 +90,7 @@ export default async function TechnicalReportPage({
                     신호 종합 (Signal)
                   </a>
                   <a href="#a-flow" className="block px-2.5 py-2 text-[12.5px] font-bold text-[#475569] hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors">
-                    신호 흐름 요약 (LLM)
+                    신호 흐름 요약 (AI 분석)
                   </a>
                   <a href="#a-chart" className="block px-2.5 py-2 text-[12.5px] font-bold text-[#475569] hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors">
                     가격 차트 (Chart)

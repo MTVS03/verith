@@ -314,6 +314,9 @@ CUP_HANDLE_MIN_HANDLE_BARS = 5             # 핸들 최소 길이(봉)
 CUP_HANDLE_MAX_HANDLE_BARS = 30            # 핸들 최대 길이(봉)
 CUP_HANDLE_MIN_BOTTOM_BARS = 3            # 둥근 저점 최소 봉 수(단봉 V자 spike 배제)
 CUP_HANDLE_BOTTOM_TOLERANCE_PCT = 0.03   # bottom 근처 판정 폭(이 안에 MIN_BOTTOM_BARS 이상)
+CUP_HANDLE_MIN_ARM_RATIO = 0.5           # 좌/우 팔 폭(봉 수) 대칭 하한 = min(좌,우)/max(좌,우).
+#   rim 가격 차(RIM_TOLERANCE)만으로는 '한쪽 팔만 긴 찌그러진 컵'이 통과한다. 하강(좌rim→bottom)과
+#   상승(bottom→우rim) 봉 폭이 2:1(=0.5)보다 더 벌어지면 후보에서 제외(false positive·어색한 후보 감소).
 
 # annotation 중복 제거 창 — candle(봉) index 거리 기준 (chart_annotation_spec §8.4).
 ANNOTATION_DEDUP_BARS = {
@@ -407,7 +410,9 @@ OPENAI_MODEL_ENV = "OPENAI_MODEL"        # 모델 "이름"만 — 값은 .env(�
 OPENAI_TIMEOUT_SECONDS: float = 20.0     # 1회 호출 timeout(초) — 60초 계약 안에서 보수적 하향
 OPENAI_MAX_RETRIES: int = 0              # SDK 재시도 끔 — agent-level 재생성/template fallback 우선
 OPENAI_TEMPERATURE: float | None = 0.0   # None이면 요청 파라미터에서 생략 — 튜닝 상수(코드)
-OPENAI_MAX_OUTPUT_TOKENS: int = 1200     # 응답 최대 토큰(보수적 기본) — 튜닝 상수(코드)
+OPENAI_MAX_OUTPUT_TOKENS: int = 3000     # 응답 최대 토큰 — 5구조 요약 + 지표별 2~3문장 detail(+bold)로
+#   출력이 길어져 1200 에선 JSON 문자열이 중간에 잘려(Unterminated string) 파싱 실패→template_fallback 이
+#   빈발했다. 실측 full 출력 ~1800~2000 토큰 기준 여유값으로 상향. gpt-5.4-mini 라 비용/지연 영향 작음.
 OPENAI_STORE: bool = False               # OpenAI 측 application state 저장 끔(stateless). 분석 이력은 backend DB.
 
 

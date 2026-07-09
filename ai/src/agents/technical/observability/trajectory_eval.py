@@ -83,9 +83,16 @@ class EvalResult:
 # ─────────────────────────────────────────────────────────────────────────────
 # 문자열 매칭 (test_plan §5.3)
 # ─────────────────────────────────────────────────────────────────────────────
+def _strip_md(text: str) -> str:
+    """verify 는 **마크다운 기호를 제거한 plain text** 기준으로 검사한다. 핵심 조건 bold(`**...**`)로 인해
+    대표 표현이 `**지지** 구간`처럼 별표로 쪼개져 부분 매칭이 깨지는 것을 방지한다(별표만 제거·내용 보존)."""
+    return text.replace("**", "")
+
+
 def contains_forbidden_terms(text: str) -> list[str]:
-    """금지어 등장 목록(부정문 안이어도 등장 자체가 위반, §5.3 규칙 5)."""
-    return [t for t in FORBIDDEN_TERMS if t in text]
+    """금지어 등장 목록(부정문 안이어도 등장 자체가 위반, §5.3 규칙 5). 마크다운 제거 후 검사."""
+    plain = _strip_md(text)
+    return [t for t in FORBIDDEN_TERMS if t in plain]
 
 
 def check_label(text: str, rule: LabelRule) -> list[str]:
@@ -98,6 +105,7 @@ def check_label(text: str, rule: LabelRule) -> list[str]:
     - 남은 텍스트에서 충돌 표현을 긴 것부터 찾는다(§5.3 규칙 2), 첫 충돌 1건만 보고.
     """
     reasons: list[str] = []
+    text = _strip_md(text)  # 마크다운 별표 제거 후 대표/충돌 표현 매칭(부분 bold 로 인한 매칭 깨짐 방지)
     if rule.require_representative and rule.required_any and not any(t in text for t in rule.required_any):
         reasons.append("missing_required")
 
