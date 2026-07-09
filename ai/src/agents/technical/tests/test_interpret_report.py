@@ -294,6 +294,19 @@ def test_fallback_interpretation_uses_confirmed_only():
     assert contains_forbidden_terms(result.text) == []
 
 
+def test_fallback_interpretation_is_five_part_structured():
+    # 신호 흐름 요약 폴백이 한 줄이 아니라 5구조 라벨 + 줄바꿈으로 나온다(빈약 착지 방지).
+    risks = [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="x"),
+             RiskItem(flag=RiskFlag.MIXED_SIGNALS, note="y")]
+    txt = node.fallback_interpretation(regime=_regime(), signal=_signal(),
+                                       risks=risks, signals=_signals()).text
+    assert "전체 판단:" in txt
+    assert "주의할 점:" in txt
+    assert "다음 관찰 기준:" in txt
+    assert "\n" in txt and txt.count("\n") >= 3      # 여러 줄(pre-wrap 렌더)
+    assert contains_forbidden_terms(txt) == []       # 투자조언 없음
+
+
 # ── risk_interpretation 고도화(맥락 있는 해설·나열 금지) ────────────────────────
 def _risks_combo():
     return [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="거래량 약함."),

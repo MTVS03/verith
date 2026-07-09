@@ -4,6 +4,7 @@ import { Calculator, GitBranch, ShieldAlert, Info, AlertTriangle } from "lucide-
 import type { TechnicalReportReadModel } from "@/types/technical";
 import { formatNumber } from "@/lib/format";
 import { riskLabel, signalLabel } from "@/lib/technical-labels";
+import { BoldText } from "@/lib/bold-text";
 import { IndicatorCardComponent } from "./indicator-card";
 
 const INDICATOR_MAP: Record<string, { name: string; weight: string; icon: string }> = {
@@ -151,15 +152,24 @@ export function TechnicalSignalRiskGrid({ report }: { report: TechnicalReportRea
             <ShieldAlert className="w-4.5 h-4.5 text-amber-700" /> 리스크 / 경고 모니터링
           </h3>
 
-          {/* 2-1. 상단: 에이전트 위험 해설(risk_interpretation 그대로) — 있으면만 */}
+          {/* 2-1. 상단: 에이전트 위험 해설(risk_interpretation) — 문장 단위 블록으로 분리(가독성) */}
           {riskInterpretation && (
             <div className="rounded-xl border border-amber-100 bg-white p-4 mb-3">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 mb-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700 mb-2">
                 <Info className="w-3.5 h-3.5" /> 위험 해설
               </div>
-              <p className="text-[13px] leading-relaxed text-[#475569] m-0">
-                {riskInterpretation}
-              </p>
+              <div className="flex flex-col gap-2">
+                {riskInterpretation
+                  .split(/(?<=\.)\s+/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((sentence, idx) => (
+                    <div key={idx} className="flex gap-2 text-[13px] leading-relaxed text-[#475569]">
+                      <span className="shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-300" />
+                      <span><BoldText text={sentence} /></span>
+                    </div>
+                  ))}
+              </div>
             </div>
           )}
 

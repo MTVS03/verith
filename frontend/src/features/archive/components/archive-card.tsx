@@ -5,6 +5,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { archiveItemHref } from "@/lib/report-links";
 import type { ArchiveItem } from "@/types/archive";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { BoldText } from "@/lib/bold-text";
 
 function toneToStatusTone(tone?: string | null): "green" | "amber" | "red" | "neutral" | "gray" {
   if (tone === "green") return "green";
@@ -46,7 +47,7 @@ export function ArchiveCard({ item }: { item: ArchiveItem }) {
         </div>
         {item.card.summary ? (
           <p className="line-clamp-3 min-h-[4.5rem] text-sm leading-7 text-slate-600">
-            {item.card.summary}
+            <BoldText text={item.card.summary} />
           </p>
         ) : (
           <p className="min-h-[4.5rem] text-sm leading-7 text-slate-400">

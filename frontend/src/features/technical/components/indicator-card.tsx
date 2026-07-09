@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { IndicatorCard } from "@/types/technical";
 import { formatNumber } from "@/lib/format";
+import { BoldText } from "@/lib/bold-text";
 
 // Format Volume helper to "만주" units
 function formatVolume(val: number | null): string {
@@ -220,27 +221,27 @@ export function IndicatorCardComponent({
             </span>
           </div>
           <p className="text-[13.5px] leading-relaxed text-[#334155] m-0">
-            {llm_detail}
+            <BoldText text={llm_detail} />
           </p>
-          {/* 지표별 설명 확장(AI additive): 왜/주의/관찰 — 값 없으면 해당 줄 생략(null-safe) */}
-          {(detail_reason || detail_caution || detail_watchpoint) && (
-            <div className="mt-3 flex flex-col gap-2 border-t border-[rgba(79,70,229,0.08)] pt-3">
+          {/* 지표별 설명 확장(AI additive): 핵심 해석/체크 포인트/해석 제한 — 값 없으면 생략(null-safe) */}
+          {(detail_reason || detail_watchpoint || detail_caution) && (
+            <div className="mt-3 flex flex-col gap-2.5 border-t border-[rgba(79,70,229,0.08)] pt-3">
               {detail_reason && (
-                <div className="flex gap-2 text-[12.5px] leading-relaxed">
-                  <span className="shrink-0 font-bold text-[#4f46e5]">왜</span>
-                  <span className="text-[#475569]">{detail_reason}</span>
-                </div>
-              )}
-              {detail_caution && (
-                <div className="flex gap-2 text-[12.5px] leading-relaxed">
-                  <span className="shrink-0 font-bold text-amber-600">주의</span>
-                  <span className="text-[#475569]">{detail_caution}</span>
+                <div className="flex flex-col gap-1 text-[12.5px] leading-relaxed">
+                  <span className="text-[11px] font-bold text-[#4f46e5]">핵심 해석</span>
+                  <span className="text-[#475569]"><BoldText text={detail_reason} /></span>
                 </div>
               )}
               {detail_watchpoint && (
-                <div className="flex gap-2 text-[12.5px] leading-relaxed">
-                  <span className="shrink-0 font-bold text-[#0891b2]">관찰</span>
-                  <span className="text-[#475569]">{detail_watchpoint}</span>
+                <div className="flex flex-col gap-1 text-[12.5px] leading-relaxed">
+                  <span className="text-[11px] font-bold text-[#0891b2]">체크 포인트</span>
+                  <span className="text-[#475569]"><BoldText text={detail_watchpoint} /></span>
+                </div>
+              )}
+              {detail_caution && (
+                <div className="flex flex-col gap-1 text-[12.5px] leading-relaxed">
+                  <span className="text-[11px] font-bold text-amber-600">해석 제한</span>
+                  <span className="text-[#475569]"><BoldText text={detail_caution} /></span>
                 </div>
               )}
             </div>

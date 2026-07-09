@@ -386,7 +386,7 @@ def _risk_text(risks: Sequence[RiskItem]) -> str:
     s2 = ("이런 요인이 겹치면 개별 신호를 방향 전환의 근거로 단정하기보다, "
           "종합 해석의 확신이 제한되는 구간으로 보는 것이 안전합니다.")
     if watches:
-        s3 = "이 구간에서는 " + "·".join(watches) + " 등을 추가로 확인하는 것이 중요합니다."
+        s3 = "이 구간에서는 " + "·".join(f"**{w}**" for w in watches) + " 등을 추가로 확인하는 것이 중요합니다."
         return f"{s1} {s2} {s3}"
     return f"{s1} {s2}"
 
@@ -413,11 +413,12 @@ def _key_drivers(
 
 
 def _what_to_watch(regime: RegimeResult, risks: Sequence[RiskItem]) -> str:
+    # 핵심 조건은 **bold**(프론트가 <strong> 로 렌더, verify 는 별표 제거 후 검사).
     if regime.alignment_flag == AlignmentFlag.COUNTER_TREND:
-        return "상위 추세와 단기 흐름의 정합 회복 여부"
+        return "상위 추세와 단기 흐름의 **정합 회복 여부**"
     if risks:
-        return f"확인된 위험({RISK_LABELS[risks[0].flag]})의 해소 여부와 거래량 동반"
-    return "현재 국면 유지 여부와 거래량 동반"
+        return f"확인된 위험({RISK_LABELS[risks[0].flag]})의 **해소 여부**와 **거래량 동반**"
+    return "**국면 유지 여부**와 **거래량 동반**"
 
 
 def _invalidation() -> str:
@@ -520,16 +521,32 @@ def fallback_interpretation(
 
     확정값(final_regime·consensus·confidence_level·risk flags·timeframe·signals)만 문장화한다. 새 판단 없음.
     LLM 이 죽어도 프론트가 같은 섹션 구조로 렌더할 수 있게 한다(확정 5)."""
-    parts = [
-        f"현재 기술적 상태는 {REGIME_LABELS[regime.final_regime]}로 분류됩니다.",
-        _signal_text(signal),
-        _timeframe_text(regime),
+    # 신호 흐름 요약 — 5구조(전체 판단/약세 근거/완충 신호/주의할 점/다음 관찰 기준)로 줄바꿈 분리.
+    # 프론트가 whitespace-pre-wrap 로 렌더하므로 라벨+개행이 그대로 보인다(빈약한 한 줄 착지 방지).
+    bearish = [INDICATOR_LABELS[s.indicator] for s in signals if s.signal == Signal.NEGATIVE]
+    supportive = [INDICATOR_LABELS[s.indicator] for s in signals if s.signal == Signal.POSITIVE]
+    lines = [
+        f"전체 판단: 현재 기술적 상태는 {REGIME_LABELS[regime.final_regime]}로 분류됩니다. "
+        f"{_signal_text(signal)} {_timeframe_text(regime)}",
     ]
-    if risks:
-        parts.append(_risk_text(risks))
-    parts.append("이 내용은 투자 판단을 대신하지 않으며, 기술적 지표 기반 참고 정보입니다.")
+    if bearish:
+        lines.append(
+            "약세 근거: " + "·".join(bearish)
+            + "이(가) 약세 쪽으로 읽혀 추세 복원 신호가 아직 충분하지 않은 상태입니다."
+        )
+    if supportive:
+        lines.append(
+            "완충 신호: " + "·".join(supportive)
+            + "이(가) 하락 압력을 다소 완화하지만, 방향 전환 확정으로 보기엔 이른 수준입니다."
+        )
+    lines.append(
+        "주의할 점: " + (_risk_text(risks) if risks
+                       else "두드러진 위험 요인은 없으나 단일 지표만으로 방향을 단정하는 것은 피하는 것이 안전합니다.")
+    )
+    lines.append("다음 관찰 기준: " + _what_to_watch(regime, risks))
+    lines.append("이 내용은 투자 판단을 대신하지 않으며, 기술적 지표 기반 참고 정보입니다.")
     return InterpretationResult(
-        text=" ".join(parts),
+        text="\n".join(lines),
         source=GenerationSource.TEMPLATE_FALLBACK,
         one_line_summary=_one_line(regime, signal),
         directional_bias=bias_from_consensus(signal.consensus),
@@ -567,24 +584,34 @@ def unavailable_interpretation() -> InterpretationResult:
 _FALLBACK_DETAIL_HINTS: dict[str, tuple[str, str]] = {
     "moving_average": (
         "이동평균은 후행 지표라 방향 전환을 늦게 반영합니다. 단독으로 진입·청산 근거로 쓰지 마세요.",
-        "5·20·60일선의 배열(정배열·역배열)이 유지되는지, 골든/데드크로스가 나오는지 확인하세요.",
+        "**5·20·60일선 배열 유지 여부**와 **골든/데드크로스** 발생을 확인하세요.",
     ),
     "rsi": (
         "RSI만으로 방향을 단정하기 어렵고, 과매수·과매도가 곧 반전을 뜻하지는 않습니다.",
-        "RSI가 과매수·과매도 기준선을 돌파하는지, 50선 위아래로 방향을 트는지 확인하세요.",
+        "**RSI 기준선 돌파 여부**와 **50선 안착 여부**를 확인하세요.",
     ),
     "volume": (
         "거래량은 방향이 아니라 강도 정보입니다. 가격 신호와 함께 봐야 의미가 있습니다.",
-        "거래 급증이 가격 상승·하락 어느 쪽을 뒷받침하는지, 급증이 이어지는지 확인하세요.",
+        "**가격 방향과 동반된 거래량 확장**이 이어지는지 확인하세요.",
     ),
     "support_resistance": (
         "지지·저항은 절대선이 아니라 구간이며, 돌파·이탈 시 역할이 뒤바뀔 수 있습니다.",
-        "현재가가 지지·저항 부근에서 어떻게 반응하는지, 거래량을 동반해 돌파·이탈하는지 확인하세요.",
+        "**지지·저항 반응**과 **거래량 동반 돌파·이탈** 여부를 확인하세요.",
     ),
     "pattern": (
         "패턴은 관찰용 후보이며 완성된 신호가 아닙니다. 방향 판정(신호 점수)에는 반영되지 않습니다.",
-        "패턴이 실제로 완성·확정되는지, 거래량이 이를 확인해 주는지 이어서 관찰하세요.",
+        "**패턴 완성·확정 여부**와 **거래량 확인**을 이어서 관찰하세요.",
     ),
+}
+
+
+# 지표별 "핵심 해석" 앞문장(결정론) — fallback reason 을 한 단계 더 설명적으로. 새 판정 없이 지표 성격만.
+_FALLBACK_DETAIL_REASON: dict[str, str] = {
+    "moving_average": "이동평균의 배열(정/역배열)과 현재가 위치가 추세 방향을 나타냅니다.",
+    "rsi": "RSI 값이 과매수·과매도 기준선 대비 어디에 있는지가 모멘텀 상태를 나타냅니다.",
+    "volume": "거래량이 가격 움직임을 확인해 주는 수준인지가 신호 강도를 좌우합니다.",
+    "support_resistance": "현재가가 지지·저항 구간 중 어디에 가까운지가 가격 반응 여부를 좌우합니다.",
+    "pattern": "최근 캔들 구조가 단기 방향의 힘을 나타내며, 패턴 후보는 관찰용입니다.",
 }
 
 
@@ -605,7 +632,11 @@ def fallback_detail(indicator: IndicatorType, signal: Signal, metrics: Sequence[
     text = f"{indicator_label} 지표는 {signal_label} 신호로 확인됩니다."
     if metrics:
         text += f" ({', '.join(metrics)})"
-    reason = f"코드가 확정한 {indicator_label} 수치를 기준으로 {signal_label} 신호가 산출됐습니다."
+    meaning = _FALLBACK_DETAIL_REASON.get(indicator.value)
+    reason = (
+        (meaning + " " if meaning else "")
+        + f"코드가 확정한 {indicator_label} 수치를 기준으로 {signal_label} 신호로 확인됩니다."
+    )
     if metrics:
         reason += f" ({', '.join(metrics)})"
     caution, watchpoint = _FALLBACK_DETAIL_HINTS.get(

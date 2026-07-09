@@ -410,7 +410,9 @@ OPENAI_MODEL_ENV = "OPENAI_MODEL"        # 모델 "이름"만 — 값은 .env(�
 OPENAI_TIMEOUT_SECONDS: float = 20.0     # 1회 호출 timeout(초) — 60초 계약 안에서 보수적 하향
 OPENAI_MAX_RETRIES: int = 0              # SDK 재시도 끔 — agent-level 재생성/template fallback 우선
 OPENAI_TEMPERATURE: float | None = 0.0   # None이면 요청 파라미터에서 생략 — 튜닝 상수(코드)
-OPENAI_MAX_OUTPUT_TOKENS: int = 1200     # 응답 최대 토큰(보수적 기본) — 튜닝 상수(코드)
+OPENAI_MAX_OUTPUT_TOKENS: int = 3000     # 응답 최대 토큰 — 5구조 요약 + 지표별 2~3문장 detail(+bold)로
+#   출력이 길어져 1200 에선 JSON 문자열이 중간에 잘려(Unterminated string) 파싱 실패→template_fallback 이
+#   빈발했다. 실측 full 출력 ~1800~2000 토큰 기준 여유값으로 상향. gpt-5.4-mini 라 비용/지연 영향 작음.
 OPENAI_STORE: bool = False               # OpenAI 측 application state 저장 끔(stateless). 분석 이력은 backend DB.
 
 
