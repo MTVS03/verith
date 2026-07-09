@@ -1,16 +1,10 @@
-"""Technical Agent LangGraph 실행 state (`feat/technical-langgraph-orchestration`).
+"""Technical Agent LangGraph 실행 state + 주입 의존성 (`feat/technical-langgraph-orchestration`).
 
-`technical_supervisor.run()`이 만든 **주입 의존성**(llm_client·fetcher·cache·trace·deadline)과
-파이프라인 **중간 산출물**을 node 간에 넘기는 채널이다.
-
-**보안 경계(중요) — 이 state는 "저장 안전(secret-safe)" 객체가 아니다.**
-현재 LangGraph state는 **실행용(runtime-only)** 이며 외부 저장을 전제로 하지 않는다. checkpointer가
-없기 때문에 저장되지 않을 뿐이며, state에는 **원본 query가 포함된 `payload`와 runtime client
-(`llm_client`·`cache`·`fetcher`·`trace`)·대용량 OHLCV/charts**가 그대로 들어간다.
-
-> Do not enable LangGraph checkpointer, LangSmith state tracing, or persistent callbacks until a
-> **sanitized state boundary** is introduced. Otherwise the original query (PII) and runtime clients
-> could be observed/persisted.
+**정화된 state 경계(sanitized boundary).** runtime 의존성(원본 query가 담긴 `payload`·runtime client
+`llm_client`/`fetcher`/`cache`/`trace`)은 **`TechnicalDeps`로 묶어 graph `config['configurable']['deps']`
+로 주입**한다. LangGraph **state(`TechnicalGraphState`)에는 계산 결과만** 담긴다 — 그래서 state는
+secret-safe다: checkpointer·LangSmith state tracing이 state를 직렬화해도 PII(원본 query)·secret(client)이
+새지 않는다. `config`는 traced state가 아니므로 deps는 관측/저장 경로에 노출되지 않는다.
 
 `total=False`는 LangGraph state가 노드별로 **점진적으로** 채워지기 때문이다(전 필드 required 불가).
 순환 import 없이 좁힐 수 있는 타입만 정확히 두고, 순환이 생기는 내부 타입(`_Interpretation`·
@@ -20,7 +14,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, TypedDict
+
+from langchain_core.runnables import RunnableConfig
 
 from ..nodes._llm_utils import LlmClient
 from ..nodes.focus_analysis import FocusResult
@@ -45,19 +42,33 @@ from ..synthesis.confidence import ConfidenceResult
 from ..synthesis.signal_score import SignalScoreResult
 
 
-class TechnicalGraphState(TypedDict, total=False):
-    # ── 주입(무변경 통과) — endpoint/run()이 채운다. **원본 query·runtime client 포함(저장 금지)** ──
-    payload: TechnicalAgentInput          # 원본 query 포함(PII) — 저장 전 정화 필요
+@dataclass(frozen=True)
+class TechnicalDeps:
+    """graph invoke 시 `config['configurable']['deps']`로 주입되는 **runtime 의존성**.
+
+    원본 query(`payload`)·runtime client(`llm_client`/`fetcher`/`cache`/`trace`)를 담는다 —
+    **traced state에 넣지 않는다.** state는 계산 결과만 담아 secret-safe가 되므로 checkpointer·
+    LangSmith tracing을 켜도 PII·secret이 직렬화되지 않는다(이 분리가 '정화된 state 경계').
+    """
+    payload: TechnicalAgentInput          # 원본 query 포함(PII) — config로만 흐른다(state 아님)
     trace_id: str
-    llm_client: LlmClient                 # runtime client — 저장 금지
+    trace: TraceLogger                    # runtime 객체
+    llm_client: LlmClient                 # runtime client
     fetcher: Any                          # OhlcvFetcher(supervisor alias → 순환 회피 위해 Any)
-    cache: OhlcvCache | None              # runtime client — 저장 금지
-    trace: TraceLogger                    # runtime 객체 — 저장 금지
+    cache: OhlcvCache | None              # runtime client
     deadline: Deadline | None
     intraday_candles: Sequence[IntradayCandle] | None  # run()이 Sequence로 받음
     intraday_fetcher: Any                 # MinuteFetcher(supervisor alias → Any)
 
-    # ── 중간 산출(계산 helper 소유 — state는 전달만, raw prompt/response 없음) ────────────────────
+
+def deps_of(config: RunnableConfig) -> TechnicalDeps:
+    """graph node가 `config`에서 주입 의존성을 꺼낸다. state가 아니라 config로 흐르므로
+    traced state·checkpointer에 PII·client가 남지 않는다."""
+    return config["configurable"]["deps"]
+
+
+class TechnicalGraphState(TypedDict, total=False):
+    # ── 계산 결과만 담는다(secret-safe). 주입 deps(payload·client 등)는 TechnicalDeps(config)로 분리됨 ──
     normalized: NormalizeResult          # 노드 1 결과(정규화 질문). focus_analysis 노드가 입력으로 사용
     focus: FocusResult
     ohlcv: dict[str, Sequence[OHLCV]]     # _collect_ohlcv 반환 타입과 일치
