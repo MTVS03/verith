@@ -14,7 +14,7 @@ from ..core.config import CORP_CODE_MAP, STOCK_NAME_MAP, settings
 
 
 class UnknownStockCodeError(KeyError):
-    """지원 유니버스(10종목) 밖의 종목코드."""
+    """backend 정본과 static fallback에서 모두 찾지 못한 종목코드."""
 
 
 class CorpCodeRepositoryUnavailable(RuntimeError):
