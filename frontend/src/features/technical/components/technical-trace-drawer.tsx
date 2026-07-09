@@ -49,7 +49,7 @@ const METHOD_ITEMS = [
     no: "05",
     icon: Sparkles,
     title: "맥락 해석",
-    sub: "LLM",
+    sub: "AI",
     tag: "단정 안 함",
   },
 ];
@@ -126,7 +126,7 @@ export function TechnicalTraceDrawer({
           <Info className="w-[17px] h-[17px] text-[#94a3b8] flex-shrink-0 mt-0.5" />
           <p className="text-[13px] leading-relaxed text-[#64748b] m-0">
             지표 계산은 <b className="text-[#334155] font-semibold">결정론적 코드</b>로 수행되며
-            LLM은 숫자를 만들지 않고 <b className="text-[#334155] font-semibold">해석만</b> 합니다.
+            AI는 숫자를 만들지 않고 <b className="text-[#334155] font-semibold">해석만</b> 합니다.
             데이터 부족 시 추정으로 채우지 않고{" "}
             <b className="text-[#334155] font-semibold">&apos;데이터 제한&apos;</b>으로 표기합니다.
           </p>

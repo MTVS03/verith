@@ -51,8 +51,8 @@ export function TechnicalSignalRiskGrid({ report }: { report: TechnicalReportRea
           <GitBranch className="w-4 h-4 text-[#94a3b8] flex-shrink-0 mt-0.5" />
           <span>
             <b className="font-semibold text-[#059669]">판정·수치·가중치는 코드가 계산</b>하고,{" "}
-            <b className="font-semibold text-[#4f46e5]">설명 문장은 LLM이 그 값을 해석</b>합니다.
-            LLM은 판정을 바꿀 수 없으며, 검증을 통과한 문장만 표시됩니다.
+            <b className="font-semibold text-[#4f46e5]">AI는 그 결과를 바탕으로 분석 내용을 작성</b>합니다.
+            AI가 판정을 임의로 변경할 수는 없으며, 검증을 통과한 문장만 화면에 표시됩니다.
           </span>
         </p>
         <p className="text-[13.5px] text-[#64748b] m-0 mb-5 flex items-center gap-1.5">

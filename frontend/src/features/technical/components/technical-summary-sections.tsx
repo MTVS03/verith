@@ -221,7 +221,7 @@ export function TechnicalSummarySections({ report }: { report: TechnicalReportRe
             <TrendingUp className="w-[19px] h-[19px] text-[#334155]" /> 신호 흐름 요약
           </h2>
           <span className="flex items-center gap-1.5 text-xs font-semibold text-[#4f46e5]">
-            <Sparkles className="w-3.5 h-3.5" /> LLM 생성 · 근거 연결
+            <Sparkles className="w-3.5 h-3.5" /> AI 분석 · 근거 연결
           </span>
         </div>
 

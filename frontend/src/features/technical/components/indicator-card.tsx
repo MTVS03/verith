@@ -203,7 +203,7 @@ export function IndicatorCardComponent({
           <div className="flex justify-between items-center mb-2.5">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-[#4f46e5] flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> LLM 서술
+                <Sparkles className="w-3.5 h-3.5" /> AI 분석
               </span>
               {verified ? (
                 <span className="text-[10px] font-bold text-[#10b981] bg-[rgba(16,185,129,0.08)] px-1.5 py-0.5 rounded flex items-center gap-0.5">
@@ -216,7 +216,7 @@ export function IndicatorCardComponent({
               )}
             </div>
             <span className="text-[10.5px] font-semibold text-[#94a3b8]">
-              출처: {detail_source === "template_fallback" ? "기본 서술" : "LLM 서술"}
+              출처: {detail_source === "template_fallback" ? "기본 서술" : "AI 분석"}
             </span>
           </div>
           <p className="text-[13.5px] leading-relaxed text-[#334155] m-0">

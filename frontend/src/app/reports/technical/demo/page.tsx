@@ -75,7 +75,7 @@ export default async function TechnicalDemoPage() {
                     신호 종합 (Signal)
                   </a>
                   <a href="#a-flow" className="block px-2.5 py-2 text-[12.5px] font-bold text-[#475569] hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors">
-                    신호 흐름 요약 (LLM)
+                    신호 흐름 요약 (AI 분석)
                   </a>
                   <a href="#a-chart" className="block px-2.5 py-2 text-[12.5px] font-bold text-[#475569] hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors">
                     가격 차트 (Chart)
