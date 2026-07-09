@@ -352,7 +352,7 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 
 **대상**: `1y`(일봉)·`5y`(주봉)만. **`3m` 제외**(창이 너무 짧음). `1d` intraday 제외. 최신+최근 후보는 현재 fetch capacity로 충분하며, **fetch lookback 확대는 보류**(§19.1) — 창 부족 초기 구간은 skip한다.
 
-**오탐 방지(보수적 가드)**: ④ handle은 **실제 조정이 있어야** 인정한다 — `handle 저점 < right rim` **그리고** 되돌림이 `[MIN, MAX]` 범위(상한만이 아니라 **하한**도) 안이어야 한다(조정 없이 상승만 하면 배제). ② 저점은 **bottom 근처(±tol)에 최소 봉 수**가 있어야 한다(단봉 V자 급락 배제 — 완전 곡률/기울기 검사는 Phase 2).
+**오탐 방지(보수적 가드)**: ④ handle은 **실제 조정이 있어야** 인정한다 — `handle 저점 < right rim` **그리고** 되돌림이 `[MIN, MAX]` 범위(상한만이 아니라 **하한**도) 안이어야 한다(조정 없이 상승만 하면 배제). ② 저점은 **bottom 근처(±tol)에 최소 봉 수**가 있어야 한다(단봉 V자 급락 배제 — 완전 곡률/기울기 검사는 Phase 2). ⑤ **좌/우 팔 폭 대칭** — 하강(좌rim→bottom)과 상승(bottom→우rim)의 봉 폭 비 `min/max ≥ CUP_HANDLE_MIN_ARM_RATIO`(기본 0.5=2:1)를 만족해야 한다. rim 가격 차만 보던 기존 판정은 '한쪽 팔만 긴 찌그러진 컵'을 통과시켰다(예: 좌팔 71봉·우팔 35봉). **후보는 교과서형 완성 패턴 보장이 아니라 관찰용 후보**임에 유의.
 
 **MVP 기본값(config.py §11)**:
 - `CUP_HANDLE_DAILY_LOOKBACK_BARS = 120`, `CUP_HANDLE_WEEKLY_LOOKBACK_BARS = 78`
@@ -361,6 +361,7 @@ RSI는 메인 차트가 아니라 서브차트(`subcharts.rsi`)에 표시한다.
 - `CUP_HANDLE_MIN_HANDLE_PULLBACK_PCT = 0.02`, `CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT = 0.15`(핸들 되돌림 하한·상한)
 - `CUP_HANDLE_MIN_HANDLE_BARS = 5`, `CUP_HANDLE_MAX_HANDLE_BARS = 30`
 - `CUP_HANDLE_MIN_BOTTOM_BARS = 3`, `CUP_HANDLE_BOTTOM_TOLERANCE_PCT = 0.03`(둥근 저점 — 단봉 V자 배제)
+- `CUP_HANDLE_MIN_ARM_RATIO = 0.5`(좌/우 팔 폭 대칭 하한 — 찌그러진 비대칭 컵 배제)
 
 look-ahead 없이(창 = `source[i-lookback+1:i+1]`, 미래 봉 미참조) visible range를 rolling으로 판정한다. 거래량은 생성 gate가 아니라 `meta.volume_confirmed`/`meta.volume_ratio`로만 기록한다.
 

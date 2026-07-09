@@ -314,6 +314,9 @@ CUP_HANDLE_MIN_HANDLE_BARS = 5             # 핸들 최소 길이(봉)
 CUP_HANDLE_MAX_HANDLE_BARS = 30            # 핸들 최대 길이(봉)
 CUP_HANDLE_MIN_BOTTOM_BARS = 3            # 둥근 저점 최소 봉 수(단봉 V자 spike 배제)
 CUP_HANDLE_BOTTOM_TOLERANCE_PCT = 0.03   # bottom 근처 판정 폭(이 안에 MIN_BOTTOM_BARS 이상)
+CUP_HANDLE_MIN_ARM_RATIO = 0.5           # 좌/우 팔 폭(봉 수) 대칭 하한 = min(좌,우)/max(좌,우).
+#   rim 가격 차(RIM_TOLERANCE)만으로는 '한쪽 팔만 긴 찌그러진 컵'이 통과한다. 하강(좌rim→bottom)과
+#   상승(bottom→우rim) 봉 폭이 2:1(=0.5)보다 더 벌어지면 후보에서 제외(false positive·어색한 후보 감소).
 
 # annotation 중복 제거 창 — candle(봉) index 거리 기준 (chart_annotation_spec §8.4).
 ANNOTATION_DEDUP_BARS = {
