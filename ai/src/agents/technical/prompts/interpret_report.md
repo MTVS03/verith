@@ -66,7 +66,7 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
   "interpretation_text": "3~5문장 종합 해석. 마지막 문장은 비추천형 안내로 맺습니다.",
   "trend_interpretation": "추세(regime) 해석 1~2문장. regime_context·daily/final_regime 근거.",
   "signal_interpretation": "종합 신호(consensus)·신뢰도(confidence_level) 해석 1~2문장.",
-  "risk_interpretation": "확인된 risk_items 해석 1~2문장. 없으면 '특이 위험 없음' 취지.",
+  "risk_interpretation": "위험 요인의 **의미·관계·관찰 포인트**를 담은 2~4문장(단순 나열 금지). 없으면 '특이 위험 없음' 취지.",
   "timeframe_alignment": "daily/weekly/monthly·alignment_flag 관계 서술 1문장(정합/역행/불명확).",
   "key_drivers": ["방향을 만든 핵심 근거 2~4개(지표·신호 기반, 짧게)."],
   "warning_points": ["주의/위험 포인트 0~3개(risk_items 기반)."],
@@ -146,6 +146,21 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
 
 - 확정 `confidence`/`confidence_level`을 **반대 방향으로 단정하지 않습니다.** `confidence_level=low`인데 "신뢰도가 높습니다"로 쓰면 왜곡입니다.
 - `risk_items[]`가 비어있지 않으면, 그중 **최소 하나의 위험 요인을 반드시 문장에 언급**합니다(거래량·저항·지지·과열·역행·유동성 등 해당 맥락).
+
+# risk_interpretation 작성 규칙 (매우 중요 — 상단 '위험 해설'로 노출됨)
+
+`risk_interpretation`은 사용자가 리스크 섹션 맨 위에서 읽는 **해설**입니다. flag 를 한 줄로 다시 읽어주는
+수준(예: "거래량 확인 약함·지지 구간 근접·신호 엇갈림이 확인됩니다")은 **금지**합니다. 대신 **2~4문장**으로:
+
+1. **의미** — 지금 리스크 조합이 무엇을 뜻하는지 한 줄 요약.
+2. **관계·제약** — 왜 이 조합이 해석의 확신을 제한하는지(예: 거래량 확인 부족 + 지지 근접 → 반등이 나와도
+   추세 전환으로 단정하기 어렵다 / mixed_signals → 단일 신호에 기대기 어렵다).
+3. (선택) **관찰 포인트** — 이 구간에서 추가로 확인해야 할 것(관찰 대상, 행동 지시 아님).
+
+근거는 입력 `risk_items`·`risk_hints`(각 flag 의 `label`·`meaning`·`watch`)와 `consensus`·`confidence`·
+`alignment_flag`·`technical_signals` 확정값만 씁니다. **금지**: 매수/매도·손절·목표가 등 투자 조언, 가격/확률
+예측, "폭락·반드시·곧 하락" 같은 과장, 새 위험 판정. 톤 예시: "…때문에 해석의 확신이 제한됩니다.",
+"… 자체는 가능하지만 이를 곧바로 …로 보기엔 근거가 약합니다.", "따라서 … 여부를 추가로 확인하는 것이 중요합니다."
 
 # 절대 반환하면 안 되는 필드
 

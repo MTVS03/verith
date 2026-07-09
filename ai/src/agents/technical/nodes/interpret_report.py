@@ -48,6 +48,7 @@ from ..schemas.enums import (
     DirectionalBias,
     GenerationSource,
     IndicatorType,
+    RiskFlag,
     Signal,
     Trend,
 )
@@ -211,6 +212,17 @@ def build_payload(
             for s in signals
         ],
         "risk_items": [{"flag": r.flag.value, "note": r.note} for r in risks],
+        # risk_interpretation 을 '나열'이 아니라 '맥락 있는 해설'로 쓰도록 하는 설명 힌트(additive·새 계산 아님).
+        # label=사람 라벨, meaning=해석상 의미(왜 주의인지), watch=관찰 포인트. LLM 은 이 힌트로 조합을 설명한다.
+        "risk_hints": [
+            {
+                "flag": r.flag.value,
+                "label": RISK_LABELS[r.flag],
+                "meaning": _RISK_MEANING.get(r.flag, RISK_LABELS[r.flag]),
+                "watch": _RISK_WATCH.get(r.flag),
+            }
+            for r in risks
+        ],
         # 검증 통과에 필요한 한글 대표 표현(단일 출처 keyword_rules) — 영문 enum·모순어로 인한 fallback 방지.
         "verify_expressions": _verify_expressions(regime, signal, signals, risks),
     }
@@ -334,10 +346,49 @@ def _signal_text(signal: SignalSummary) -> str:
     )
 
 
+# flag별 "해석상 의미"(왜 주의 신호인지·오해 금지 포인트) — 단순 라벨 나열 대신 의미를 설명하기 위한
+# 결정론 문구. 새 판정이 아니라 확정 flag 를 사람 언어로 풀어 쓰는 힌트다(prompt·fallback 공용).
+_RISK_MEANING: dict[RiskFlag, str] = {
+    RiskFlag.VOLUME_NOT_CONFIRMED: "거래량 확인이 약해 가격 움직임을 뒷받침할 근거가 부족한 점",
+    RiskFlag.NEAR_SUPPORT: "지지 구간에 근접해 반등 가능성과 이탈 위험이 함께 열려 있는 점",
+    RiskFlag.NEAR_RESISTANCE: "저항 구간에 근접해 추가 상승보다 저항 반응 확인이 필요한 점",
+    RiskFlag.MIXED_SIGNALS: "지표 간 방향성이 엇갈려 단일 신호에 기대기 어려운 점",
+    RiskFlag.OVERHEATED_MOMENTUM: "상승 해석과 별개로 단기 과열 부담이 남아 있는 점",
+    RiskFlag.COUNTER_HIGHER_TREND: "단기 흐름이 상위 추세와 역행하는 점",
+    RiskFlag.LOW_LIQUIDITY: "유동성이 낮아 신호 신뢰도가 떨어질 수 있는 점",
+}
+# flag별 관찰 포인트(무엇을 더 확인해야 하는지 — 행동 지시 아님).
+_RISK_WATCH: dict[RiskFlag, str] = {
+    RiskFlag.VOLUME_NOT_CONFIRMED: "거래량 동반 여부",
+    RiskFlag.NEAR_SUPPORT: "지지선에서의 가격 반응",
+    RiskFlag.NEAR_RESISTANCE: "저항 구간에서의 반응",
+    RiskFlag.MIXED_SIGNALS: "지표 간 방향 정렬",
+    RiskFlag.OVERHEATED_MOMENTUM: "과열 완화 여부",
+    RiskFlag.COUNTER_HIGHER_TREND: "상위 추세와의 정합 회복",
+    RiskFlag.LOW_LIQUIDITY: "거래 활성도",
+}
+
+
 def _risk_text(risks: Sequence[RiskItem]) -> str:
+    """risk_interpretation 결정론 폴백 — flag 나열이 아니라 **의미 + 해석 제약 + 관찰 포인트** 2~3문장.
+
+    확정 flag 만 근거로 하며(새 판정 없음), 매수/매도·목표가·확률 예측·과장 표현은 쓰지 않는다.
+    LLM 이 죽어도 프론트 상단 '위험 해설'로 쓸 만한 문장이 되도록 한다."""
     if not risks:
         return "특이 위험 요인은 확인되지 않았습니다."
-    return "위험 요인으로 " + "·".join(RISK_LABELS[r.flag] for r in risks) + "이(가) 확인됩니다."
+    meanings = [_RISK_MEANING.get(r.flag, RISK_LABELS[r.flag]) for r in risks]
+    watches: list[str] = []
+    for r in risks:
+        w = _RISK_WATCH.get(r.flag)
+        if w and w not in watches:
+            watches.append(w)
+    s1 = "현재는 " + ", ".join(meanings) + "이 함께 확인됩니다."
+    s2 = ("이런 요인이 겹치면 개별 신호를 방향 전환의 근거로 단정하기보다, "
+          "종합 해석의 확신이 제한되는 구간으로 보는 것이 안전합니다.")
+    if watches:
+        s3 = "이 구간에서는 " + "·".join(watches) + " 등을 추가로 확인하는 것이 중요합니다."
+        return f"{s1} {s2} {s3}"
+    return f"{s1} {s2}"
 
 
 def _timeframe_text(regime: RegimeResult) -> str:

@@ -287,9 +287,62 @@ def test_fallback_interpretation_uses_confirmed_only():
     assert "과열" in result.text
     assert "약한 긍정" in result.text
     assert "보통" in result.text
-    assert "단기 과열 관찰" in result.text
+    # 강화된 risk 해설: 단순 라벨 나열이 아니라 의미+제약+관찰이 담긴다.
+    assert "단기 과열 부담" in result.text          # 라벨("단기 과열 관찰") 대신 의미 서술
+    assert "확신이 제한" in result.text             # 해석 제약 문장
     assert result.text.endswith("참고 정보입니다.")
     assert contains_forbidden_terms(result.text) == []
+
+
+# ── risk_interpretation 고도화(맥락 있는 해설·나열 금지) ────────────────────────
+def _risks_combo():
+    return [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="거래량 약함."),
+            RiskItem(flag=RiskFlag.NEAR_SUPPORT, note="지지 근접."),
+            RiskItem(flag=RiskFlag.MIXED_SIGNALS, note="신호 엇갈림.")]
+
+
+def test_risk_text_is_explanatory_not_a_flag_list():
+    txt = node._risk_text(_risks_combo())
+    # 나쁜(구) 형태: "위험 요인으로 A·B·C이(가) 확인됩니다." — 이 패턴이 아니어야 한다.
+    assert not txt.startswith("위험 요인으로 ")
+    # 최소 2문장 + 해석 제약 + 관찰 포인트가 담긴다(맥락 있는 해설).
+    assert txt.count(".") >= 2
+    assert "확신이 제한" in txt
+    assert "추가로 확인" in txt
+    # 의미 서술(라벨 나열 아님)
+    assert "거래량 확인이 약해" in txt and "지지 구간에 근접" in txt
+
+
+def test_risk_text_no_advice_or_exaggeration():
+    for combo in ([RiskItem(flag=RiskFlag.NEAR_RESISTANCE, note="x")],
+                  [RiskItem(flag=RiskFlag.OVERHEATED_MOMENTUM, note="x")],
+                  _risks_combo()):
+        txt = node._risk_text(combo)
+        assert contains_forbidden_terms(txt) == []            # 매수/매도/목표가 등 없음
+        for bad in ("폭락", "반드시", "곧 하락", "손절", "목표가"):
+            assert bad not in txt
+
+
+def test_payload_includes_risk_hints():
+    risks = _risks_combo()
+    payload = node.build_payload(regime=_regime(), signal=_signal(), signals=_signals(), risks=risks)
+    hints = payload["risk_hints"]
+    assert [h["flag"] for h in hints] == ["volume_not_confirmed", "near_support", "mixed_signals"]
+    h0 = hints[0]
+    assert h0["label"] and h0["meaning"] and h0["watch"]       # 라벨·의미·관찰 힌트 존재
+    assert payload["risk_items"][0]["flag"] == "volume_not_confirmed"  # 기존 risk_items 유지(회귀 0)
+
+
+def test_risk_interpretation_from_llm_is_used_verbatim():
+    # LLM 이 rich 한 risk_interpretation 을 주면 그대로 쓰고 fallback 나열로 덮지 않는다.
+    out = node.parse_llm_output(json.dumps({
+        "interpretation_text": "x",
+        "risk_interpretation": "지지 근접 자체는 반등 여지를 주지만 거래량 확인이 약해 추세 전환으로 보긴 어렵습니다.",
+    }, ensure_ascii=False))
+    res = node.interpretation_from_llm(out, source=GenerationSource.LLM,
+                                       regime=_regime(), signal=_signal(), signals=_signals(),
+                                       risks=_risks_combo())
+    assert res.risk_interpretation.startswith("지지 근접 자체는")
 
 
 def test_fallback_detail_matches_signal_and_no_forbidden():

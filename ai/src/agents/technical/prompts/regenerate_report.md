@@ -32,6 +32,9 @@ supervisor/technical_supervisor.py 가 소유한다. 이 프롬프트는 재생�
 - `detail_must_include_any_by_indicator`: 각 지표 detail 에 지정된 표현(긍정/중립/부정 등) 중 하나를 포함하세요.
 - `must_mention_risk_any`: 비어있지 않으면 최소 하나(거래량·저항·지지 …)를 언급하세요.
 - `must_avoid`: 이 표현(반대·모순어)은 쓰지 마세요. `do_not_use_english_enum`: 영문 enum 값을 서술에 쓰지 마세요.
+- `risk_interpretation`: flag 를 한 줄로 나열하지 말고 **2~4문장**으로 — 리스크 조합의 **의미 + 왜 해석의
+  확신을 제한하는지 + (선택)관찰 포인트**를 씁니다. 근거는 `risk_items`·`risk_hints`(label·meaning·watch)만.
+  재생성에서도 다시 얇은 나열로 돌아가지 마세요. 투자 조언·가격/확률 예측·과장 금지.
 
 # 금지 표현 (부정문 안에서도 금지)
 
