@@ -116,6 +116,61 @@ npm run dev
 
 ---
 
+## 6. 뉴스 DB 스냅샷 복원 (팀 공유 데이터)
+
+뉴스 에이전트가 쌓아둔 데이터(PostgreSQL + Neo4j)를 팀에서 공유한다.
+**작성자가 스냅샷을 떠서 커밋**하면, 나머지 팀원은 **`git pull` 받은 뒤 아래 순서대로** 자기 로컬 DB에 복원한다.
+
+> 이 과정은 뉴스 그래프에 **Neo4j**(`verith-neo4j` 컨테이너)가 필요하다. 위 2번에서 postgres·redis만 띄웠다면 neo4j도 함께 띄운다.
+
+**순서가 중요하다** — DB가 안 떠 있거나 스키마가 옛날 상태면 복원이 실패한다.
+공통 순서: **① DB 컨테이너 실행 → ② 스키마 최신화(+backend 1회 기동) → ③ 복원 스크립트 실행**
+
+### WSL / macOS / Linux (bash)
+
+```bash
+# 1) DB 컨테이너 실행 (verith-postgres / verith-neo4j 가 떠야 함)
+docker compose up -d
+
+# 2) 스키마 최신화 + 제약 생성
+cd backend
+uv run alembic upgrade head            # PG 스키마 최신화
+#   그리고 backend 를 한 번 기동  → Neo4j 유니크 제약 생성 (복원 정합/속도)
+
+# 3) 복원 스크립트 실행 (프로젝트 루트 verith/ 에서)
+cd ..
+./restore_news.sh                      # 권한 없으면  bash restore_news.sh
+```
+
+→ [restore_news.sh](restore_news.sh)
+
+### Windows (PowerShell)
+
+```powershell
+docker compose up -d
+
+cd backend
+.venv\Scripts\python.exe -m alembic upgrade head
+#   그리고 backend 를 한 번 기동  → Neo4j 유니크 제약 생성
+
+cd ..
+./restore_news.ps1
+```
+
+→ [restore_news.ps1](restore_news.ps1)
+
+### 복원 스크립트가 하는 일 (공통)
+
+- `backend/dumps/shared_news_pg.sql` → PostgreSQL 복원 (맨 앞에서 `news`/`news_reports` 를 스냅샷 상태로 초기화 후 주입)
+- `backend/dumps/shared_news_neo4j.cypher` → Neo4j 그래프에 반영
+- 끝나면 **news 행 수 / neo4j 노드 수**를 찍어 복원이 잘 됐는지 확인시켜 준다
+
+복원 후 backend 가 떠 있었다면 **재기동**하면 완전히 반영된다.
+
+> **임베딩(embedding)은 용량 때문에 스냅샷에서 기본 제외**된다. 임베딩이 필요한 작업이면 따로 채워야 한다.
+
+---
+
 ## 실행 확인 (health check)
 
 ```bash
