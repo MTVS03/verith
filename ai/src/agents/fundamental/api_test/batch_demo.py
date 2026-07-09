@@ -183,8 +183,8 @@ async def run_batch(tickers: list[str], years: int, use_cache: bool) -> dict[str
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the fundamental agent for all supported tickers.")
-    parser.add_argument("--ticker", default=None, help="Run a single 6-digit ticker instead of all 10")
+    parser = argparse.ArgumentParser(description="Run the fundamental agent over the CORP_CODE_MAP demo set (fallback tickers).")
+    parser.add_argument("--ticker", default=None, help="Run a single 6-digit ticker instead of the demo set")
     parser.add_argument("--years", type=int, default=4, help="Number of fiscal years to analyze. default: 4")
     parser.add_argument("--no-cache", action="store_true", help="Bypass local DART response cache")
     args = parser.parse_args()

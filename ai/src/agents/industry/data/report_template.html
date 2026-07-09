@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#eceef3;-webkit-font-smoothing:antialiased}
+a{color:#2b53c0;text-decoration:none}
+a:hover{color:#1b3fa0}
+::selection{background:#dbe6ff}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#eceef3;padding:26px 22px 56px;font-family:Pretendard,system-ui,-apple-system,sans-serif;color:#1b1e26">
+<div style="max-width:1120px;margin:0 auto">
+
+  <!-- TOP BAR -->
+  <div style="display:flex;align-items:center;gap:16px;padding:2px 8px 18px">
+    <div style="display:flex;align-items:baseline;gap:2px;font-weight:900;font-size:16px;letter-spacing:-.02em;color:#1b1e26">GraphRAG<span style="width:7px;height:7px;border-radius:50%;background:#3f6ede;display:inline-block;margin-left:3px;transform:translateY(-1px)"></span></div>
+    <div style="display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;color:#9098a6">
+      <span>리서치 리포트</span><span style="color:#c4cad4">›</span><span style="color:#5a6270">그래프 질의</span>
+    </div>
+    <div style="flex:1"></div>
+    <button type="button" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 16px;border-radius:11px;border:1px solid rgba(20,26,40,.14);background:#fff;color:#3a4150;font:700 13px Pretendard,sans-serif;cursor:pointer">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>PDF</button>
+    <button type="button" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 18px;border-radius:11px;border:none;background:#1b1e26;color:#fff;font:700 13px Pretendard,sans-serif;cursor:pointer">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.4"/><circle cx="17" cy="6" r="2.4"/><circle cx="17" cy="18" r="2.4"/><path d="M8 11l7-4M8 13l7 4"/></svg>공유</button>
+  </div>
+
+  <!-- MAIN CARD -->
+  <div style="background:#fff;border:1px solid rgba(20,26,40,.07);border-radius:26px;box-shadow:0 24px 60px rgba(20,30,60,.09),0 2px 6px rgba(20,30,60,.04);overflow:hidden">
+
+    <!-- HERO -->
+    <div style="padding:38px 44px 34px;background:radial-gradient(900px 380px at 6% -30%,rgba(63,110,222,.14),transparent 60%),linear-gradient(180deg,#eef3ff 0%,#ffffff 62%);border-bottom:1px solid rgba(20,26,40,.07)">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+        <span style="display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 12px;border-radius:999px;background:#e6edfd;color:#2b53c0;font:800 12px Pretendard,sans-serif">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8 11l8-4M8 13l8 4"/></svg>GraphRAG · Research Report</span>
+        <span style="font-size:13px;font-weight:600;color:#9aa1b0">{{ schemaLine }}</span>
+      </div>
+      <h1 style="margin:0 0 10px;font-size:38px;line-height:1.12;letter-spacing:-.03em;font-weight:800;color:#161922">{{ reportTitle }}</h1>
+      <p style="margin:0 0 4px;max-width:760px;font-size:15.5px;line-height:1.6;color:#5a6270;font-weight:500">{{ questionText }}</p>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:14px;font-size:13px;font-weight:600;color:#8890a0">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15" rx="2.4"/><path d="M3.5 9h17M8 3.5v3M16 3.5v3"/></svg>
+        <span>{{ generatedMeta }} · <span style="color:#5a6270">{{ questionType }}</span> · 조회 {{ rowCount }}행 → 그래프 엣지 <b style="color:#3a4150">{{ edgeCount }}건</b></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;background:{{ faithPillBg }};color:{{ faithPillFg }};font-weight:800;font-size:11.5px"><span style="width:6px;height:6px;border-radius:50%;background:#e3a52a"></span>{{ faithLabel }}</span>
+      </div>
+
+      <!-- METRIC ROW -->
+      <div style="display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:14px;margin-top:26px">
+        <div style="padding:18px 20px;border-radius:16px;background:#fff;border:1px solid rgba(20,26,40,.08);box-shadow:0 1px 3px rgba(20,30,60,.05)">
+          <div style="font-size:12px;font-weight:800;color:#8890a0;letter-spacing:.01em">관계 구성</div>
+          <div style="display:flex;height:12px;border-radius:999px;overflow:hidden;margin:14px 0 12px;background:#eef0f4">
+            <div style="flex:6;background:#3f6ede"></div><div style="flex:1;background:#1fb877"></div><div style="flex:1;background:#f0435f"></div>
+          </div>
+          <div style="display:flex;gap:14px;font-size:12.5px;font-weight:700;color:#5a6270">{{ relationSummary }}</div>
+        </div>
+        <div style="padding:18px 20px;border-radius:16px;background:#fff;border:1px solid rgba(20,26,40,.08);box-shadow:0 1px 3px rgba(20,30,60,.05)">
+          <div style="font-size:12px;font-weight:800;color:#8890a0">그래프 엣지</div>
+          <div style="font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1;margin:10px 0 8px;color:#161922">{{ edgeCount }}<span style="font-size:15px;font-weight:700;color:#9aa1b0;margin-left:3px">건</span></div>
+          <div style="font-size:12.5px;font-weight:600;color:#9aa1b0">노드 {{ nodeCount }}개 · Cypher {{ attemptCount }}회</div>
+        </div>
+        <div style="padding:18px 20px;border-radius:16px;background:#fff;border:1px solid rgba(20,26,40,.08);box-shadow:0 1px 3px rgba(20,30,60,.05)">
+          <div style="font-size:12px;font-weight:800;color:#8890a0">검증 상태</div>
+          <div style="font-size:32px;font-weight:800;letter-spacing:-.02em;line-height:1;margin:10px 0 8px;color:{{ faithMainColor }}">{{ faithShort }}</div>
+          <div style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:#9aa1b0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="{{ faithDot }}" stroke-width="2.2" stroke-linecap="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>{{ faithLabel }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANSWER SUMMARY -->
+    <div style="padding:34px 44px;border-bottom:1px solid rgba(20,26,40,.07)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:11px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:#eef3ff;color:#3f6ede;flex:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h9"/></svg></span>
+          <h2 style="margin:0;font-size:17px;font-weight:800;letter-spacing:-.02em;color:#161922">답변 요약</h2>
+        </div>
+        <span style="display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 12px;border-radius:999px;background:#f1f3f7;color:#7a828f;font:800 11.5px Pretendard,sans-serif"><span style="width:6px;height:6px;border-radius:50%;background:#3f6ede"></span>GraphRAG 생성 · 근거 연결</span>
+      </div>
+      <div style="padding:24px 26px;border-radius:18px;background:#f7f9fc;border:1px solid rgba(20,26,40,.06)">
+        <p style="margin:0 0 12px;font-size:17px;line-height:1.55;font-weight:700;letter-spacing:-.01em;color:#1b1e26">{{ answerHeadline }}</p>
+        <p style="margin:0 0 18px;font-size:14.5px;line-height:1.78;color:#4a515f;font-weight:500;white-space:pre-line">{{ answerBody }}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <sc-for list="{{ answerTags }}" as="tag" hint-placeholder-count="6">
+            <span style="height:30px;padding:0 13px;display:inline-flex;align-items:center;border-radius:999px;background:#fff;border:1px solid rgba(20,26,40,.1);color:#3a4150;font:700 13px Pretendard,sans-serif">{{ tag }}</span>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- GRAPH -->
+    <div style="padding:34px 44px;border-bottom:1px solid rgba(20,26,40,.07)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:11px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:#eef3ff;color:#3f6ede;flex:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8 11l8-4M8 13l8 4"/></svg></span>
+          <div>
+            <h2 style="margin:0;font-size:17px;font-weight:800;letter-spacing:-.02em;color:#161922">관계 그래프</h2>
+            <div style="font-size:12.5px;font-weight:600;color:#9aa1b0;margin-top:2px">관계 타입과 홉 기반 위치 · 노드·엣지를 눌러 근거를 강조하세요</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <sc-for list="{{ filters }}" as="f" hint-placeholder-count="4">
+            <button type="button" onClick="{{ f.onClick }}" style="display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:999px;border:1.5px {{ f.dash }} {{ f.border }};background:{{ f.bg }};color:{{ f.fg }};font:800 13px Pretendard,sans-serif;cursor:pointer">{{ f.label }}<span style="opacity:.75;font-weight:700">{{ f.count }}</span></button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:stretch">
+        <div style="min-height:470px;border:1px solid rgba(20,26,40,.08);border-radius:18px;background-image:radial-gradient(rgba(20,30,60,.055) 1.1px,transparent 1.1px);background-size:22px 22px;background-color:#fbfcfe;overflow:hidden">
+          <svg ref="{{ graphRef }}" viewBox="0 0 980 560" role="img" aria-label="공급망 관계 그래프" style="display:block;width:100%;height:100%;min-height:470px"></svg>
+        </div>
+        <aside aria-live="polite" style="display:flex;flex-direction:column;padding:20px;border-radius:18px;background:#f7f9fc;border:1px solid rgba(20,26,40,.06)">
+          <div style="font-size:11.5px;font-weight:800;color:#8890a0;letter-spacing:.02em;text-transform:uppercase">선택 항목</div>
+          <h3 style="margin:8px 0 8px;font-size:19px;font-weight:800;letter-spacing:-.02em;color:#161922">{{ selectionTitle }}</h3>
+          <p style="margin:0;font-size:13.5px;line-height:1.65;color:#6a7280;font-weight:500">{{ selectionDescription }}</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px">
+            <sc-for list="{{ miniStats }}" as="m" hint-placeholder-count="4">
+              <div style="padding:13px;border-radius:12px;background:#fff;border:1px solid rgba(20,26,40,.07)">
+                <span style="display:block;font-size:11.5px;font-weight:700;color:#8890a0">{{ m.label }}</span>
+                <strong style="display:block;margin-top:5px;font-size:22px;font-weight:800;letter-spacing:-.02em;color:#161922">{{ m.value }}</strong>
+              </div>
+            </sc-for>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- EVIDENCE -->
+    <div style="padding:34px 44px;background:#f7f9fc;border-bottom:1px solid rgba(20,26,40,.07)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:11px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:#eef3ff;color:#3f6ede;flex:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9.5 14.5l5-5"/><path d="M11 6.5l1-1a3.7 3.7 0 0 1 5.2 5.2l-1 1"/><path d="M13 17.5l-1 1a3.7 3.7 0 0 1-5.2-5.2l1-1"/></svg></span>
+          <div>
+            <h2 style="margin:0;font-size:17px;font-weight:800;letter-spacing:-.02em;color:#161922">근거 링크</h2>
+            <div style="font-size:12.5px;font-weight:600;color:#9aa1b0;margin-top:2px">그래프 엣지를 뒷받침하는 원문 근거</div>
+          </div>
+        </div>
+        <label style="display:inline-flex;align-items:center;gap:9px;height:40px;padding:0 14px;border-radius:12px;background:#fff;border:1px solid rgba(20,26,40,.12)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9aa1b0" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.4-3.4"/></svg>
+          <input type="search" placeholder="회사명, 관계, 원문 키워드" onInput="{{ onSearch }}" style="border:none;outline:none;background:transparent;width:220px;font:600 13.5px Pretendard,sans-serif;color:#1b1e26">
+        </label>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+        <sc-for list="{{ evidenceList }}" as="it" hint-placeholder-count="6">
+          <article style="display:flex;flex-direction:column;gap:12px;padding:18px;border-radius:16px;background:#fff;border:1px solid {{ it.borderCol }};box-shadow:{{ it.shadow }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span style="font-size:12.5px;font-weight:900;color:#2b53c0;letter-spacing:.01em">[{{ it.id }}]</span>
+              <span style="height:24px;padding:0 10px;display:inline-flex;align-items:center;border-radius:999px;background:{{ it.pillBg }};color:{{ it.pillFg }};font:900 11px Pretendard,sans-serif">{{ it.relLabel }}</span>
+            </div>
+            <h3 style="margin:0;font-size:15px;font-weight:800;line-height:1.4;letter-spacing:-.01em;color:#161922">{{ it.title }}</h3>
+            <p style="margin:0;font-size:13.5px;line-height:1.65;color:#4a515f;font-weight:500;flex:1">{{ it.quote }}</p>
+            <p style="margin:0;font-size:12px;font-weight:700;color:#9aa1b0">{{ it.source }}</p>
+            <sc-if value="{{ it.hasUrl }}" hint-placeholder-val="{{ true }}">
+              <a href="{{ it.url }}" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;gap:6px;width:fit-content;height:34px;padding:0 13px;border-radius:10px;border:1px solid rgba(20,26,40,.12);color:#3a4150;font:700 12.5px Pretendard,sans-serif">원문 열기<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            </sc-if>
+          </article>
+        </sc-for>
+      </div>
+      <sc-if value="{{ noEvidence }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px;border-radius:16px;background:#fff;border:1px solid rgba(20,26,40,.08);color:#8890a0;font-size:14px;font-weight:600">현재 필터와 검색어에 맞는 근거가 없습니다.</div>
+      </sc-if>
+    </div>
+
+    <!-- FOOTER NOTE -->
+    <div style="display:flex;align-items:center;gap:10px;padding:20px 44px;background:#f7f9fc;border-top:1px solid rgba(20,26,40,.07);font-size:12.5px;font-weight:600;color:#8890a0">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1fb877" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>
+      <span>이 리포트는 공시 원문 그래프에 근거한 자동 분석이며 투자 권유가 아닙니다. 모든 관계는 DART 원문 링크로 검증됩니다.</span>
+    </div>
+
+  </div>
+
+  <div style="text-align:center;margin-top:20px;font-size:12px;font-weight:600;color:#a6adba">GraphRAG · Multi-agent Research · research-report.v1</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:1600},&quot;showEdgeLabels&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;그래프&quot;},&quot;focusRelation&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;전체&quot;,&quot;options&quot;:[&quot;전체&quot;,&quot;SUPPLIES&quot;,&quot;BENEFITS_FROM&quot;,&quot;COMPETES_WITH&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;그래프&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.state = { selectedType:'all', selectedId:null, active:['SUPPLIES','COMPETES_WITH','BENEFITS_FROM','COMMUNITY'], search:'' };
+    this.graphRef = React.createRef();
+
+    this.nodes = [
+      { id:'ecopro', label:'에코프로', kind:'upstream', x:120, y:280 },
+      { id:'ecoprobm', label:'에코프로비엠', kind:'midstream', x:365, y:280 },
+      { id:'skon', label:'SK온', kind:'customer', x:620, y:150 },
+      { id:'skinnovation', label:'SK이노베이션', kind:'customer', x:620, y:400 },
+      { id:'volkswagen', label:'폭스바겐', kind:'downstream', x:865, y:165 },
+      { id:'mercedes', label:'메르세데스-벤츠', kind:'downstream', x:865, y:395 },
+    ];
+    this.edges = [
+      { id:'g1', source:'ecopro', target:'ecoprobm', relation:'SUPPLIES', label:'공급', evidence:['G1'] },
+      { id:'g2', source:'ecoprobm', target:'skon', relation:'SUPPLIES', label:'공급', evidence:['G2'] },
+      { id:'g3', source:'ecoprobm', target:'skinnovation', relation:'SUPPLIES', label:'공급', evidence:['G3'] },
+      { id:'g4', source:'skinnovation', target:'skon', relation:'SUPPLIES', label:'공급', evidence:['G4'] },
+      { id:'g5', source:'skon', target:'volkswagen', relation:'SUPPLIES', label:'공급', evidence:['G5'] },
+      { id:'g6', source:'skon', target:'mercedes', relation:'SUPPLIES', label:'공급', evidence:['G6'] },
+      { id:'g7', source:'ecoprobm', target:'mercedes', relation:'COMPETES_WITH', label:'경쟁', evidence:['G7'], dashed:true },
+      { id:'g8', source:'ecoprobm', target:'volkswagen', relation:'BENEFITS_FROM', label:'정책 수혜', evidence:['G8'], dashed:true },
+    ];
+    this.evidence = [
+      { id:'G1', relation:'SUPPLIES', title:'에코프로 → 에코프로비엠', quote:'해외 자원개발 관련 지분투자를 통해 확보한 주요 광물을 자회사에 공급하는 무역사업부문이 있습니다.', source:'에코프로 사업보고서 (2025.12)', url:'http://dart.fss.or.kr/report/viewer.do?rcpNo=20260318001612&dcmNo=11144186&eleId=9&offset=142214&length=347053&dtd=dart4.xsd' },
+      { id:'G2', relation:'SUPPLIES', title:'에코프로비엠 → SK온', quote:'당사의 주요 매출처는 이차전지 Cell 제조 업체로 삼성SDI, SK온이 있으며', source:'에코프로비엠 사업보고서 (2025.12)', url:'http://dart.fss.or.kr/report/viewer.do?rcpNo=20260318001622&dcmNo=11144261&eleId=9&offset=109202&length=79351&dtd=dart4.xsd' },
+      { id:'G3', relation:'SUPPLIES', title:'에코프로비엠 → SK이노베이션', quote:'그래프 엣지의 evidences 필드에서 확인된 공급 관계입니다.', source:'공시 기반 그래프 엣지', url:'http://dart.fss.or.kr/report/viewer.do?rcpNo=20260318001612&dcmNo=11144186&eleId=9&offset=142214&length=347053&dtd=dart4.xsd' },
+      { id:'G4', relation:'SUPPLIES', title:'SK이노베이션 → SK온', quote:'당사는 계열회사인 에스케이온(주)와 이차전지용 분리막 장기공급계약을 체결하였으며', source:'SK이노베이션 사업보고서 (2025.12)', url:'http://dart.fss.or.kr/report/viewer.do?rcpNo=20260316000827&dcmNo=11125846&eleId=9&offset=171678&length=639988&dtd=dart4.xsd' },
+      { id:'G5', relation:'SUPPLIES', title:'SK온 → 폭스바겐', quote:'그래프 엣지의 evidences 필드에서 확인된 공급 관계입니다.', source:'공시 기반 그래프 엣지', url:'http://dart.fss.or.kr/report/viewer.do?rcpNo=20260316000827&dcmNo=11125846&eleId=9&offset=171678&length=639988&dtd=dart4.xsd' },
+      { id:'G6', relation:'SUPPLIES', title:'SK온 → 메르세데스-벤츠', quote:'그래프 엣지의 evidences 필드에서 확인된 공급 관계입니다.', source:'공시 기반 그래프 엣지', url:'http://dart.fss.or.kr/report/viewer.do?rcpNo=20260316000827&dcmNo=11125846&eleId=9&offset=171678&length=639988&dtd=dart4.xsd' },
+      { id:'G7', relation:'COMPETES_WITH', title:'에코프로비엠 → 메르세데스-벤츠', quote:'그래프 엣지의 evidences 필드에서 확인된 경쟁 관계입니다.', source:'공시 기반 그래프 엣지', url:'http://dart.fss.or.kr/' },
+      { id:'G8', relation:'BENEFITS_FROM', title:'에코프로비엠 → 폭스바겐', quote:'그래프 엣지의 evidences 필드에서 확인된 정책 수혜 관계입니다.', source:'공시 기반 그래프 엣지', url:'http://dart.fss.or.kr/' },
+    ];
+    this.pipeline = [
+      { title:'질문 분류', status:'done', statusText:'구현됨', body:'LangGraph classify 노드가 관계형·정성·글로벌 질문을 구분합니다.' },
+      { title:'Cypher 생성·재시도', status:'done', statusText:'구현됨', body:'스키마 고정 프롬프트와 실패 힌트 재질의로 빈 결과와 오류를 줄입니다.' },
+      { title:'원문 근거 링크', status:'done', statusText:'구현됨', body:'관계 엣지의 evidences·origins를 DART 원문 링크로 연결합니다.' },
+      { title:'Faithfulness gate', status:'done', statusText:'구현됨', body:'답변 문장 단위로 근거 지지 여부를 점검하고 미검증 진술을 표시합니다.' },
+      { title:'벡터 fallback', status:'skipped', statusText:'미사용', body:'이번 리포트는 그래프 조회 결과를 중심으로 생성되어 벡터 청크 근거는 포함하지 않습니다.' },
+    ];
+    this.snapshot = {
+      nodes:'Company 371 · Industry 85 · Policy 42',
+      relationships:'SUPPLIES 77 · BENEFITS_FROM 66 · COMPETES_WITH 21 · OWNS_STAKE 300',
+      retrieval:'classify → Cypher → Neo4j rows → grounded answer → faithfulness gate',
+    };
+
+    this.report = {
+      schemaLine:'research-report.v1 · relational graph question',
+      reportTitle:'산업/거시 보고서',
+      questionText:'에코프로에서 시작된 원료·소재 공급이 어떤 경로로 어떤 기업까지 파급되는가?',
+      generatedMeta:'2026.07.07 생성',
+      questionType:'path_impact_propagation',
+      rowCount:25,
+      attemptCount:1,
+      answerHeadline:'에코프로의 광물·소재 공급은 에코프로비엠을 거쳐 배터리 셀 및 완성차 고객군으로 확장됩니다.',
+      answerBody:'그래프 조회 결과는 에코프로가 자회사에 원료를 공급하고, 에코프로비엠이 SK온과 SK이노베이션으로 이어지는 소재 공급 축을 형성한다는 경로를 보여줍니다. 하류에는 SK온, 폭스바겐, 독일 메르세데스-벤츠 그룹 같은 배터리·완성차 수요자가 연결되어 공급망 파급 범위를 확인할 수 있습니다.',
+      answerTags:['에코프로','에코프로비엠','SK온','SK이노베이션','폭스바겐','메르세데스-벤츠'],
+      faithStatus:'warning',
+      faithLabel:'검증 경고 포함',
+    };
+
+    this.relColor = { SUPPLIES:'#3f6ede', COMPETES_WITH:'#f0435f', BENEFITS_FROM:'#1fb877', BELONGS_TO:'#7c5cff', SUPPLY_HUB:'#0f9f8f', COMPETITION_HUB:'#f0435f', COMMUNITY:'#c9cdd6', VECTOR:'#7a828f' };
+    this.relLabel = { SUPPLIES:'공급', COMPETES_WITH:'경쟁', BENEFITS_FROM:'정책 수혜', BELONGS_TO:'소속', SUPPLY_HUB:'공급 허브', COMPETITION_HUB:'경쟁 중심', COMMUNITY:'커뮤니티', VECTOR:'벡터 근거' };
+    this.relSoft = { SUPPLIES:'#eef3ff', BENEFITS_FROM:'#e8f7f0', COMPETES_WITH:'#fde7eb', BELONGS_TO:'#f0edff', SUPPLY_HUB:'#e8f7f5', COMPETITION_HUB:'#fde7eb', COMMUNITY:'#f1f3f7', VECTOR:'#f1f3f7' };
+    this.relInk = { SUPPLIES:'#2b53c0', BENEFITS_FROM:'#157a4f', COMPETES_WITH:'#c22b45', BELONGS_TO:'#5942bd', SUPPLY_HUB:'#08776b', COMPETITION_HUB:'#c22b45', COMMUNITY:'#7a828f', VECTOR:'#5a6270' };
+
+    const payload = this.readPayload();
+    if(payload){
+      const view = this.payloadToView(payload);
+      this.nodes = view.nodes;
+      this.edges = view.edges;
+      this.evidence = view.evidence;
+      this.pipeline = view.pipeline;
+      this.snapshot = view.snapshot;
+      this.report = view.report;
+      this.state.active = view.relations;
+    }
+
+    this.relations = [...new Set(this.edges.map(e=>e.relation).concat(this.state.active))];
+    this.nodeById = new Map(this.nodes.map(n=>[n.id,n]));
+    this.edgeById = new Map(this.edges.map(e=>[e.id,e]));
+  }
+
+  readPayload(){
+    const el=document.getElementById('research-report-data');
+    if(!el || !el.textContent.trim()) return null;
+    try { return JSON.parse(el.textContent); } catch { return null; }
+  }
+
+  shortId(id){
+    return String(id||'').replace(/^ev:/,'').replace(/^edge:/,'');
+  }
+
+  sourceText(source){
+    if(!source) return '';
+    return [source.name, source.reportName, source.section, source.bsnsYear].filter(Boolean).join(' · ');
+  }
+
+  snapshotText(obj){
+    return Object.entries(obj||{}).map(([k,v])=>`${k} ${v}`).join(' · ');
+  }
+
+  payloadToView(payload){
+    const graph=payload.graph||{};
+    const nodes=(graph.nodes||[]).map((n,i)=>{
+      const p=n.position||{};
+      return {
+        id:String(n.id||`node-${i}`),
+        label:String(n.label||n.id||`Node ${i+1}`),
+        kind:String(n.kind||'aggregate'),
+        x:Number(p.x||120+(i%4)*240),
+        y:Number(p.y||120+Math.floor(i/4)*120),
+      };
+    });
+    const evidenceByEdge=new Map();
+    (payload.evidence||[]).forEach(ev=>{
+      if(ev.edgeId){
+        const list=evidenceByEdge.get(ev.edgeId)||[];
+        list.push(this.shortId(ev.ref||ev.id));
+        evidenceByEdge.set(ev.edgeId,list);
+      }
+    });
+    const edges=(graph.edges||[]).map((e,i)=>({
+      id:String(e.id||`edge-${i}`),
+      source:String(e.source||''),
+      target:String(e.target||''),
+      relation:String(e.relation||'COMMUNITY'),
+      label:String(e.label||this.relLabel[e.relation]||e.relation||'관계'),
+      evidence:(e.evidenceIds||[]).map(id=>this.shortId(id)).concat(evidenceByEdge.get(e.id)||[]).filter((v,idx,arr)=>v&&arr.indexOf(v)===idx),
+      dashed:e.style==='dashed' || !['SUPPLIES','BELONGS_TO'].includes(e.relation),
+    })).filter(e=>e.source&&e.target);
+    const edgeRel=new Map(edges.map(e=>[e.id,e.relation]));
+    const evidence=(payload.evidence||[]).map(ev=>{
+      const rel=String(ev.relation||edgeRel.get(ev.edgeId)||'VECTOR');
+      const source=ev.source||{};
+      return {
+        id:this.shortId(ev.ref||ev.id),
+        relation:rel,
+        title:String(ev.title||ev.id||'근거'),
+        quote:String(ev.quote||''),
+        source:this.sourceText(source)||'Neo4j 집계 결과',
+        url:String(source.textFragmentUrl||source.url||''),
+        hasUrl:Boolean(source.textFragmentUrl||source.url),
+      };
+    });
+    const metrics=payload.metrics||{};
+    const answer=payload.answer||{};
+    const faith=answer.faithfulness||{};
+    const question=payload.question||{};
+    const created=String(payload.createdAt||'').slice(0,10).replaceAll('-','.');
+    return {
+      nodes, edges, evidence,
+      pipeline:(payload.execution&&payload.execution.pipeline)||this.pipeline,
+      snapshot:{
+        nodes:this.snapshotText((payload.graphSnapshot||{}).nodes),
+        relationships:this.snapshotText((payload.graphSnapshot||{}).relationships),
+        retrieval:(payload.execution&&payload.execution.retrievalFlow)||'',
+      },
+      report:{
+        schemaLine:`${payload.schemaVersion||'research-report.v1'} · ${question.label||question.type||'graph question'}`,
+        reportTitle:'산업/거시 보고서',
+        questionText:String(question.text||''),
+        generatedMeta:created?`${created} 생성`:'생성일 없음',
+        questionType:String(question.type||'unknown'),
+        rowCount:Number(metrics.rows||0),
+        attemptCount:Number(metrics.attempts||0),
+        answerHeadline:String(answer.headline||'분석 결과'),
+        answerBody:String(answer.body||''),
+        answerTags:Array.isArray(answer.tags)?answer.tags:[],
+        faithStatus:String(faith.status||'unchecked'),
+        faithLabel:String(faith.label||'근거 검증 정보 없음'),
+      },
+      relations:[...new Set(edges.map(e=>e.relation).concat(evidence.map(e=>e.relation)))].filter(Boolean),
+    };
+  }
+
+  componentDidMount(){ this.paintGraph(); }
+  componentDidUpdate(){ this.paintGraph(); }
+
+  toggleRel(r){
+    this.setState(s=>{
+      const set=new Set(s.active);
+      if(set.has(r)) set.delete(r); else set.add(r);
+      return { active:[...set] };
+    });
+  }
+
+  selection(){
+    const st=this.state;
+    let selEdges;
+    if(st.selectedType==='edge') selEdges=new Set([st.selectedId]);
+    else if(st.selectedType==='node') selEdges=new Set(this.edges.filter(e=>e.source===st.selectedId||e.target===st.selectedId).map(e=>e.id));
+    else selEdges=new Set(this.edges.map(e=>e.id));
+    let selNodes;
+    if(st.selectedType==='node'){ selNodes=new Set([st.selectedId]); this.edges.forEach(e=>{ if(selEdges.has(e.id)){ selNodes.add(e.source); selNodes.add(e.target); } }); }
+    else if(st.selectedType==='edge'){ const e=this.edgeById.get(st.selectedId); selNodes=new Set(e?[e.source,e.target]:[]); }
+    else selNodes=new Set(this.nodes.map(n=>n.id));
+    let selEv;
+    if(st.selectedType==='edge'){ const e=this.edgeById.get(st.selectedId); selEv=new Set(e?e.evidence:[]); }
+    else if(st.selectedType==='node'){ selEv=new Set(this.edges.filter(e=>e.source===st.selectedId||e.target===st.selectedId).flatMap(e=>e.evidence)); }
+    else selEv=new Set(this.evidence.map(x=>x.id));
+    return { selEdges, selNodes, selEv };
+  }
+
+  edgePath(e){
+    const s=this.nodeById.get(e.source), t=this.nodeById.get(e.target);
+    const dx=t.x-s.x, dy=t.y-s.y; const len=Math.hypot(dx,dy)||1;
+    const R=72, ux=dx/len, uy=dy/len;
+    const sx=s.x+ux*R, sy=s.y+uy*R, tx=t.x-ux*R, ty=t.y-uy*R;
+    const curve = e.dashed ? 44 : Math.max(-54, Math.min(54, (ty-sy)*0.24));
+    const cx1=sx+(tx-sx)*0.42, cy1=sy+curve;
+    const cx2=sx+(tx-sx)*0.58, cy2=ty-curve;
+    return `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${tx} ${ty}`;
+  }
+  edgeMid(e){
+    const s=this.nodeById.get(e.source), t=this.nodeById.get(e.target);
+    return { x:(s.x+t.x)/2, y:(s.y+t.y)/2 - (e.dashed?24:12) };
+  }
+
+  esc(value){
+    return String(value??'').replace(/[&<>"']/g, ch=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+  }
+
+  paintGraph(){
+    const svg=this.graphRef.current; if(!svg) return;
+    const st=this.state; const active=new Set(st.active);
+    const showLabels = this.props.showEdgeLabels !== false;
+    const focus = this.props.focusRelation || '전체';
+    const { selEdges, selNodes } = this.selection();
+    const isVis = e => active.has(e.relation) && (focus==='전체' || e.relation===focus);
+
+    const used=[...new Set(this.edges.map(e=>e.relation))];
+    const markers = used.map(r=>`<marker id="ar-${r}" viewBox="0 0 12 12" refX="9" refY="6" markerWidth="8.5" markerHeight="8.5" orient="auto-start-reverse"><path d="M1 1 L11 6 L1 11 z" fill="${this.relColor[r]||'#c9cdd6'}"></path></marker>`).join('');
+
+    const edgeM = this.edges.map(e=>{
+      const vis=isVis(e); const muted=!vis||!selEdges.has(e.id);
+      const activeE=vis&&selEdges.has(e.id)&&st.selectedType!=='all';
+      const col=this.relColor[e.relation]||'#c9cdd6';
+      const d=this.edgePath(e); const mid=this.edgeMid(e);
+      const w=Math.max(58, e.label.length*15+22), h=24;
+      const label = showLabels ? `<g style="opacity:${muted?0.16:1};pointer-events:none;transition:opacity .16s"><rect x="${mid.x-w/2}" y="${mid.y-h/2}" width="${w}" height="${h}" rx="12" style="fill:#fff;stroke:rgba(20,26,40,.1)"></rect><text x="${mid.x}" y="${mid.y+4.5}" style="fill:${activeE?col:'#5a6270'};font:800 12.5px Pretendard,sans-serif;text-anchor:middle">${this.esc(e.label)}</text></g>` : '';
+      return `<path data-edge-id="${e.id}" d="${d}" ${e.dashed?'stroke-dasharray="7 7"':''} style="fill:none;stroke:${col};stroke-width:${activeE?5:3}px;opacity:${muted?0.12:0.85};cursor:pointer;marker-end:url(#ar-${e.relation});transition:opacity .16s,stroke-width .16s"></path>${label}`;
+    }).join('');
+
+    const ring={ upstream:'#1fb877', midstream:'#3f6ede', customer:'#e3a52a', downstream:'#f0435f' };
+    const soft={ upstream:'#e8f7f0', midstream:'#eef3ff', customer:'#fbf2dd', downstream:'#fde7eb' };
+    const nodeM = this.nodes.map(n=>{
+      const muted=!selNodes.has(n.id); const activeN=selNodes.has(n.id)&&st.selectedType!=='all';
+      const rc=ring[n.kind]||'#c9cdd6', sf=soft[n.kind]||'#f2f4f8';
+      return `<g data-node-id="${n.id}" transform="translate(${n.x} ${n.y})" style="cursor:pointer;opacity:${muted?0.32:1};transition:opacity .16s">
+        <rect x="-77" y="-33" width="154" height="66" rx="17" style="fill:#fff;stroke:${activeN?rc:'rgba(20,26,40,.12)'};stroke-width:${activeN?2.5:1.5}px;filter:drop-shadow(0 12px 22px rgba(20,30,55,.13))"></rect>
+        <rect x="-77" y="-33" width="7" height="66" rx="3.5" style="fill:${rc}"></rect>
+        <circle cx="-56" cy="0" r="4" style="fill:${sf};stroke:${rc};stroke-width:2px"></circle>
+        <text x="-44" y="5" style="fill:#161922;font:800 14.5px Pretendard,sans-serif;text-anchor:start;pointer-events:none">${this.esc(n.label)}</text>
+      </g>`;
+    }).join('');
+
+    svg.innerHTML = `<defs>${markers}</defs>${edgeM}${nodeM}`;
+    svg.querySelectorAll('[data-node-id]').forEach(el=>el.addEventListener('click',()=>this.setState({ selectedType:'node', selectedId:el.getAttribute('data-node-id') })));
+    svg.querySelectorAll('[data-edge-id]').forEach(el=>el.addEventListener('click',()=>this.setState({ selectedType:'edge', selectedId:el.getAttribute('data-edge-id') })));
+  }
+
+  renderVals(){
+    const st=this.state; const active=new Set(st.active);
+    const counts={}; this.edges.forEach(e=>counts[e.relation]=(counts[e.relation]||0)+1);
+    const order=this.relations&&this.relations.length?this.relations:['SUPPLIES','BENEFITS_FROM','COMPETES_WITH','COMMUNITY'];
+    const filters = order.map(r=>{
+      const count=counts[r]||0; const isActive=active.has(r); const future=count===0;
+      return {
+        relation:r, label:this.relLabel[r]||r, count: future?'예정':String(count),
+        bg: isActive?this.relSoft[r]:'#ffffff',
+        fg: isActive?this.relInk[r]:'#8890a0',
+        border: isActive?this.relColor[r]:'rgba(20,26,40,.14)',
+        dash: future?'dashed':'solid',
+        onClick: ()=>this.toggleRel(r),
+      };
+    });
+
+    const { selEdges, selEv } = this.selection();
+
+    let selectionTitle, selectionDescription;
+    if(st.selectedType==='node'){
+      const n=this.nodeById.get(st.selectedId);
+      selectionTitle=n.label;
+      selectionDescription='연결된 관계 엣지와 근거 카드가 함께 강조되어 그래프 안에서의 위치를 확인할 수 있습니다.';
+    } else if(st.selectedType==='edge'){
+      const e=this.edgeById.get(st.selectedId);
+      const s=this.nodeById.get(e.source), t=this.nodeById.get(e.target);
+      selectionTitle=`${s.label} → ${t.label}`;
+      selectionDescription=`${this.relLabel[e.relation]}(${e.relation}) 관계입니다. 이 엣지를 뒷받침하는 공시 문장과 출처 링크가 근거 영역에서 강조됩니다.`;
+    } else {
+      selectionTitle='전체 경로';
+      selectionDescription='조회 결과에서 생성된 노드와 관계 엣지 전체입니다. 각 엣지는 relation 타입과 연결된 근거 카드로 표시됩니다.';
+    }
+
+    const visSel=[...selEdges].filter(id=>this.edgeById.get(id)&&active.has(this.edgeById.get(id).relation));
+    const miniStats=[
+      { label:'강조 엣지', value:String(visSel.length) },
+      { label:'근거 카드', value:String(selEv.size) },
+      { label:'활성 관계', value:String(st.active.length) },
+      { label:'노드 수', value:String(this.nodes.length) },
+    ];
+
+    const q=st.search.trim().toLowerCase();
+    const evidenceList = this.evidence
+      .filter(it=>active.has(it.relation) && (!q || [it.id,it.relation,it.title,it.quote,it.source].join(' ').toLowerCase().includes(q)))
+      .map(it=>{
+        const hl=selEv.has(it.id);
+        return { id:it.id, title:it.title, quote:it.quote, source:it.source, url:it.url, hasUrl:it.hasUrl,
+          relLabel:this.relLabel[it.relation], pillBg:this.relSoft[it.relation], pillFg:this.relInk[it.relation],
+          borderCol: hl?this.relColor[it.relation]:'rgba(20,26,40,.08)',
+          shadow: hl?('0 0 0 3px '+this.relSoft[it.relation]):'0 1px 3px rgba(20,30,60,.05)' };
+      });
+
+    const pipelineView = this.pipeline.map((p,i)=>({
+      title:p.title, body:p.body, statusText:p.statusText, index:String(i+1).padStart(2,'0'),
+      dot: p.status==='done'?'#1fb877':'#3f6ede',
+      pillBg: p.status==='done'?'#e8f7f0':'#eef3ff',
+      pillFg: p.status==='done'?'#157a4f':'#2b53c0',
+    }));
+
+    const provenance=[
+      { key:'그래프 스냅샷', value:this.snapshot.nodes },
+      { key:'관계 스냅샷', value:this.snapshot.relationships },
+      { key:'검색 흐름', value:this.snapshot.retrieval },
+      { key:'질문 유형', value:this.report.questionType },
+      { key:'데이터', value:'정적 리포트 페이로드 (research-report.v1)' },
+    ];
+    const faithStatus=this.report.faithStatus;
+    const faithTone={
+      verified:{ short:'완료', main:'#157a4f', bg:'#e8f7f0', fg:'#157a4f', dot:'#1fb877' },
+      warning:{ short:'경고', main:'#c58a12', bg:'#faf1dd', fg:'#9a6c10', dot:'#e3a52a' },
+      failed:{ short:'실패', main:'#c22b45', bg:'#fde7eb', fg:'#c22b45', dot:'#f0435f' },
+      unchecked:{ short:'미확인', main:'#7a828f', bg:'#f1f3f7', fg:'#7a828f', dot:'#9aa1b0' },
+    }[faithStatus]||{ short:'미확인', main:'#7a828f', bg:'#f1f3f7', fg:'#7a828f', dot:'#9aa1b0' };
+    const relationSummary = order
+      .filter(r=>counts[r])
+      .map(r=>`${this.relLabel[r]||r} ${counts[r]}`)
+      .join(' · ') || '관계 없음';
+
+    return {
+      graphRef:this.graphRef,
+      filters,
+      selectionTitle, selectionDescription, miniStats,
+      evidenceList, noEvidence: evidenceList.length===0,
+      onSearch: (e)=>this.setState({ search:e.target.value }),
+      pipelineView, provenance,
+      schemaLine:this.report.schemaLine,
+      reportTitle:this.report.reportTitle,
+      questionText:this.report.questionText,
+      generatedMeta:this.report.generatedMeta,
+      questionType:this.report.questionType,
+      rowCount:String(this.report.rowCount),
+      edgeCount:String(this.edges.length),
+      nodeCount:String(this.nodes.length),
+      attemptCount:String(this.report.attemptCount),
+      relationSummary,
+      faithLabel:this.report.faithLabel,
+      faithShort:faithTone.short,
+      faithMainColor:faithTone.main,
+      faithPillBg:faithTone.bg,
+      faithPillFg:faithTone.fg,
+      faithDot:faithTone.dot,
+      answerHeadline:this.report.answerHeadline,
+      answerBody:this.report.answerBody,
+      answerTags:this.report.answerTags,
+    };
+  }
+}
+</script>
+</body>
+</html>
