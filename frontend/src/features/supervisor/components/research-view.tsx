@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { GitBranch, Sparkles } from "lucide-react";
+import { GitBranch, Search, Sparkles } from "lucide-react";
 
 import { analyzeQuery } from "@/api/supervisor";
 import { createTechnicalReport } from "@/api/technical-create";
@@ -14,7 +14,7 @@ import type { SupervisorAnalyzeResponse } from "@/types/supervisor";
 import type { AgentType } from "@/types/archive";
 import { AGENT_META, AGENT_ORDER } from "@/features/supervisor/lib/agents";
 import { PipelineBox, type PipelineStep, type StepState } from "./pipeline-box";
-import { Composer } from "./composer";
+import { Composer, type ComposerHandle } from "./composer";
 import { ResultMessage, type CreatedReports } from "./result-message";
 
 type Phase = "intro" | "running" | "done";
@@ -27,6 +27,16 @@ const PLANNING = {
   icon: GitBranch,
 };
 const TOTAL_STEPS = 1 + AGENT_ORDER.length;
+
+// 인트로 예시 질문(프리셋) — 클릭하면 입력창에 채워진다(자동 전송 안 함: 분석 1회가 비싸다).
+// 종목 의존 3에이전트(재무·기술·수급)가 돌려면 종목이 들어간 질문이어야 하므로 종목 중심으로 구성.
+const PRESET_QUERIES: string[] = [
+  "삼성전자 최근 흐름 종합 분석해줘",
+  "SK하이닉스 수급이 어떤지 알려줘",
+  "LG에너지솔루션 기술적 신호 분석해줘",
+  "카카오 최근 뉴스와 시장 심리 요약해줘",
+  "현대차 재무 상태 점검해줘",
+];
 
 // 각 스텝의 "최종" 상태를 실제 supervisor 결과에서 뽑는다(연출이 아니라 진실).
 function finalStateFor(idx: number, res: SupervisorAnalyzeResponse | null): StepState {
@@ -68,6 +78,7 @@ export function ResearchView() {
   // 실제 저장까지 연결된 리포트 — agent 별 {report_id, 생성중}. (technical·news)
   const [createdReports, setCreatedReports] = useState<CreatedReports>({});
   const timers = useRef<number[]>([]);
+  const composerRef = useRef<ComposerHandle>(null);
 
   const clearTimers = useCallback(() => {
     timers.current.forEach((t) => window.clearTimeout(t));
@@ -192,17 +203,56 @@ export function ResearchView() {
       {/* 대화/인트로 스크롤 영역 */}
       <div className="flex-1 overflow-y-auto px-8 py-8">
         {phase === "intro" ? (
-          <div className="mx-auto flex min-h-[50vh] max-w-3xl flex-col items-center justify-center text-center">
-            <div className="mb-6 grid h-16 w-16 place-items-center rounded-2xl border border-indigo-100 bg-indigo-50 text-indigo-600 shadow-md shadow-indigo-100">
+          <div className="mx-auto flex min-h-[60vh] max-w-3xl flex-col items-center justify-center text-center">
+            <div className="mb-6 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-200">
               <Sparkles className="h-8 w-8" />
             </div>
-            <h1 className="text-3xl font-extrabold leading-tight tracking-tight text-slate-900">
-              근거 검증 기반 AI 리서치
+            <h1 className="break-keep text-3xl font-extrabold leading-tight tracking-tight text-slate-900">
+              근거 검증 기반 <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">AI 리서치</span>
             </h1>
-            <p className="mt-3 max-w-lg text-sm leading-relaxed text-slate-500">
-              원하시는 종목과 질문을 입력해 주세요. 5개 분석 에이전트(재무·기술·뉴스·수급·산업)가
-              검증 게이트를 통과한 리포트를 생성합니다.
+            {/* break-keep: 한국어 어절 단위 줄바꿈(단어 중간에서 꺾이지 않게). 문장 경계는 <br>로 명시. */}
+            <p className="mt-3 max-w-xl break-keep text-[14px] leading-relaxed text-slate-500">
+              원하시는 종목과 질문을 입력해 주세요.
+              <br />
+              5개 분석 에이전트가 검증 게이트를 통과한 리포트를 생성합니다.
             </p>
+
+            {/* 5개 에이전트 배지 — 무엇이 도는지 한눈에 */}
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              {AGENT_ORDER.map((type) => {
+                const meta = AGENT_META[type];
+                const Icon = meta.icon;
+                return (
+                  <span
+                    key={type}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11.5px] font-bold text-slate-600 shadow-sm"
+                  >
+                    <Icon className="h-3.5 w-3.5 text-indigo-500" />
+                    {meta.label}
+                  </span>
+                );
+              })}
+            </div>
+
+            {/* 예시 질문 — 클릭하면 입력창에 채워진다(전송은 사용자가) */}
+            <div className="mt-10 w-full">
+              <div className="flex items-center justify-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                <Search className="h-3.5 w-3.5" />
+                이런 질문으로 시작해 보세요
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {PRESET_QUERIES.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => composerRef.current?.setValue(q)}
+                    className="break-keep rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-left text-[12.5px] font-medium text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:bg-indigo-50/60 hover:text-indigo-700 hover:shadow-md"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-6">
@@ -230,7 +280,7 @@ export function ResearchView() {
         )}
       </div>
 
-      <Composer onSubmit={handleSubmit} disabled={phase === "running"} />
+      <Composer onSubmit={handleSubmit} disabled={phase === "running"} handleRef={composerRef} />
     </div>
   );
 }

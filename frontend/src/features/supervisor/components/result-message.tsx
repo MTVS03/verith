@@ -28,7 +28,7 @@ export function ResultMessage({
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-md">
-      <p className="text-[14.5px] font-medium leading-relaxed text-slate-700">
+      <p className="break-keep text-[14.5px] font-medium leading-relaxed text-slate-700">
         질문하신 <b className="font-bold text-slate-900">&ldquo;{stockName}&rdquo;</b> 분석 결과, 총{" "}
         <b className="font-bold text-indigo-600">{succeeded.length}개</b>의 에이전트가 검증 게이트를 통과해
         리포트를 생성했습니다.

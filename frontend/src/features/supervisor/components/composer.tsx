@@ -1,18 +1,35 @@
 "use client";
 
-import { useRef } from "react";
+import { useImperativeHandle, useRef, type Ref } from "react";
 import { ArrowUp, ShieldCheck } from "lucide-react";
+
+// 프리셋(예시 질문) 클릭 → 입력창 채우기용 외부 핸들. 자동 전송은 하지 않는다 —
+// 분석 1회가 수 분짜리 비싼 작업이라, 사용자가 수정·확인 후 직접 전송하게 한다.
+export type ComposerHandle = { setValue: (value: string) => void };
 
 // 목업 verith(3).html 의 하단 composer 를 그대로 옮김:
 // 회색 라운드 박스 + textarea(자동 높이) + 하단 "Verification Gate ON" / 전송 버튼.
 export function Composer({
   onSubmit,
   disabled = false,
+  handleRef,
 }: {
   onSubmit: (query: string) => void;
   disabled?: boolean;
+  handleRef?: Ref<ComposerHandle>;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
+
+  useImperativeHandle(handleRef, () => ({
+    setValue(value: string) {
+      const el = areaRef.current;
+      if (!el) return;
+      el.value = value;
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+      el.focus();
+    },
+  }));
 
   function autoGrow() {
     const el = areaRef.current;
