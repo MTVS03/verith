@@ -345,3 +345,33 @@ def test_verification_scans_section_forbidden_terms():
     assert not ev.passed
     assert any(f.reason == "forbidden_term" and "interpretation.one_line_summary" in f.target
                for f in ev.failures)
+
+
+# ── verify_expressions: payload↔verify 계약 정렬(fix/interpret-verify-contract) ──
+def test_build_payload_injects_verify_expressions_from_rules():
+    from src.agents.technical.observability.keyword_rules import CONSENSUS_RULES, REGIME_RULES
+    from src.agents.technical.schemas.enums import Regime
+    regime = _regime(final=Regime.DOWNTREND, alignment=AlignmentFlag.NEUTRAL)
+    signal = _signal(consensus=Consensus.STRONG_NEGATIVE)
+    ve = node.build_payload(regime=regime, signal=signal, signals=_signals(),
+                            risks=[])["verify_expressions"]
+    # 검증이 요구하는 한글 대표어가 그대로 실린다(단일 출처 keyword_rules).
+    assert ve["interpretation_must_include_any"]["regime"] == list(REGIME_RULES[Regime.DOWNTREND].required_any)
+    assert ve["interpretation_must_include_any"]["consensus"] == list(CONSENSUS_RULES[Consensus.STRONG_NEGATIVE].required_any)
+    assert "하락 추세" in ve["interpretation_must_include_any"]["regime"]
+    assert "강한 부정" in ve["interpretation_must_include_any"]["consensus"]
+    # neutral alignment 도 서술 표현을 준다(정합/역행 단독어 회피용).
+    assert ve["interpretation_must_include_any"].get("alignment")
+    # 영문 enum 금지 + 반대어(긍정/정합) avoid.
+    assert ve["do_not_use_english_enum"] is True
+    assert "긍정" in ve["must_avoid"] and "정합" in ve["must_avoid"]
+    # 지표별 detail 표현.
+    assert ve["detail_must_include_any_by_indicator"]["moving_average"] == ["긍정"]
+
+
+def test_verify_expressions_risk_mention_and_confidence():
+    from src.agents.technical.schemas.enums import RiskFlag
+    risks = [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="거래량 약함")]
+    ve = node.build_payload(regime=_regime(), signal=_signal(), signals=_signals(),
+                            risks=risks)["verify_expressions"]
+    assert "거래량" in ve["must_mention_risk_any"]               # risk 있으면 언급 표현 제공

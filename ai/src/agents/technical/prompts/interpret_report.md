@@ -86,6 +86,21 @@ LLM 출력은 observability/trajectory_eval.py 로 검증(검증 ③)하며, 실
 - `risk`(현재 확인된 위험)와 `invalidation_or_caution`(해석이 틀어지는 조건)은 **분리**해서 씁니다.
 - 각 섹션은 **근거 있는 서술**이 우선입니다("좋은 문장"보다 입력 확정값에 정확히 근거).
 
+# 검증 필수 표현 (매우 중요 — 이걸 어기면 리포트가 폴백 처리됩니다)
+
+입력 `verify_expressions` 는 이 리포트가 **검증을 통과하기 위해 반드시 지켜야 하는 한글 표현**입니다.
+
+- `interpretation_must_include_any`: 각 항목(regime·consensus 등)마다 **나열된 한글 표현 중 최소 하나를 그대로**
+  `interpretation_text` 에 포함합니다. 예: consensus 항목이 `["강한 부정","부정 우세"]` 면 둘 중 하나를 문장에 씁니다.
+- `detail_must_include_any_by_indicator`: 각 지표의 `details[].detail` 에 그 지표용 표현(긍정/중립/부정 등) 중
+  하나를 포함합니다.
+- `must_mention_risk_any`: 비어있지 않으면 이 중 최소 하나(거래량·저항·지지 등)를 `interpretation_text` 에 언급합니다.
+- `must_avoid`: 이 표현들은 **쓰지 않습니다**(확정 라벨과 모순되는 반대어).
+- `do_not_use_english_enum=true`: `strong_negative`·`downtrend`·`weak_positive` 같은 **영문 enum 값을 그대로 쓰지
+  마세요.** 반드시 위 한글 대표 표현으로 서술합니다.
+
+**요약: 확정 라벨을 설명할 때 영문 코드값이 아니라 `verify_expressions` 가 지정한 한글 표현을 그대로 사용하세요.**
+
 # interpretation_text 작성 규칙
 
 - 3~5문장, 한국어 사용자에게 자연스럽게.

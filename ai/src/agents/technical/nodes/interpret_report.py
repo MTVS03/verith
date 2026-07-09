@@ -28,12 +28,18 @@ from typing import Protocol
 
 from ..observability import trajectory_eval
 from ..observability.keyword_rules import (
+    ALIGNMENT_RULES,
     CONFIDENCE_LABELS,
+    CONFIDENCE_RULES,
     CONSENSUS_LABELS,
+    CONSENSUS_RULES,
     INDICATOR_LABELS,
     REGIME_LABELS,
+    REGIME_RULES,
     RISK_LABELS,
+    RISK_MENTION_TERMS,
     SIGNAL_LABELS,
+    SIGNAL_RULES,
 )
 from ..schemas.contracts import InterpretationResult, RegimeResult, RiskItem, SignalSummary
 from ..schemas.enums import (
@@ -105,6 +111,58 @@ def load_prompt(name: str) -> str:
     return (PROMPT_DIR / name).read_text(encoding="utf-8")
 
 
+def _verify_expressions(
+    regime: RegimeResult,
+    signal: SignalSummary,
+    signals: Sequence[IndicatorSignalResult],
+    risks: Sequence[RiskItem],
+) -> dict:
+    """검증(③)이 요구하는 **한글 대표 표현**을 확정 라벨에서 뽑아 프롬프트에 명시(단일 출처 = keyword_rules).
+
+    LLM 이 영문 enum(strong_negative 등)이나 동의어를 써서 verify 를 통과 못 하던 문제를 막는다 — 여기서 준
+    표현을 그대로 포함하고, avoid 표현은 쓰지 않게 한다. require_representative=False(중립 등)는 must_include
+    에서 제외하고 avoid 만 싣는다."""
+    def _req(rule) -> list[str]:
+        return list(rule.required_any) if (rule and rule.require_representative and rule.required_any) else []
+
+    must_include: dict = {}
+    reg = _req(REGIME_RULES.get(regime.final_regime))
+    if reg:
+        must_include["regime"] = reg
+    con = _req(CONSENSUS_RULES.get(signal.consensus))
+    if con:
+        must_include["consensus"] = con
+    # alignment 은 require_representative=False(중립) 여도, 안전한 서술 표현을 지정한다 — 그래야 모델이
+    # "정합"/"역행" 단독어(중립에선 conflict)를 쓰지 않고 지정 표현(예: "방향성 판정 없음")으로 서술한다.
+    align_rule = ALIGNMENT_RULES.get(regime.alignment_flag)
+    if align_rule and align_rule.required_any:
+        must_include["alignment"] = list(align_rule.required_any)
+    detail_by_indicator = {
+        s.indicator.value: list(SIGNAL_RULES[s.signal].required_any)
+        for s in signals if s.signal in SIGNAL_RULES and SIGNAL_RULES[s.signal].required_any
+    }
+
+    avoid: set[str] = set()
+    for rule in (
+        REGIME_RULES.get(regime.final_regime), CONSENSUS_RULES.get(signal.consensus),
+        ALIGNMENT_RULES.get(regime.alignment_flag), CONFIDENCE_RULES.get(signal.confidence_level),
+    ):
+        if rule:
+            avoid.update(rule.conflict_any)
+
+    risk_mention_any = sorted({
+        t for r in risks for t in RISK_MENTION_TERMS.get(r.flag, ())
+    })
+
+    return {
+        "interpretation_must_include_any": must_include,   # 각 키: 이 중 1개 이상을 그대로 포함
+        "detail_must_include_any_by_indicator": detail_by_indicator,  # 지표별 detail 에 signal 표현 포함
+        "must_mention_risk_any": risk_mention_any,         # risk 있으면 이 중 1개 이상 언급
+        "must_avoid": sorted(avoid),                       # 반대·모순 표현 금지
+        "do_not_use_english_enum": True,                   # strong_negative/downtrend 등 영문 enum 서술 금지
+    }
+
+
 def build_payload(
     *,
     regime: RegimeResult,
@@ -144,6 +202,8 @@ def build_payload(
             for s in signals
         ],
         "risk_items": [{"flag": r.flag.value, "note": r.note} for r in risks],
+        # 검증 통과에 필요한 한글 대표 표현(단일 출처 keyword_rules) — 영문 enum·모순어로 인한 fallback 방지.
+        "verify_expressions": _verify_expressions(regime, signal, signals, risks),
     }
     if analysis_focus is not None:
         payload["analysis_focus"] = list(analysis_focus)

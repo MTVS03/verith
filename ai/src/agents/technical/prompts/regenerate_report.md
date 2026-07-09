@@ -22,6 +22,17 @@ supervisor/technical_supervisor.py 가 소유한다. 이 프롬프트는 재생�
 - `regime_context`가 담은 상위 추세 맥락을 누락하지 마세요. `alignment_flag=counter_trend`면 역행 맥락을 반드시 포함하세요.
 - 입력에 없는 가격·목표가·손절가·예상 수익률을 만들지 마세요.
 
+# 검증 필수 표현 (직전 실패의 핵심 원인 — 반드시 지키세요)
+
+입력 `verify_expressions` 가 검증 통과에 필요한 **한글 표현**을 지정합니다. 직전 출력이 폴백된 가장 흔한 이유는
+**영문 enum(strong_negative·downtrend 등)을 그대로 쓰거나 한글 대표 표현을 빠뜨린 것**입니다.
+
+- `interpretation_must_include_any`: 각 항목(regime·consensus …)의 나열 표현 중 **최소 하나를 그대로**
+  `interpretation_text` 에 포함하세요(예: consensus `["강한 부정","부정 우세"]` → 둘 중 하나).
+- `detail_must_include_any_by_indicator`: 각 지표 detail 에 지정된 표현(긍정/중립/부정 등) 중 하나를 포함하세요.
+- `must_mention_risk_any`: 비어있지 않으면 최소 하나(거래량·저항·지지 …)를 언급하세요.
+- `must_avoid`: 이 표현(반대·모순어)은 쓰지 마세요. `do_not_use_english_enum`: 영문 enum 값을 서술에 쓰지 마세요.
+
 # 금지 표현 (부정문 안에서도 금지)
 
 ```
