@@ -100,7 +100,7 @@ latest 모드는 "시퀀스 보고서"가 아니라 DART 최신 보고서 탐색
 
 ## batch_demo
 
-고정 10개 종목 또는 단일 종목을 E2E 실행합니다. 결과는 `api_test/out/`에 저장됩니다.
+기본 실행은 `CORP_CODE_MAP` 데모 세트(2차전지 10종)를 순차 E2E 실행하고, `--ticker`로 단일 종목만 돌릴 수 있습니다. 이 세트는 **데모용 고정 목록**일 뿐 에이전트의 지원 범위가 아닙니다 — 실제 종목 식별은 backend `stock_corp_codes` 정본을 따르고, 정본/폴백에서 모두 없으면 `insufficient_data`로 응답합니다. 결과는 `api_test/out/`에 저장됩니다.
 
 ```bat
 cd /d C:\verith\ai

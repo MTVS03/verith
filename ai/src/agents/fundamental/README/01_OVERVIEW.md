@@ -23,4 +23,4 @@
 
 ## 지원 범위
 
-현재 고정 10개 2차전지 관련 종목은 `core/config.py`의 `CORP_CODE_MAP`, `STOCK_NAME_MAP`에 정의되어 있습니다. 지원하지 않는 종목은 `collect_node`에서 `UNSUPPORTED_TICKER` 플래그와 `insufficient_data` 응답으로 처리됩니다.
+지원 범위는 backend `stock_corp_codes` 정본을 우선합니다. `core/config.py`의 `CORP_CODE_MAP`, `STOCK_NAME_MAP`은 backend 정본을 읽을 수 없거나 해당 종목이 없을 때 쓰는 static fallback입니다. backend 정본과 static fallback에서 모두 찾지 못한 종목은 `collect_node`에서 `UNSUPPORTED_TICKER` 플래그와 `insufficient_data` 응답으로 처리됩니다.
