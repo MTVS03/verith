@@ -33,6 +33,7 @@ from ..config import (
     CUP_HANDLE_MAX_DEPTH_PCT,
     CUP_HANDLE_MAX_HANDLE_BARS,
     CUP_HANDLE_MAX_HANDLE_PULLBACK_PCT,
+    CUP_HANDLE_MIN_ARM_RATIO,
     CUP_HANDLE_MIN_BOTTOM_BARS,
     CUP_HANDLE_MIN_DEPTH_PCT,
     CUP_HANDLE_MIN_HANDLE_BARS,
@@ -449,8 +450,9 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
 
     보수적 결정론 판정: ① left_rim=앞 30% 최고 high ② bottom=전체 최저 low(중앙부·left_rim 이후,
     **bottom 근처 ≥MIN_BOTTOM_BARS봉** = 단봉 V자 배제) ③ right_rim=bottom 이후 최고 high(핸들 최소
-    여지) → rim 차 ≤tol · depth∈[min,max] · handle 길이∈[min,max] · **handle 되돌림∈[MIN,MAX]이고
-    handle 저점 < right_rim(실제 조정 존재)** · handle 저점이 컵 깊이 절반 위 · 최신 close가 handle~rim 근처.
+    여지) → rim 차 ≤tol · **좌/우 팔 폭 대칭 ≥MIN_ARM_RATIO(찌그러진 컵 배제)** · depth∈[min,max] ·
+    handle 길이∈[min,max] · **handle 되돌림∈[MIN,MAX]이고 handle 저점 < right_rim(실제 조정 존재)** ·
+    handle 저점이 컵 깊이 절반 위 · 최신 close가 handle~rim 근처.
     **돌파(neckline breakout)는 요구하지 않는다**(관찰 후보). 완전 곡률 판정은 Phase 2. 거래량은 meta로만.
     """
     lo_i = end_i - lookback + 1
@@ -484,6 +486,15 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
         return None
     if left_rim <= 0 or abs(left_rim - right_rim) / left_rim > CUP_HANDLE_RIM_TOLERANCE_PCT:
         return None  # 좌/우 rim 회복(가격 차 tolerance)
+
+    # 좌/우 팔 폭(봉 수) 대칭: 하강(좌rim→bottom)·상승(bottom→우rim)이 지나치게 비대칭이면 '찌그러진 컵'
+    # 으로 후보 제외. rim 가격 차만 보던 기존 판정의 사각(한쪽 팔만 긴 형태)을 막는다(shape 정직성).
+    left_arm = bottom_idx - left_rim_idx
+    right_arm = right_rim_idx - bottom_idx
+    if left_arm <= 0 or right_arm <= 0:
+        return None
+    if min(left_arm, right_arm) / max(left_arm, right_arm) < CUP_HANDLE_MIN_ARM_RATIO:
+        return None
 
     rim = min(left_rim, right_rim)
     if rim <= 0:
@@ -519,6 +530,13 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
         "handle_pullback_pct": round(handle_pullback, 4),
         "handle_bars": handle_bars,
         "candidate_stage": "handle_forming",
+        # 구간 렌더용 x축 좌표 — 탐지에 이미 쓴 index 에서 **실제 source date 만** 파생(추정 없음).
+        # handle_start=우측 rim 다음 봉, handle_end=현재 anchor 봉(end_i). 프론트가 컵/핸들 구간을 그린다.
+        "left_rim_date": source[lo_i + left_rim_idx].date,
+        "bottom_date": source[lo_i + bottom_idx].date,
+        "right_rim_date": source[lo_i + right_rim_idx].date,
+        "handle_start_date": source[lo_i + right_rim_idx + 1].date,
+        "handle_end_date": source[end_i].date,
         # 거래량은 생성 조건이 아니라 confirmation 정보. 기존 VOLUME_SPIKE_MULTIPLIER 재사용.
         "volume_confirmed": bool(vol_ratio is not None and vol_ratio >= VOLUME_SPIKE_MULTIPLIER),
         "volume_ratio": vol_ratio,

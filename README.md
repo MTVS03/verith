@@ -171,6 +171,76 @@ cd ..
 
 ---
 
+## 7. 산업 DB 스냅샷 복원 (팀 공유 데이터)
+
+산업(industry) 에이전트가 쌓아둔 데이터(PostgreSQL 리포트 + Neo4j 지식그래프 + DART 원문 벡터)를
+팀에서 공유한다. 뉴스와 같은 방식이다 — **작성자가 스냅샷을 떠서 커밋**하면 나머지는 `git pull` 후 복원.
+
+> `ai/src/agents/industry/data/` (raw·structured·extracted) 는 **이미 git 이 추적**한다.
+> 스냅샷 대상이 아니니 그냥 `git add` 하면 된다. 스냅샷이 나르는 건 **DB 안의 것**뿐이다.
+
+> **⚠ 뉴스 스냅샷도 쓴다면 반드시 `restore_news` → `restore_industry` 순서로 복원한다.**
+> 두 그래프는 Neo4j 의 `Company`/`Person` 레이블을 공유하는데 정체성 키가 다르고(뉴스=`key`,
+> 산업=`name`) **회사명 28개가 겹친다**(LG화학·삼성SDI·SK이노베이션 …). 산업을 먼저 복원하면
+> 뉴스 복원이 `Company.name` 유니크 제약 위반으로 실패한다.
+
+### WSL / macOS / Linux (bash)
+
+```bash
+# 1) DB 컨테이너 실행
+docker compose up -d
+
+# 2) 스키마 최신화 + 주식 마스터 (agent_reports.stock_code 가 stocks 로 FK 를 건다)
+cd backend
+uv run alembic upgrade head
+docker exec -i verith-postgres psql -U verith -d verith < dumps/shared_verith_snapshot.sql
+
+# 3) 복원 (뉴스도 쓴다면 ./restore_news.sh 를 먼저)
+cd ..
+./restore_industry.sh                  # 권한 없으면  bash restore_industry.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+docker compose up -d
+
+cd backend
+.venv\Scripts\python.exe -m alembic upgrade head
+cmd /c "docker exec -i verith-postgres psql -U verith -d verith < dumps\shared_verith_snapshot.sql"
+
+cd ..
+./restore_industry.ps1                 # 뉴스도 쓴다면 ./restore_news.ps1 을 먼저
+```
+
+→ [restore_industry.sh](restore_industry.sh) · [restore_industry.ps1](restore_industry.ps1)
+
+### 복원 스크립트가 하는 일 (공통)
+
+- `backend/dumps/shared_industry_pg.sql` → PostgreSQL 복원
+  - `industry_reports` 는 `TRUNCATE` 후 주입
+  - `agent_reports` 는 **공용 테이블**이라 `agent_type='industry'` 행만 지우고 주입 (다른 에이전트 인덱스 보존)
+- `backend/dumps/shared_industry_neo4j.cypher` → Neo4j 복원
+  - 제약·인덱스·벡터인덱스를 스스로 만든다 → **backend 선기동 불필요** (뉴스와 다른 점)
+  - `:Chunk` 는 전량 교체, 본체 관계 5종은 산업 노드 사이의 것만 스코프 삭제 후 재구성 (뉴스 그래프 무손상)
+- 끝나면 **리포트 행수 / 관계 수 / 청크 수 / 임베딩 있는 청크 수**를 찍어준다
+
+### 스냅샷 뜨기 (데이터 소유자)
+
+```powershell
+./snapshot_industry.ps1      # bash: ./snapshot_industry.sh
+```
+
+두 파일을 `git add / commit / push` 하면 팀원이 pull 후 복원한다.
+
+> 뉴스와 달리 **`:Chunk` 임베딩은 기본 포함**된다(파일 ~10MB). 산업의 임베딩은 배치 전용이 아니라
+> `vector_retrieve.py` 하이브리드 검색의 **조회 경로**라, 빼면 팀원이 GPU 로 `vectorize.py` 를 다시
+> 돌려야 한다. 굳이 빼려면 `--no-embedding`.
+
+자세한 내용: [backend/dumps/README.md](backend/dumps/README.md)
+
+---
+
 ## 실행 확인 (health check)
 
 ```bash

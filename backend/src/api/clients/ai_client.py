@@ -14,6 +14,7 @@ import httpx
 _ANALYZE_PATH = "/internal/technical/analyze"
 _FUNDAMENTAL_ANALYZE_PATH = "/internal/fundamental/analyze"
 _SUPERVISOR_ANALYZE_PATH = "/internal/supervisor/analyze"
+_INDUSTRY_ANALYZE_PATH = "/internal/industry/analyze"
 
 
 class AIClientError(Exception):
@@ -118,6 +119,29 @@ class AIClient:
         payload 는 FundamentalAgentInput 형태(request_id/trace_id/ticker/query).
         """
         url = self._base_url + _FUNDAMENTAL_ANALYZE_PATH
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
+                resp = await client.post(url, json=payload)
+        except httpx.TimeoutException as exc:
+            raise AITimeoutError("AI 서버 응답 timeout") from exc
+        except httpx.HTTPError as exc:
+            raise AIUnavailableError(f"AI 서버 연결 실패: {type(exc).__name__}") from exc
+
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 422:
+            raise AIValidationError("AI 요청 검증 실패(422)")
+        if resp.status_code == 504:
+            raise AITimeoutError("AI 서버 timeout(504)")
+        if resp.status_code in (502, 503):
+            raise AIUnavailableError(f"AI 서버 사용 불가({resp.status_code})")
+        raise AIUnavailableError(f"AI 서버 오류({resp.status_code})")
+
+    async def analyze_industry(self, payload: dict) -> dict:
+        """`/internal/industry/analyze` 호출 → research-report.v1 JSON(dict) 반환."""
+        url = self._base_url + _INDUSTRY_ANALYZE_PATH
         try:
             async with httpx.AsyncClient(
                 timeout=self._timeout, transport=self._transport

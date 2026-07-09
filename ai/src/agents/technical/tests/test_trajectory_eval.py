@@ -95,6 +95,18 @@ def test_forbidden_term_in_negation_still_fails():
     assert contains_forbidden_terms("매수 신호는 아닙니다.") == ["매수"]
 
 
+def test_verify_strips_markdown_before_matching():
+    # 핵심 조건 bold(**...**) 허용 — verify 는 별표 제거 plain text 로 검사한다.
+    # ① 대표 표현이 **로 감싸여 쪼개져도 매칭돼야 한다(missing_required 안 뜸).
+    assert check_label("현재 **약한 긍정**으로 해석됩니다.",
+                       REGIME_RULES[Regime.BULLISH_REVERSAL_WATCH]) is not None
+    from src.agents.technical.observability.keyword_rules import LabelRule
+    rule = LabelRule(required_any=["지지 구간"], conflict_any=[], require_representative=True)
+    assert check_label("**지지 구간** 근접", rule) == []          # 부분 bold 도 통과
+    # ② 금지어를 bold 로 감싸도 여전히 잡힌다(우회 불가).
+    assert contains_forbidden_terms("**매수** 추천") == ["매수", "추천"]
+
+
 # ── 지표별 detail 왜곡 (DETAIL-01~05) ───────────────────────────────────────
 def test_detail01_signal_distortion():
     fails = evaluate_details(

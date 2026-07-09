@@ -321,7 +321,7 @@ def _write_markdown(results: list[dict[str, Any]], path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Probe broad DART APIs for fundamental insight candidates.")
     parser.add_argument("--ticker", action="append", help="6-digit supported ticker. Repeatable.")
-    parser.add_argument("--all-tickers", action="store_true", help="Probe all supported tickers.")
+    parser.add_argument("--all-tickers", action="store_true", help="Probe the CORP_CODE_MAP demo set (fallback tickers).")
     parser.add_argument("--year", type=int, default=2025, help="Business year. default: 2025")
     parser.add_argument("--reprt-code", default="11011", help="DART report code. default: 11011 annual report")
     parser.add_argument("--sample-rows", type=int, default=5, help="Rows to preserve in markdown-adjacent samples")

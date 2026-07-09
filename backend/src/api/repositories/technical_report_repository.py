@@ -164,3 +164,9 @@ async def delete_root(session: AsyncSession, report_id: UUID) -> int:
         delete(TechnicalReport).where(TechnicalReport.id == report_id)
     )
     return result.rowcount or 0
+
+
+async def delete_all_roots(session: AsyncSession) -> int:
+    """technical_reports **전체** 삭제(자식 CASCADE). 삭제된 행수 반환(전체 삭제용)."""
+    result = await session.execute(delete(TechnicalReport))
+    return result.rowcount or 0

@@ -208,6 +208,62 @@ def test_details_missing_indicator_falls_back():
     assert by_ind["volume"].detail_source == GenerationSource.TEMPLATE_FALLBACK
 
 
+# ── 지표별 설명 확장(additive): reason/caution/watchpoint ───────────────────────
+def test_details_from_llm_captures_additive_fields():
+    out = {"interpretation_text": "x", "details": [
+        {"indicator": "moving_average", "detail": "이동평균선 긍정.",
+         "detail_reason": "5MA가 20·60MA 위라 정배열입니다.",
+         "detail_caution": "이동평균은 후행 지표입니다.",
+         "detail_watchpoint": "배열 유지·크로스를 확인하세요."},
+        {"indicator": "rsi", "detail": "RSI 중립."},
+        {"indicator": "volume", "detail": "거래량 중립."},
+    ]}
+    by_ind = {d.indicator: d for d in
+              node.details_from_llm(out, signals=_signals(), source=GenerationSource.LLM)}
+    ma = by_ind["moving_average"]
+    assert ma.detail_source == GenerationSource.LLM
+    assert ma.detail_reason == "5MA가 20·60MA 위라 정배열입니다."
+    assert ma.detail_caution == "이동평균은 후행 지표입니다."
+    assert ma.detail_watchpoint == "배열 유지·크로스를 확인하세요."
+
+
+def test_details_from_llm_backfills_missing_additive():
+    # LLM이 detail만 주고 additive 필드를 생략해도, 결정론 백필로 3필드가 비지 않는다(카드 공백 방지).
+    out = node.parse_llm_output(VALID_OUTPUT)  # additive 필드 없음
+    by_ind = {d.indicator: d for d in
+              node.details_from_llm(out, signals=_signals(), source=GenerationSource.LLM)}
+    rsi = by_ind["rsi"]
+    assert rsi.detail_source == GenerationSource.LLM  # 본문 detail 은 LLM
+    assert rsi.detail == "RSI는 중립 구간입니다."
+    assert rsi.detail_reason and rsi.detail_caution and rsi.detail_watchpoint  # 백필됨(비지 않음)
+    assert "RSI" in rsi.detail_caution  # 지표별 결정론 hint
+
+
+def test_fallback_detail_fills_all_four_fields():
+    fb = node.fallback_detail(MA, Signal.POSITIVE, ["5MA 82900.0"])
+    assert fb.detail and fb.detail_reason and fb.detail_caution and fb.detail_watchpoint
+    assert fb.detail_source == GenerationSource.TEMPLATE_FALLBACK
+    assert "긍정" in fb.detail_reason  # 확정 signal 근거 설명
+    assert "이동평균" in fb.detail_caution  # 지표별 결정론 hint(MA)
+
+
+def test_parse_accepts_additive_detail_keys():
+    out = node.parse_llm_output(json.dumps({"interpretation_text": "x", "details": [
+        {"indicator": "rsi", "detail": "중립", "detail_reason": "r",
+         "detail_caution": "c", "detail_watchpoint": "w"}]}, ensure_ascii=False))
+    assert out["details"][0]["detail_reason"] == "r"
+
+
+def test_additive_fields_do_not_break_verify():
+    # additive 필드가 있어도 검증(③)은 detail 만 보므로 결과 불변(회귀 방지).
+    out = node.parse_llm_output(VALID_OUTPUT)
+    for e in out["details"]:
+        e["detail_reason"] = "설명"
+        e["detail_watchpoint"] = "관찰"
+    ev = node.verify(out, regime=_regime(), signal=_signal(), signals=_signals(), risks=())
+    assert not ev.details_structure_failed
+
+
 def test_interpretation_from_llm_source():
     out = node.parse_llm_output(VALID_OUTPUT)
     result = node.interpretation_from_llm(
@@ -231,9 +287,75 @@ def test_fallback_interpretation_uses_confirmed_only():
     assert "과열" in result.text
     assert "약한 긍정" in result.text
     assert "보통" in result.text
-    assert "단기 과열 관찰" in result.text
+    # 강화된 risk 해설: 단순 라벨 나열이 아니라 의미+제약+관찰이 담긴다.
+    assert "단기 과열 부담" in result.text          # 라벨("단기 과열 관찰") 대신 의미 서술
+    assert "확신이 제한" in result.text             # 해석 제약 문장
     assert result.text.endswith("참고 정보입니다.")
     assert contains_forbidden_terms(result.text) == []
+
+
+def test_fallback_interpretation_is_five_part_structured():
+    # 신호 흐름 요약 폴백이 한 줄이 아니라 5구조 라벨 + 줄바꿈으로 나온다(빈약 착지 방지).
+    risks = [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="x"),
+             RiskItem(flag=RiskFlag.MIXED_SIGNALS, note="y")]
+    txt = node.fallback_interpretation(regime=_regime(), signal=_signal(),
+                                       risks=risks, signals=_signals()).text
+    assert "전체 판단:" in txt
+    assert "주의할 점:" in txt
+    assert "다음 관찰 기준:" in txt
+    assert "\n" in txt and txt.count("\n") >= 3      # 여러 줄(pre-wrap 렌더)
+    assert contains_forbidden_terms(txt) == []       # 투자조언 없음
+
+
+# ── risk_interpretation 고도화(맥락 있는 해설·나열 금지) ────────────────────────
+def _risks_combo():
+    return [RiskItem(flag=RiskFlag.VOLUME_NOT_CONFIRMED, note="거래량 약함."),
+            RiskItem(flag=RiskFlag.NEAR_SUPPORT, note="지지 근접."),
+            RiskItem(flag=RiskFlag.MIXED_SIGNALS, note="신호 엇갈림.")]
+
+
+def test_risk_text_is_explanatory_not_a_flag_list():
+    txt = node._risk_text(_risks_combo())
+    # 나쁜(구) 형태: "위험 요인으로 A·B·C이(가) 확인됩니다." — 이 패턴이 아니어야 한다.
+    assert not txt.startswith("위험 요인으로 ")
+    # 최소 2문장 + 해석 제약 + 관찰 포인트가 담긴다(맥락 있는 해설).
+    assert txt.count(".") >= 2
+    assert "확신이 제한" in txt
+    assert "추가로 확인" in txt
+    # 의미 서술(라벨 나열 아님)
+    assert "거래량 확인이 약해" in txt and "지지 구간에 근접" in txt
+
+
+def test_risk_text_no_advice_or_exaggeration():
+    for combo in ([RiskItem(flag=RiskFlag.NEAR_RESISTANCE, note="x")],
+                  [RiskItem(flag=RiskFlag.OVERHEATED_MOMENTUM, note="x")],
+                  _risks_combo()):
+        txt = node._risk_text(combo)
+        assert contains_forbidden_terms(txt) == []            # 매수/매도/목표가 등 없음
+        for bad in ("폭락", "반드시", "곧 하락", "손절", "목표가"):
+            assert bad not in txt
+
+
+def test_payload_includes_risk_hints():
+    risks = _risks_combo()
+    payload = node.build_payload(regime=_regime(), signal=_signal(), signals=_signals(), risks=risks)
+    hints = payload["risk_hints"]
+    assert [h["flag"] for h in hints] == ["volume_not_confirmed", "near_support", "mixed_signals"]
+    h0 = hints[0]
+    assert h0["label"] and h0["meaning"] and h0["watch"]       # 라벨·의미·관찰 힌트 존재
+    assert payload["risk_items"][0]["flag"] == "volume_not_confirmed"  # 기존 risk_items 유지(회귀 0)
+
+
+def test_risk_interpretation_from_llm_is_used_verbatim():
+    # LLM 이 rich 한 risk_interpretation 을 주면 그대로 쓰고 fallback 나열로 덮지 않는다.
+    out = node.parse_llm_output(json.dumps({
+        "interpretation_text": "x",
+        "risk_interpretation": "지지 근접 자체는 반등 여지를 주지만 거래량 확인이 약해 추세 전환으로 보긴 어렵습니다.",
+    }, ensure_ascii=False))
+    res = node.interpretation_from_llm(out, source=GenerationSource.LLM,
+                                       regime=_regime(), signal=_signal(), signals=_signals(),
+                                       risks=_risks_combo())
+    assert res.risk_interpretation.startswith("지지 근접 자체는")
 
 
 def test_fallback_detail_matches_signal_and_no_forbidden():

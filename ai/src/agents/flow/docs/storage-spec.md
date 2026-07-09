@@ -21,6 +21,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
   "version": 1,
   "report_id": "uuid4 문자열",
   "trace_id":  "uuid4 문자열 (기본 = report_id · 상관관계 ID)",
+  "data_status": "ok | data_limited",
   "meta":   { "stock_name": "삼성전자", "ticker": "005930",
               "market": "KOSPI200", "base_date": "2026-07-06" },
   "signals": { "consecutive": …, "strength": …, "alignment": "동반매수",
@@ -33,7 +34,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
   "interpretation": "LLM 해석 (게이트3 통과분만, 아니면 null)",
   "interpretation_meta": { "source": "llm | fallback",
                            "provider": "openai | null",
-                           "model": "gpt-4o-mini | null" }
+                           "model": "gpt-5.4-mini | null" }
 }
 ```
 
@@ -41,8 +42,13 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
   `verification.outcome`·`regen_count`, `interpretation_meta`. 모두 flow 가 이미
   아는 값을 옮겨 담은 것(새 계산 아님). `outcome`/`interpretation_meta.source` 는
   게이트3 통과 여부의 재표현이고, `provider`/`model` 은 해석이 실린 경우에만
-  채워진다(interpretation null ↔ provider/model null, 출처 정합). `data_status`
-  는 아직 미포함 — enum 이 백엔드 소관이라 확인 B 합의 후 추가.
+  채워진다(interpretation null ↔ provider/model null, 출처 정합).
+- 2026-07-09 추가: `data_status`(top-level, always-fill). 값 어휘는 **백엔드
+  공통 lexicon**(technical·news 가 이미 저장하는 `data_limited`)을 그대로
+  재사용 — flow 전용 신조어를 만들지 않는다. 파생 규칙: 일별시세(`price_daily`)
+  결측 → `data_limited`(시세표·한도소진율 동반 상실), 그 외 `ok`. 검증(게이트)
+  축과 분리(게이트2 실패는 `verification` 이 표현, data_status 로 중복 안 함).
+  구현: `export/to_json.derive_data_status`(옮겨 담기지 새 계산 아님).
 
 - `signals`의 키는 한글이다(개인·외국인·기관·증권…). 화면·검증 문장과 같은
   어휘로 대조되게 하려는 의도 — 바꾸지 말 것. 화면의 모든 숫자는 이 signals에서
@@ -63,7 +69,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 | `base_date` | Date | payload.meta.base_date |
 | `alignment` | String | payload.signals.alignment (승격 복사) |
 | `signals` | JSONB | payload.signals (통짜) |
-| `data_status` | String | **flow 미산출 — 확인 B (미결)** |
+| `data_status` | String | payload.`data_status` ("ok"/"data_limited") ✅ 실림 (확인 B 확정) |
 | `trace_id` | String | payload.`trace_id` (기본=report_id) ✅ 실림 |
 | `created_at` | TIMESTAMPTZ | DB now() (flow 미산출) |
 - 인덱스: (ticker, base_date DESC), (trace_id)
@@ -74,7 +80,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 | `interpretation` | payload.interpretation (null이면 게이트3 통과 해석 없음) |
 | `interpretation_source` | payload.`interpretation_meta.source` ("llm"/"fallback") ✅ |
 | `provider` | payload.`interpretation_meta.provider` ("openai", 해석 실릴 때만) ✅ |
-| `model` | payload.`interpretation_meta.model` ("gpt-4o-mini", 해석 실릴 때만) ✅ |
+| `model` | payload.`interpretation_meta.model` ("gpt-5.4-mini", 해석 실릴 때만) ✅ |
 
 **`flow_report_verifications`** (1:1, FK→flow_reports.id CASCADE)
 | 컬럼 | 매핑 원천 |
@@ -100,7 +106,7 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
 
 ## 4. 백엔드 확인 사항
 
-**flow 측 반영 완료 (2026-07-08, C·D·E) — payload 에 실려 나감:**
+**flow 측 반영 완료 (C·D·E·B) — payload 에 실려 나감:**
 - **C. `trace_id`** = payload.trace_id(기본 report_id). 슈퍼바이저가 상위 추적 ID를
   주면 `build_payload(trace_id=…)` 로 대체 가능(형식만 알려주면 됨).
 - **D. `interpretation_source`** = payload.interpretation_meta.source =
@@ -108,15 +114,18 @@ ERD 초안"은 폐기 — 백엔드는 3테이블 분리 구조로 확정했다.
   interpretation null ↔ source "fallback" ↔ provider/model null.
 - **E. `outcome`·`regen_count`** = payload.verification.outcome("explained"/
   "fact_only") · regen_count(explain_retries). 백엔드는 파생 말고 이 값을 그대로 저장.
+- **B. `data_status`** (2026-07-09 확정) = payload.data_status("ok"/"data_limited").
+  백엔드 신규 enum 을 만들지 않고 **공통 lexicon 재사용**(technical·news 가 이미
+  저장하는 `data_limited`). 파생은 데이터 가용성 축만 본다: 일별시세 결측 →
+  `data_limited`, 그 외 `ok`. **게이트2 실패는 data_status 가 아니다** — 검증 축은
+  `verification.gate2_passed`·`outcome` 이 이미 표현(초기 초안의 "게이트2 실패→
+  degraded" 는 축 혼동이라 폐기). 백엔드는 파생 말고 이 값을 그대로 저장.
 
 **남은 것 (백엔드 답 필요):**
 - **A. `flow_reports.id` 에 우리 report_id(uuid4)를 넣어도 되나?** 컬럼 default가
   `gen_random_uuid()`라 DB가 새로 만들 수 있는데, 그러면 §3-5가 깨진다. 우리 UUID를
   그대로 PK로 받아 달라(technical 선례처럼 백엔드가 자체 PK를 만들면 우리 report_id는
   최소한 trace_id 로 보존됨 — 이미 payload 에 있음).
-- **B. `data_status` 값 규칙 (미결)**: flow는 게이트 결과로 파생 가능(예: 게이트2
-  실패→degraded, 정상→ok). **원하는 enum을 정해 주면** payload 에 실어 준다 —
-  enum 어휘가 백엔드 소관이라 지금 커밋에서 뺐다(추측 값으로 굳히면 재작업).
 
 ## 5. 지금 안 만드는 것 (요구가 실물로 오면)
 

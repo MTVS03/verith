@@ -2,9 +2,18 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from db.graph import close_driver, ensure_constraints
-from src.api.routes import news, reports, research, stocks, technical_reports
+from src.api.config import settings
+from src.api.routes import (
+    industry_reports,
+    news,
+    reports,
+    research,
+    stocks,
+    technical_reports,
+)
 from src.api.routes import fundamental_reports
 
 
@@ -19,8 +28,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="verith-backend", lifespan=lifespan)
 
+# 프론트(다른 origin)의 브라우저 직접 호출 허용. 허용 origin 은 settings(CORS_ORIGINS, env override).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],   # GET/POST/DELETE/OPTIONS 등
+    allow_headers=["*"],
+)
+
 app.include_router(technical_reports.router)
 app.include_router(fundamental_reports.router)
+app.include_router(industry_reports.router)
 app.include_router(reports.router)
 app.include_router(research.router)
 app.include_router(news.router)

@@ -18,7 +18,7 @@ import logging
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # INTRADAY_FETCH_ENABLED는 이 모듈 코드가 직접 쓰진 않지만 technical_graph가 `steps.`로 조회하고
 # 테스트가 이 모듈에 monkeypatch하므로 유지한다(fetch_minute_ohlcv도 동일).
@@ -210,6 +210,9 @@ def _to_technical_signals(
             detail=detail.detail,
             detail_source=detail.detail_source,
             weight=s.weight,
+            detail_reason=detail.detail_reason,
+            detail_caution=detail.detail_caution,
+            detail_watchpoint=detail.detail_watchpoint,
         ))
     return result
 
@@ -231,6 +234,9 @@ class _ResolvedIntraday:
     cumulative_trading_value: int | None
 
 
+_KST = timezone(timedelta(hours=9))  # KIS 당일 판정은 장 시각(KST) 기준
+
+
 def _intraday_matches_as_of(
     candles: Sequence[IntradayCandle], as_of: date | datetime | None,
 ) -> bool:
@@ -239,10 +245,18 @@ def _intraday_matches_as_of(
     KIS 주식당일분봉조회는 **당일 데이터만** 제공하므로, 과거 `as_of` 리포트에 오늘 분봉이 결합되는 것을
     막는다. `as_of` 가 None이면 True(기존 동작 유지), 빈 candles도 True(상위에서 intraday off 처리).
     일부 candle만 날짜가 달라도 False(fail-safe로 intraday off).
+
+    candle.timestamp 는 KST 장 시각(예: 2026-07-09T09:00:00)이므로, tz-aware `as_of`(백엔드는 UTC)를
+    **KST로 변환한 날짜**와 비교한다 — UTC 날짜로 비교하면 장중(예: 12:15 KST=03:15 UTC)엔 같은 날이라
+    통과하지만 00:00~09:00 KST 구간(전날 UTC) 등에서 날짜가 어긋나 정상 분봉을 폐기할 수 있다.
     """
     if as_of is None or not candles:
         return True
-    expected = (as_of.date() if isinstance(as_of, datetime) else as_of).isoformat()
+    if isinstance(as_of, datetime):
+        as_of_date = (as_of.astimezone(_KST) if as_of.tzinfo is not None else as_of).date()
+    else:
+        as_of_date = as_of
+    expected = as_of_date.isoformat()
     return all(c.timestamp[:10] == expected for c in candles)
 
 

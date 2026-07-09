@@ -77,6 +77,11 @@ def _key(name: str) -> str:
     return _clean(name).lower().replace(" ", "")
 
 
+def normalize_lookup_key(name: str) -> str:
+    """Public lookup-key normalizer (clean, lowercase, spaces removed)."""
+    return _key(name)
+
+
 # Out-of-scope-but-recurring entities: variant -> canonical. Keys are written
 # human-readable and normalized to lookup keys at import. Most duplicates are
 # now caught by the machine-generated map (resolve.py); promote a mapping here
@@ -292,3 +297,4 @@ def normalize_name(raw: str, kind: str = "Company") -> str:
     if kind == "Policy":
         return _llm_resolve(_normalize_policy(cleaned, key), kind)
     return cleaned
+
