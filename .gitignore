@@ -337,3 +337,7 @@ ai/src/agents/technical/scripts/kis_sample_output/
 # fallback 관측/집계 산출물(운영 데이터) — sample 만 커밋
 /ai/src/supervisor/planning/data/
 **/ai/src/supervisor/planning/data/
+
+# 프론트엔드 소스 src/lib 은 위쪽 Python 빌드 산출물용 `lib/` 규칙에 걸리면 안 된다(실제 소스임).
+!frontend/src/lib/
+!frontend/src/lib/**
