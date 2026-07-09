@@ -62,6 +62,7 @@
 | `verification` | outcome?·calc_passed?·regime_passed?·label_matched?·regen_count?·failed_indicators[]·summary? | 검증 상세 |
 | `trace_summary` | §5 | 생성/검증/품질 요약 |
 | `trust_summary` | §5.1 | 상단 카드 집계(신뢰도/데이터품질/검증게이트/출처연결) |
+| `indicator_cards[]` | §5.4 | 지표 카드(RSI/이동평균/거래량/지지저항/패턴) UI용 projection |
 | `followup_count` | int | 후속 대화 수(스레드는 §7 별도 호출) |
 
 > `risks`(현재 확인된 위험) ↔ `interpretation.invalidation_or_caution`(해석이 틀어지는 조건)은 **분리**된 개념이다.
@@ -126,6 +127,25 @@
   `data_status`(normal/stale_cache/data_limited/regime_unavailable) · `limited`(= data_status ∈ {data_limited,
   regime_unavailable}, `flags.limited_data` 와 동일) · `available_periods[]`(저장된 차트 period 목록) ·
   `chart_count`(차트 개수) · `intraday_available`(intraday_context 존재 또는 "1d" 차트 유무). **재계산 아님.**
+
+### 5.4 indicator_cards (지표 카드 — detail 응답 내)
+프론트가 5개 지표 카드(이동평균/RSI/거래량/지지·저항/패턴)를 바로 렌더. **projection only**(계산 재실행 없음,
+저장된 technical_signals + charts annotations 재구성). 각 카드(`IndicatorCard`):
+| 필드 | 의미 |
+|---|---|
+| `indicator`·`title` | 코드·한글 제목 |
+| `signal`·`signal_label` | positive/neutral/negative · 긍정/중립/부정 |
+| `weight` | 신호 가중치(그동안 미노출이던 저장값) |
+| `llm_detail`·`detail_source` | 지표 설명 문장·출처(llm/template_fallback) |
+| `verified` | **리포트 전체 verification 통과 여부**(지표별 세부 검증 아님 — 후속) |
+| `code_metrics[]` | raw 계산 칩(예: "5MA 449300.0") |
+| `calc_basis` | 지표별 구조화 근거(**metrics 방어적 파싱**, 실패 시 null): MA `ma{5,20,60}`·`alignment`(정/역배열) / RSI `rsi_period`·`oversold`·`overbought` / volume `relative_volume` / S·R `support`·`resistance`·`position` / 공통 `related_annotations[]`(관련 이벤트 **최근 3개**) |
+| `pattern_candidates[]` | **패턴 카드만** — chart annotations 중 `cup_handle_candidate`·`box_breakout_candidate`·`box_range_candidate` 요약(최근 6개) |
+
+> **컵앤핸들(중요):** `technical_signals.pattern` 은 최신 캔들 성격 요약이고, **컵앤핸들은 annotation-only** 다
+> (`cup_handle_candidate`). 그래서 signals 만 보면 안 보인다 — **패턴 카드의 `pattern_candidates`** 에서 읽는다
+> (`kind`·`label`·`period`·`date`·`importance`·`meta`(cup_depth_pct·candidate_stage·volume_confirmed…)). 이는
+> **읽기 전용 노출**이며 `signal_score`·`final_regime`·`consensus` 에 **반영하지 않는다**(기존 정책 유지). 없으면 `[]`.
 
 ### 5.2 차트 full — `GET /api/technical/reports/{id}/charts`
 **기본 정책(잠금): all-period eager load.** 이 endpoint 는 `available_periods` 전부(3m/1y/5y…)의 full payload 를
