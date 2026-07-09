@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-import services.graph_builder as graph_builder
-from nodes.graph_builder import graph_node
-from schemas.article import Article, ExtractResult
-from schemas.event import Event
-from schemas.graph import GraphBatch, NodeLabel, RelType
+import src.agents.news.services.graph_builder as graph_builder
+from src.agents.news.nodes.graph_builder import graph_node
+from src.agents.news.schemas.article import Article, ExtractResult
+from src.agents.news.schemas.event import Event
+from src.agents.news.schemas.graph import GraphBatch, NodeLabel, RelType
 
 _URL_SEQ = iter(range(1_000_000))
 

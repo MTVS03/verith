@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Row, delete, distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -64,15 +64,50 @@ async def get_existing_urls(session: AsyncSession, urls: list[str]) -> set[str]:
 async def get_articles_by_event(
     session: AsyncSession, event_id: uuid.UUID, limit: int
 ) -> Sequence[Row]:
-    """이벤트(event_id)에 속한 기사를 최신순으로 최대 limit 건 (id, summary, url)."""
+    """이벤트(event_id)에 속한 기사를 최신순으로 최대 limit 건 (id, title, summary, url, publisher, published_at)."""
     stmt = (
-        select(News.id, News.summary, News.url)
+        select(
+            News.id,
+            News.title,
+            News.summary,
+            News.url,
+            News.publisher,
+            News.published_at,
+        )
         .where(News.event_id == event_id)
         .order_by(News.published_at.desc().nullslast())
         .limit(limit)
     )
     result = await session.execute(stmt)
     return result.all()
+
+
+async def get_events_near_embedding(
+    session: AsyncSession,
+    embedding: list[float],
+    within_days: int,
+    top_k: int,
+) -> list[uuid.UUID]:
+    """query 임베딩에 가까운 최근(within_days) 기사들의 distinct event_id 를 코사인 거리순 top_k.
+
+    회사 정보 없이도 '내용이 비슷한 최근 이벤트'를 병합 후보로 찾기 위한 pgvector 최근접 검색(A2).
+    이벤트 단위로 최소 거리(가장 가까운 소속 기사)를 잡아 거리순 정렬한다. 640건 규모라 seq scan 으로 충분.
+    """
+    if not embedding:
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
+    dist = func.min(News.embedding.cosine_distance(embedding)).label("dist")
+    stmt = (
+        select(News.event_id, dist)
+        .where(News.event_id.isnot(None))
+        .where(News.embedding.isnot(None))
+        .where(News.published_at >= cutoff)
+        .group_by(News.event_id)
+        .order_by(dist)
+        .limit(top_k)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [r.event_id for r in rows if r.event_id is not None]
 
 
 async def get_event_article_stats(
@@ -126,6 +161,27 @@ async def get_event_aggregates(
     )
     rows = (await session.execute(stmt)).all()
     return {r.event_id: r for r in rows}
+
+
+async def get_daily_article_counts(
+    session: AsyncSession, event_ids: list[uuid.UUID]
+) -> Sequence[Row]:
+    """이벤트들의 기사를 발행일(KST)별로 집계 → [(day, count)] 발행일 오름차순.
+
+    published_at 은 timestamptz 라 KST 로 변환한 뒤 날짜로 자른다(func.date) — 리포트 표기 기준(KST)과
+    일치시켜 날짜 경계가 어긋나지 않게 한다. published_at NULL 은 날짜를 알 수 없어 제외한다.
+    """
+    if not event_ids:
+        return []
+    day = func.date(func.timezone("Asia/Seoul", News.published_at)).label("day")
+    stmt = (
+        select(day, func.count().label("count"))
+        .where(News.event_id.in_(event_ids))
+        .where(News.published_at.isnot(None))
+        .group_by(day)
+        .order_by(day)
+    )
+    return (await session.execute(stmt)).all()
 
 
 async def delete_articles_before(

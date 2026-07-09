@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import json
 
-import services.answer_generator as ag
-import services.backend.query_client as query_client
-import services.llm as llm
-from schemas.event import Event
-from schemas.query import QueryIntent, QueryUnderstanding
-from schemas.report import ArticleRef, SentimentGauge
-from schemas.response import EventWithArticles, SubjectQueryResponse
+import src.agents.news.services.answer_generator as ag
+import src.agents.news.services.backend.query_client as query_client
+import src.agents.news.services.llm as llm
+from src.agents.news.schemas.event import Event
+from src.agents.news.schemas.query import QueryIntent, QueryUnderstanding
+from src.agents.news.schemas.report import ArticleRef, SentimentGauge
+from src.agents.news.schemas.response import EventWithArticles, SubjectQueryResponse
 
 
 def _event(cid, title, importance):

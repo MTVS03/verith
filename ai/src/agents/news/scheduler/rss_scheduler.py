@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from config import (
+from src.agents.news.config import (
     BATCH_INTERVAL_MINUTES,
     BATCH_MAX_INSTANCES,
     BATCH_MISFIRE_GRACE_SEC,
@@ -58,7 +58,7 @@ def _run_batch_pipeline() -> dict:
     함수만 mock 해 파이프라인 결과/예외를 주입할 수 있게 한다. TASK 11 은 `graph.run_batch(state) -> state`
     를 제공한다(컴파일된 배치 앱 실행). 미구현 시 ImportError 는 run_batch_once 가 격리해 ok=False 로 보고.
     """
-    from graph import run_batch  # TASK 11 소유(배치 앱 러너). 결합·미완성을 여기 가둔다.
+    from src.agents.news.graph import run_batch  # TASK 11 소유(배치 앱 러너). 결합·미완성을 여기 가둔다.
 
     return run_batch(_initial_batch_state())
 

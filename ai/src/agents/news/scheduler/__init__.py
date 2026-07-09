@@ -10,9 +10,9 @@ run_batch_once/run_cleanup_once 는 부수효과 순수 엔트리포인트라 in
 """
 from __future__ import annotations
 
-from scheduler.cleanup_scheduler import run_cleanup_once, start_cleanup_scheduler
-from scheduler.rss_scheduler import BatchRunResult, run_batch_once, start_rss_scheduler
-from scheduler.runner import main, start_all
+from src.agents.news.scheduler.cleanup_scheduler import run_cleanup_once, start_cleanup_scheduler
+from src.agents.news.scheduler.rss_scheduler import BatchRunResult, run_batch_once, start_rss_scheduler
+from src.agents.news.scheduler.runner import main, start_all
 
 __all__ = [
     "BatchRunResult",

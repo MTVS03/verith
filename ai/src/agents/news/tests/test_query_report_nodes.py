@@ -6,13 +6,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import nodes.query as query_node_mod
-import nodes.report as report_node_mod
-import services.answer_generator as answer_generator
-import services.graph_query as graph_query
-import services.query_understanding as query_understanding
-from schemas.query import Answer, QueryIntent, QueryUnderstanding
-from schemas.response import SubjectQueryResponse
+import src.agents.news.nodes.query as query_node_mod
+import src.agents.news.nodes.report as report_node_mod
+import src.agents.news.services.answer_generator as answer_generator
+import src.agents.news.services.graph_query as graph_query
+import src.agents.news.services.query_understanding as query_understanding
+from src.agents.news.schemas.query import Answer, QueryIntent, QueryUnderstanding
+from src.agents.news.schemas.response import SubjectQueryResponse
 
 
 def test_query_node_calls_services_in_order(monkeypatch):
@@ -84,7 +84,7 @@ def test_report_node_fills_report_json():
 
 def test_report_node_survives_render_failure(monkeypatch):
     # build_report_model 이 던져도 노드는 최소 JSON 으로 통과(흐름 안 죽임).
-    import services.report_renderer as rr
+    import src.agents.news.services.report_renderer as rr
     monkeypatch.setattr(rr, "build_report_model",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("render boom")))
     state = {

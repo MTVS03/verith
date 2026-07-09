@@ -97,6 +97,26 @@ async def get_events_by_companies(
     return [r.data() async for r in result]
 
 
+async def get_events_by_ids(
+    session: AsyncSession, event_ids: list[str]
+) -> list[dict]:
+    """event canonical_id(=key) 목록 → 각 이벤트의 참여 회사(+제목·importance).
+
+    벡터 최근접(회사 무관)으로 찾은 후보 이벤트의 companies 를 보강하는 용도(A2). 반환 형태는
+    get_events_by_companies 와 동일: [{canonical_id, canonical_title, importance, companies}].
+    """
+    if not event_ids:
+        return []
+    query = (
+        "MATCH (e:Event) WHERE e.key IN $event_ids "
+        "OPTIONAL MATCH (co:Company)-[:PARTICIPATES_IN]->(e) "
+        "RETURN e.key AS canonical_id, e.canonical_title AS canonical_title, "
+        "       e.importance AS importance, collect(DISTINCT co.key) AS companies"
+    )
+    result = await session.run(query, event_ids=event_ids)
+    return [r.data() async for r in result]
+
+
 async def get_shared_events(
     session: AsyncSession, company_a: str, company_b: str
 ) -> list[dict]:

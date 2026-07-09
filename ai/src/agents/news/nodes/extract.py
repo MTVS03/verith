@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-import services.llm as llm
+import src.agents.news.services.llm as llm
 
 logger = logging.getLogger(__name__)
 

@@ -24,7 +24,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from config import (
+from src.agents.news.config import (
     ARTICLE_CONTENT_MAX_CHARS,
     CRAWL_ALLOWED_CONTENT_TYPES,
     CRAWL_ALLOWED_SCHEMES,
@@ -37,10 +37,10 @@ from config import (
     RETRY_BACKOFF,
     USER_AGENT,
 )
-from utils.html_parser import extract_text
+from src.agents.news.utils.html_parser import extract_text
 
 if TYPE_CHECKING:  # 런타임 결합 최소화. crawl_status는 런타임엔 평범한 str.
-    from schemas.article import CrawlStatus
+    from src.agents.news.schemas.article import CrawlStatus
 
 logger = logging.getLogger(__name__)
 

@@ -28,7 +28,15 @@ class NewsQueryService:
         """이벤트별 근거 기사(ArticleRef) 최신순 limit 건. summary 없으면 빈 문자열."""
         rows = await news_repo.get_articles_by_event(self._session, event_id, limit)
         return [
-            ArticleRef(news_id=r.id, summary=r.summary or "", url=r.url) for r in rows
+            ArticleRef(
+                news_id=r.id,
+                summary=r.summary or "",
+                url=r.url,
+                title=r.title or "",
+                publisher=r.publisher,
+                published_at=r.published_at,
+            )
+            for r in rows
         ]
 
     async def get_event_stats(

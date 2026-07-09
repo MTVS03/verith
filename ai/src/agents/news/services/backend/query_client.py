@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import logging
 
-from config import (
+from src.agents.news.config import (
     BACKEND_EVENT_ARTICLES_PATH,
     BACKEND_QUERY_SHARED_PATH,
     BACKEND_QUERY_SUBJECT_PATH,
 )
-from schemas.report import ArticleRef
-from schemas.response import SubjectQueryResponse
-from services.backend.client import BackendClient
+from src.agents.news.schemas.report import ArticleRef
+from src.agents.news.schemas.response import SubjectQueryResponse
+from src.agents.news.services.backend.client import BackendClient
 
 logger = logging.getLogger(__name__)
 

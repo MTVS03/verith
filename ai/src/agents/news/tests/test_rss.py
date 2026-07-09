@@ -9,9 +9,9 @@ from datetime import datetime
 
 import pytest
 
-import services.rss as rss
-from utils.html_parser import extract_text
-from utils.rss_parser import parse_rss
+import src.agents.news.services.rss as rss
+from src.agents.news.utils.html_parser import extract_text
+from src.agents.news.utils.rss_parser import parse_rss
 
 # --- 픽스처 XML ------------------------------------------------------------
 RSS_2 = """<?xml version="1.0" encoding="UTF-8"?>

@@ -19,7 +19,7 @@ import math
 import re
 from typing import Callable, Protocol
 
-from config import (
+from src.agents.news.config import (
     IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT,
     IMPORTANCE_PUBLISHER_WEIGHTS,
     IMPORTANCE_VOLUME_MODE,
@@ -27,8 +27,8 @@ from config import (
     IMPORTANCE_W_SENTIMENT,
     IMPORTANCE_W_VOLUME,
 )
-from schemas.article import Article, Sentiment
-from schemas.event import EventArticleStats
+from src.agents.news.schemas.article import Article, Sentiment
+from src.agents.news.schemas.event import EventArticleStats
 
 logger = logging.getLogger(__name__)
 

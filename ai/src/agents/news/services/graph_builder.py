@@ -20,20 +20,20 @@ from __future__ import annotations
 
 import logging
 
-from config import (
+from src.agents.news.config import (
     GRAPH_ENABLE_BELONGS_TO,
     GRAPH_ENABLE_RELATED_TO,
 )
-from schemas.article import Article, ExtractResult
-from schemas.event import Event
-from schemas.graph import (
+from src.agents.news.schemas.article import Article, ExtractResult
+from src.agents.news.schemas.event import Event
+from src.agents.news.schemas.graph import (
     GraphBatch,
     GraphNode,
     GraphRelationship,
     NodeLabel,
     RelType,
 )
-from utils.entity import normalize_entity_name
+from src.agents.news.utils.entity import normalize_entity_name
 
 logger = logging.getLogger(__name__)
 

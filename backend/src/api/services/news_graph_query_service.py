@@ -18,14 +18,17 @@ from src.api.repositories import news_repository as news_repo
 from src.api.schemas.news import (
     ArticleRef,
     CandidateEvent,
+    DailyCount,
     Event,
     EventWithArticles,
     SentimentGauge,
     SubjectQueryResponse,
 )
 
-# 이벤트별 화면 노출 대표 기사 소수(전체 아님 — 깊은 근거는 /events/{id}/articles on-demand).
-_REP_ARTICLE_LIMIT = 3
+# 이벤트별로 붙여줄 기사 상한. 리포트가 관련 기사를 '전부' 노출하도록 넉넉히 잡는다(실제 이벤트당
+# 기사는 대개 수 건~수십 건). 초대형 이벤트 방어용 안전 상한이며, 이를 넘는 깊은 근거는 여전히
+# /events/{id}/articles on-demand 로 조회 가능. (LLM 답변 근거는 별도로 소수만 사용 — 토큰 보호.)
+_REP_ARTICLE_LIMIT = 100
 
 
 def _centroid(embeddings: list[list[float]]) -> list[float] | None:
@@ -64,12 +67,13 @@ class NewsGraphQueryService:
     ) -> SubjectQueryResponse:
         events_raw = await graph_repo.get_events_by_companies(self._graph, companies)
         subject_found = await graph_repo.companies_exist(self._graph, companies)
-        response = await self._assemble(events_raw, within_days)
+        events, overall, daily_counts = await self._assemble(events_raw, within_days)
         return SubjectQueryResponse(
             subject=", ".join(companies),
             subject_found=subject_found,
-            events=response[0],
-            overall_gauge=response[1],
+            events=events,
+            overall_gauge=overall,
+            daily_counts=daily_counts,
         )
 
     async def get_recent_candidate_events(
@@ -86,7 +90,51 @@ class NewsGraphQueryService:
             eid = _as_uuid(e.get("canonical_id"))
             if eid is not None:
                 by_uuid[eid] = e
+        return await self._build_candidates(by_uuid, within_days)
 
+    async def get_merge_candidates(
+        self,
+        companies: list[str],
+        within_days: int,
+        embedding: list[float] | None,
+        top_k: int,
+    ) -> list[CandidateEvent]:
+        """병합 후보(A2): 회사 참여 이벤트 ∪ 임베딩 최근접 이벤트. 회사 없는 기사도 내용으로 후보를 얻는다.
+
+        - 회사 경로: get_events_by_companies(기존).
+        - 벡터 경로: get_events_near_embedding(pgvector 최근접) 로 event_id 를 얻고, 회사 목록은
+          graph 에서 보강(get_events_by_ids). 두 경로 event 를 합집합해 centroid·event_time 을 계산.
+        """
+        by_uuid: dict[uuid.UUID, dict] = {}
+        events_raw = await graph_repo.get_events_by_companies(self._graph, companies)
+        for e in events_raw:
+            eid = _as_uuid(e.get("canonical_id"))
+            if eid is not None:
+                by_uuid[eid] = e
+
+        if embedding:
+            near_ids = await news_repo.get_events_near_embedding(
+                self._session, embedding, within_days, top_k
+            )
+            missing = [eid for eid in near_ids if eid is not None and eid not in by_uuid]
+            if missing:
+                vec_raw = await graph_repo.get_events_by_ids(
+                    self._graph, [str(x) for x in missing]
+                )
+                for e in vec_raw:
+                    eid = _as_uuid(e.get("canonical_id"))
+                    if eid is not None:
+                        by_uuid[eid] = e
+
+        return await self._build_candidates(by_uuid, within_days)
+
+    async def _build_candidates(
+        self, by_uuid: dict[uuid.UUID, dict], within_days: int
+    ) -> list[CandidateEvent]:
+        """event(uuid→raw) 집합에 대해 centroid(임베딩 평균)·event_time 을 계산해 CandidateEvent[] 로.
+
+        within_days 내 기사가 없거나 임베딩이 하나도 없는 이벤트는 유사도 후보가 될 수 없어 제외한다.
+        """
         inputs = await news_repo.get_event_centroid_inputs(self._session, list(by_uuid))
         cutoff = datetime.now(UTC) - timedelta(days=within_days)
 
@@ -121,20 +169,22 @@ class NewsGraphQueryService:
     ) -> SubjectQueryResponse:
         events_raw = await graph_repo.get_shared_events(self._graph, company_a, company_b)
         subject_found = await graph_repo.companies_exist(self._graph, [company_a, company_b])
-        events, overall = await self._assemble(events_raw, within_days)
+        events, overall, daily_counts = await self._assemble(events_raw, within_days)
         return SubjectQueryResponse(
             subject=f"{company_a} & {company_b}",
             subject_found=subject_found,
             events=events,
             overall_gauge=overall,
+            daily_counts=daily_counts,
         )
 
     async def _assemble(
         self, events_raw: list[dict], within_days: int
-    ) -> tuple[list[EventWithArticles], SentimentGauge]:
-        """그래프 이벤트 + PG 집계를 합쳐 (EventWithArticles[], overall_gauge) 로.
+    ) -> tuple[list[EventWithArticles], SentimentGauge, list[DailyCount]]:
+        """그래프 이벤트 + PG 집계를 합쳐 (EventWithArticles[], overall_gauge, daily_counts) 로.
 
-        within_days 내 최신 기사가 있는 이벤트만 포함, importance 내림차순 정렬.
+        within_days 내 최신 기사가 있는 이벤트만 포함, importance 내림차순 정렬. daily_counts 는
+        그 '포함된 이벤트'들의 기사만 발행일(KST)별로 세므로 게이지·기사수와 같은 모집단을 본다.
         """
         # canonical_id → uuid 파싱(불량 id 는 제외).
         by_uuid: dict[uuid.UUID, dict] = {}
@@ -147,11 +197,13 @@ class NewsGraphQueryService:
         cutoff = datetime.now(UTC) - timedelta(days=within_days)
 
         items: list[EventWithArticles] = []
+        included_ids: list[uuid.UUID] = []
         pos = neu = neg = 0
         for eid, raw in by_uuid.items():
             agg = aggregates.get(eid)
             if agg is None or agg.recency is None or agg.recency < cutoff:
                 continue  # within_days 내 기사 없음 → 제외
+            included_ids.append(eid)
             gauge = SentimentGauge(
                 positive=agg.positive, neutral=agg.neutral, negative=agg.negative
             )
@@ -171,7 +223,14 @@ class NewsGraphQueryService:
                     ),
                     article_count=agg.article_count,
                     articles=[
-                        ArticleRef(news_id=r.id, summary=r.summary or "", url=r.url)
+                        ArticleRef(
+                            news_id=r.id,
+                            summary=r.summary or "",
+                            url=r.url,
+                            title=r.title or "",
+                            publisher=r.publisher,
+                            published_at=r.published_at,
+                        )
                         for r in rows
                     ],
                     gauge=gauge,
@@ -181,4 +240,8 @@ class NewsGraphQueryService:
         # importance 내림차순(없으면 뒤로).
         items.sort(key=lambda x: (x.event.importance is not None, x.event.importance or 0.0), reverse=True)
         overall = SentimentGauge(positive=pos, neutral=neu, negative=neg)
-        return items, overall
+
+        # 포함된 이벤트들의 기사만 발행일(KST)별로 집계(오름차순). 게이지와 같은 모집단.
+        count_rows = await news_repo.get_daily_article_counts(self._session, included_ids)
+        daily_counts = [DailyCount(date=r.day, count=r.count) for r in count_rows]
+        return items, overall, daily_counts

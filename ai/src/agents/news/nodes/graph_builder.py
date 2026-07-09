@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import logging
 
-import services.graph_builder as graph_builder
-from schemas.graph import GraphBatch
+import src.agents.news.services.graph_builder as graph_builder
+from src.agents.news.schemas.graph import GraphBatch
 
 logger = logging.getLogger(__name__)
 

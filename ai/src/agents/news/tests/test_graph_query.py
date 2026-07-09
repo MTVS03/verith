@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import services.backend.query_client as query_client
-import services.graph_query as graph_query
-from schemas.query import QueryIntent, QueryUnderstanding
-from schemas.response import SubjectQueryResponse
-from services.backend.client import BackendError
+import src.agents.news.services.backend.query_client as query_client
+import src.agents.news.services.graph_query as graph_query
+from src.agents.news.schemas.query import QueryIntent, QueryUnderstanding
+from src.agents.news.schemas.response import SubjectQueryResponse
+from src.agents.news.services.backend.client import BackendError
 
 
 def _resp(subject="삼성전자"):

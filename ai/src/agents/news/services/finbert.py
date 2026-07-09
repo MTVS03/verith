@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import logging
 
-from config import (
+from src.agents.news.config import (
     FINBERT_BATCH_SIZE,
     FINBERT_DEVICE,
     FINBERT_LABEL_MAP,
     FINBERT_MAX_INPUT_CHARS,
     FINBERT_MODEL,
 )
-from schemas.article import Sentiment, SentimentResult
+from src.agents.news.schemas.article import Sentiment, SentimentResult
 
 logger = logging.getLogger(__name__)
 

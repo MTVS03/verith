@@ -14,11 +14,11 @@ from uuid import UUID
 
 import pytest
 
-import services.event_merge as event_merge
-import nodes.merge_event as merge_node_mod
-from nodes.merge_event import merge_event_node
-from schemas.article import Article, EventCandidate, ExtractResult
-from schemas.event import CandidateEvent
+import src.agents.news.services.event_merge as event_merge
+import src.agents.news.nodes.merge_event as merge_node_mod
+from src.agents.news.nodes.merge_event import merge_event_node
+from src.agents.news.schemas.article import Article, EventCandidate, ExtractResult
+from src.agents.news.schemas.event import CandidateEvent
 
 _T = datetime(2026, 7, 6, tzinfo=timezone.utc)
 
@@ -30,8 +30,8 @@ class FakeProvider:
         self.events = events
         self.calls: list[tuple] = []
 
-    def get_recent_events(self, companies, within_days):
-        self.calls.append((companies, within_days))
+    def get_recent_events(self, companies, within_days, embedding=None):
+        self.calls.append((companies, within_days, embedding))
         return list(self.events)
 
 
@@ -88,8 +88,8 @@ def test_decide_merge_incorporates_when_above_threshold():
     assert decision.is_new_event is False
     assert decision.assigned_event_id == "evt-1"
     assert decision.best_score == pytest.approx(1.0)
-    # 후보 조회는 회사·창(7일)으로 축소 요청된다.
-    assert provider.calls == [(["삼성전자"], event_merge.MERGE_CANDIDATE_WINDOW_DAYS)]
+    # 후보 조회는 회사·창(7일)·기사 임베딩(A2 벡터 후보용)으로 요청된다.
+    assert provider.calls == [(["삼성전자"], event_merge.MERGE_CANDIDATE_WINDOW_DAYS, [1.0, 0.0])]
 
 
 def test_decide_merge_new_when_company_differs():

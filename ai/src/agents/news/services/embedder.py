@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from config import (
+from src.agents.news.config import (
     EMBED_BATCH_SIZE,
     EMBED_DEVICE,
     EMBED_MAX_INPUT_CHARS,

@@ -4,7 +4,7 @@
 `from schemas import Article, ExtractResult, Event, ReportModel, SubjectQueryResponse ...` 형태로 사용.
 schemas/graph.py(Neo4j 노드/관계 상세)는 TASK 07에서 정의·추가한다(여기선 미노출).
 """
-from schemas.article import (
+from src.agents.news.schemas.article import (
     Article,
     CrawlStatus,
     EventCandidate,
@@ -13,20 +13,20 @@ from schemas.article import (
     SentimentResult,
     SourceType,
 )
-from schemas.event import (
+from src.agents.news.schemas.event import (
     CandidateEvent,
     Event,
     EventArticleStats,
     MergeCandidate,
     MergeDecision,
 )
-from schemas.report import (
+from src.agents.news.schemas.report import (
     ArticleRef,
     ReportEvent,
     ReportModel,
     SentimentGauge,
 )
-from schemas.response import (
+from src.agents.news.schemas.response import (
     CleanupResponse,
     EventWithArticles,
     SaveResponse,

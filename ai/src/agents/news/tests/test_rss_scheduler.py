@@ -15,9 +15,9 @@ from __future__ import annotations
 import pathlib
 from unittest.mock import MagicMock
 
-import scheduler.rss_scheduler as rss
-from scheduler.rss_scheduler import BatchRunResult, run_batch_once, start_rss_scheduler
-from schemas.response import SaveResponse
+import src.agents.news.scheduler.rss_scheduler as rss
+from src.agents.news.scheduler.rss_scheduler import BatchRunResult, run_batch_once, start_rss_scheduler
+from src.agents.news.schemas.response import SaveResponse
 
 
 # ---------------------------------------------------------------------------
