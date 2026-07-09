@@ -186,6 +186,21 @@ def gauge_bar(g: dict) -> str:
     )
 
 
+def render_daily_counts(daily: list[dict]) -> None:
+    """날짜별 뉴스량(backend 집계값)을 막대그래프로. 리포트가 감성/순위 말고 '시간 흐름'도 보이게 한다."""
+    if not daily:
+        return
+    st.markdown("**🗓️ 날짜별 뉴스량**")
+    try:
+        import pandas as pd
+        df = pd.DataFrame(daily).rename(columns={"count": "뉴스 건수"}).set_index("date")
+        st.bar_chart(df["뉴스 건수"], height=220)
+    except Exception:  # pandas 미설치 등 → 표로 degrade(데모라 실패해도 멈추지 않게)
+        st.table(daily)
+    total = sum(int(d.get("count", 0)) for d in daily)
+    st.caption(f"총 {total}건 · {len(daily)}일에 분포")
+
+
 def dominant_label(g: dict) -> str:
     """기사 표본이 적어(1건) 비율 바가 무의미할 때 쓸 대표 감성 문구. 감성 없는 기사면 '감성 미분석'."""
     pairs = [("긍정", g.get("positive", 0)), ("중립", g.get("neutral", 0)), ("부정", g.get("negative", 0))]
@@ -223,6 +238,8 @@ def render_report(rj: dict) -> None:
     if rj.get("answer_text"):
         st.markdown("**🧭 뉴스 흐름 요약**")
         st.info(rj["answer_text"])
+
+    render_daily_counts(rj.get("daily_counts") or [])
 
     events = rj.get("top_events") or []
     if events:

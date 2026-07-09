@@ -63,6 +63,8 @@ def build_report_model(understanding: QueryUnderstanding,
         period_days=understanding.period_days,
         overall_gauge=response.overall_gauge,
         top_events=top_events,
+        # 날짜별 뉴스량 — backend 집계값을 그대로 실어 프론트 막대그래프로(ai 재집계 안 함, 절대규칙 4).
+        daily_counts=list(response.daily_counts),
         # ④ 답변(뉴스 흐름 요약 섹션) 내장 — 근거 칩·근거 news_id 포함(§0.2). 프론트가 칩↔TOP 이벤트를 링크.
         answer_text=answer.text,
         cited_event_ids=list(answer.cited_event_ids),

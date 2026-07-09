@@ -9,7 +9,7 @@ computed 필드로 함께 실어 프론트가 재계산할 필요가 없게 한�
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -77,6 +77,16 @@ class ArticleRef(BaseModel):
     published_at: datetime | None = None
 
 
+class DailyCount(BaseModel):
+    """발행일(KST)별 기사 건수 1건. 리포트의 '날짜별 뉴스량' 막대그래프용(backend 집계값을 받기만 함).
+
+    date 는 backend 가 published_at(timestamptz)을 KST 로 변환해 자른 캘린더 날짜(리포트 표기 기준과 일치).
+    ai 는 재집계하지 않는다(절대규칙 4·소비만) — backend daily_counts 를 그대로 실어 프론트가 그린다.
+    """
+    date: date
+    count: int = 0
+
+
 class ReportEvent(BaseModel):
     """리포트에 노출되는 이벤트 한 건."""
     # 근거 이슈 칩(Answer.cited_event_ids)→이벤트 링크의 키(= Event.canonical_id, §0.2). 없으면 None.
@@ -99,6 +109,8 @@ class ReportModel(BaseModel):
     period_days: int | None = None     # 집계 기간(헤더 표시용). 없으면 표기 생략(지어내지 않음)
     overall_gauge: SentimentGauge
     top_events: list[ReportEvent] = Field(default_factory=list)
+    # 날짜별 뉴스량(발행일 KST 기준 오름차순). backend 집계값을 그대로 실어 프론트가 막대그래프로 렌더.
+    daily_counts: list[DailyCount] = Field(default_factory=list)
     # ④ 답변(뉴스 흐름 요약 섹션) 내장 — HTML 대신 JSON 으로 프론트에 전달.
     answer_text: str = ""              # 뉴스 흐름 요약 본문(= Answer.text)
     cited_event_ids: list[str] = Field(default_factory=list)   # 근거 이슈 칩→이벤트(canonical_id). 프론트가 top_events와 링크

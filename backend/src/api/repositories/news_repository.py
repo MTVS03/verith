@@ -163,6 +163,27 @@ async def get_event_aggregates(
     return {r.event_id: r for r in rows}
 
 
+async def get_daily_article_counts(
+    session: AsyncSession, event_ids: list[uuid.UUID]
+) -> Sequence[Row]:
+    """이벤트들의 기사를 발행일(KST)별로 집계 → [(day, count)] 발행일 오름차순.
+
+    published_at 은 timestamptz 라 KST 로 변환한 뒤 날짜로 자른다(func.date) — 리포트 표기 기준(KST)과
+    일치시켜 날짜 경계가 어긋나지 않게 한다. published_at NULL 은 날짜를 알 수 없어 제외한다.
+    """
+    if not event_ids:
+        return []
+    day = func.date(func.timezone("Asia/Seoul", News.published_at)).label("day")
+    stmt = (
+        select(day, func.count().label("count"))
+        .where(News.event_id.in_(event_ids))
+        .where(News.published_at.isnot(None))
+        .group_by(day)
+        .order_by(day)
+    )
+    return (await session.execute(stmt)).all()
+
+
 async def delete_articles_before(
     session: AsyncSession, cutoff: datetime
 ) -> Sequence[Row]:

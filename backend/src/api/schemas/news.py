@@ -10,7 +10,7 @@ backend Pydantic 으로 미러한다(가이드 §8.1: 외부 입력은 Pydantic 
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -242,14 +242,27 @@ class EventWithArticles(BaseModel):
     gauge: SentimentGauge = Field(default_factory=SentimentGauge)
 
 
+class DailyCount(BaseModel):
+    """발행일(KST)별 기사 건수 1행(ai `DailyCount`). 리포트의 '날짜별 뉴스량' 막대그래프용.
+
+    date 는 timestamptz(published_at)를 KST 로 변환한 캘린더 날짜(리포트 표기 기준과 일치).
+    포함된 이벤트(within_days 통과)들의 기사만 세므로 합은 그 이벤트들의 기사 총계와 같다.
+    """
+
+    date: date
+    count: int = 0
+
+
 class SubjectQueryResponse(BaseModel):
     """종목/공유 이벤트 조회 응답(ai `SubjectQueryResponse`). importance 내림차순 가정.
 
     subject_found: '없는 종목'과 '종목은 있으나 뉴스 0건'을 구분(둘 다 events=[]).
     overall_gauge: 전체 감성 집계(sentiment=None 제외) — backend 가 채운다(ai 재집계 안 함).
+    daily_counts: 포함된 이벤트 기사들의 발행일(KST)별 건수(오름차순) — 프론트 막대그래프용.
     """
 
     subject: str
     subject_found: bool = True
     events: list[EventWithArticles] = Field(default_factory=list)
     overall_gauge: SentimentGauge = Field(default_factory=SentimentGauge)
+    daily_counts: list[DailyCount] = Field(default_factory=list)

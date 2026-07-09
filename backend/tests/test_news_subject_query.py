@@ -105,6 +105,21 @@ async def test_subject_gauge_and_overall(subject_client):
     assert (og["positive"], og["neutral"], og["negative"]) == (2, 1, 1)
 
 
+async def test_subject_daily_counts(subject_client):
+    # 포함된 이벤트(A·C)만 발행일별 집계. B(30일 전)는 within_days 밖이라 제외.
+    # A: 1일전 2건 + 2일전 1건, C: 2일전 1건 → 1일전 2건, 2일전 2건.
+    resp = await subject_client.get("/news/query/subject", params={"companies": ["삼성"]})
+    body = resp.json()
+    counts = {row["date"]: row["count"] for row in body["daily_counts"]}
+    # 합은 포함된 이벤트들의 기사 총계(A 3 + C 1 = 4)와 같다.
+    assert sum(counts.values()) == 4
+    # 날짜별로 2·2 로 갈린다(1일전 A2건, 2일전 A1+C1건).
+    assert sorted(counts.values()) == [2, 2]
+    # 발행일 오름차순 정렬.
+    dates = [row["date"] for row in body["daily_counts"]]
+    assert dates == sorted(dates)
+
+
 async def test_subject_companies_query_param_repeat(subject_client):
     # 별칭 여러 개(?companies=삼성&companies=삼성전자)
     resp = await subject_client.get(

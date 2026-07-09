@@ -18,6 +18,7 @@ from src.api.repositories import news_repository as news_repo
 from src.api.schemas.news import (
     ArticleRef,
     CandidateEvent,
+    DailyCount,
     Event,
     EventWithArticles,
     SentimentGauge,
@@ -66,12 +67,13 @@ class NewsGraphQueryService:
     ) -> SubjectQueryResponse:
         events_raw = await graph_repo.get_events_by_companies(self._graph, companies)
         subject_found = await graph_repo.companies_exist(self._graph, companies)
-        response = await self._assemble(events_raw, within_days)
+        events, overall, daily_counts = await self._assemble(events_raw, within_days)
         return SubjectQueryResponse(
             subject=", ".join(companies),
             subject_found=subject_found,
-            events=response[0],
-            overall_gauge=response[1],
+            events=events,
+            overall_gauge=overall,
+            daily_counts=daily_counts,
         )
 
     async def get_recent_candidate_events(
@@ -167,20 +169,22 @@ class NewsGraphQueryService:
     ) -> SubjectQueryResponse:
         events_raw = await graph_repo.get_shared_events(self._graph, company_a, company_b)
         subject_found = await graph_repo.companies_exist(self._graph, [company_a, company_b])
-        events, overall = await self._assemble(events_raw, within_days)
+        events, overall, daily_counts = await self._assemble(events_raw, within_days)
         return SubjectQueryResponse(
             subject=f"{company_a} & {company_b}",
             subject_found=subject_found,
             events=events,
             overall_gauge=overall,
+            daily_counts=daily_counts,
         )
 
     async def _assemble(
         self, events_raw: list[dict], within_days: int
-    ) -> tuple[list[EventWithArticles], SentimentGauge]:
-        """그래프 이벤트 + PG 집계를 합쳐 (EventWithArticles[], overall_gauge) 로.
+    ) -> tuple[list[EventWithArticles], SentimentGauge, list[DailyCount]]:
+        """그래프 이벤트 + PG 집계를 합쳐 (EventWithArticles[], overall_gauge, daily_counts) 로.
 
-        within_days 내 최신 기사가 있는 이벤트만 포함, importance 내림차순 정렬.
+        within_days 내 최신 기사가 있는 이벤트만 포함, importance 내림차순 정렬. daily_counts 는
+        그 '포함된 이벤트'들의 기사만 발행일(KST)별로 세므로 게이지·기사수와 같은 모집단을 본다.
         """
         # canonical_id → uuid 파싱(불량 id 는 제외).
         by_uuid: dict[uuid.UUID, dict] = {}
@@ -193,11 +197,13 @@ class NewsGraphQueryService:
         cutoff = datetime.now(UTC) - timedelta(days=within_days)
 
         items: list[EventWithArticles] = []
+        included_ids: list[uuid.UUID] = []
         pos = neu = neg = 0
         for eid, raw in by_uuid.items():
             agg = aggregates.get(eid)
             if agg is None or agg.recency is None or agg.recency < cutoff:
                 continue  # within_days 내 기사 없음 → 제외
+            included_ids.append(eid)
             gauge = SentimentGauge(
                 positive=agg.positive, neutral=agg.neutral, negative=agg.negative
             )
@@ -234,4 +240,8 @@ class NewsGraphQueryService:
         # importance 내림차순(없으면 뒤로).
         items.sort(key=lambda x: (x.event.importance is not None, x.event.importance or 0.0), reverse=True)
         overall = SentimentGauge(positive=pos, neutral=neu, negative=neg)
-        return items, overall
+
+        # 포함된 이벤트들의 기사만 발행일(KST)별로 집계(오름차순). 게이지와 같은 모집단.
+        count_rows = await news_repo.get_daily_article_counts(self._session, included_ids)
+        daily_counts = [DailyCount(date=r.day, count=r.count) for r in count_rows]
+        return items, overall, daily_counts
