@@ -370,6 +370,16 @@ if _intraday_env_file is not None:
 INTRADAY_FETCH_ENABLED: bool = _env_bool("INTRADAY_FETCH_ENABLED", default=False)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7.3-b Trace sink 결선 (관측). §7.3의 "운영 결선은 AI endpoint 브랜치에서 한다"의 실제 결선.
+#     노드별 duration_ms/이벤트는 trace.node()가 이미 측정한다 — sink만 주면 로컬 JSONL로 남는다.
+#     trace_logger가 secret-scrub + 원본 query hash-only(§10·§13)라 파일로 남겨도 PII 안전.
+#     기본 on(로컬 관측). 끄려면 `TECHNICAL_TRACE_ENABLED=off`. 경로는 `TECHNICAL_TRACE_PATH`로 override.
+# ─────────────────────────────────────────────────────────────────────────────
+TECHNICAL_TRACE_ENABLED: bool = _env_bool("TECHNICAL_TRACE_ENABLED", default=True)
+_DEFAULT_TRACE_PATH = Path(__file__).resolve().parents[3] / "traces" / "technical_trace.jsonl"
+TECHNICAL_TRACE_PATH: str = os.getenv("TECHNICAL_TRACE_PATH") or str(_DEFAULT_TRACE_PATH)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 14. 1D intraday(Beta) 판단 상수 (config.md §12). intraday builder/synthesis/kis_client가 사용한다.
 #     계산 모듈에 흩어져 있던 상수를 여기로 모은 정본이다. **값은 이동 전과 동일** —
 #     이 값들은 아직 실측 튜닝 전(Beta)이며, 후속 튜닝 대상이다(변경 시 이 표만 고치면 됨).
