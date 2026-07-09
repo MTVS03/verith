@@ -1143,3 +1143,10 @@ class TechnicalReportService:
         deleted = await tr_repo.delete_root(self._session, report_id)
         await self._session.commit()
         return deleted > 0
+
+    async def delete_all_reports(self) -> int:
+        """technical 리포트 **전체** 삭제(목록 전체 삭제용). 삭제된 리포트 수 반환."""
+        await agent_repo.delete_all_technical(self._session)         # index 먼저(FK 없음)
+        deleted = await tr_repo.delete_all_roots(self._session)      # root 전체(자식 CASCADE)
+        await self._session.commit()
+        return deleted

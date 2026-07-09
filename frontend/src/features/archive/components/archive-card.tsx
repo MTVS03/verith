@@ -6,6 +6,7 @@ import { archiveItemHref } from "@/lib/report-links";
 import type { ArchiveItem } from "@/types/archive";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { BoldText } from "@/lib/bold-text";
+import { DeleteReportButton } from "./delete-report-button";
 
 function toneToStatusTone(tone?: string | null): "green" | "amber" | "red" | "neutral" | "gray" {
   if (tone === "green") return "green";
@@ -22,12 +23,17 @@ export function ArchiveCard({ item }: { item: ArchiveItem }) {
         <div className="grid h-16 w-16 place-items-center rounded-3xl bg-indigo-50 text-indigo-600">
           <FileText className="h-7 w-7" />
         </div>
-        {item.card.badge_label && item.card.badge_value ? (
-          <StatusBadge
-            label={`${item.card.badge_label} ${item.card.badge_value}`}
-            tone={toneToStatusTone(item.card.badge_tone)}
-          />
-        ) : null}
+        <div className="flex flex-col items-end gap-2">
+          {item.card.badge_label && item.card.badge_value ? (
+            <StatusBadge
+              label={`${item.card.badge_label} ${item.card.badge_value}`}
+              tone={toneToStatusTone(item.card.badge_tone)}
+            />
+          ) : null}
+          {item.agent_type === "technical" ? (
+            <DeleteReportButton reportId={item.report_id} />
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-6 space-y-3">

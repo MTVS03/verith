@@ -383,6 +383,17 @@ async def test_delete_missing_404(client):
     assert resp.status_code == 404
 
 
+async def test_delete_all_empties_list(client):
+    # 2건 생성 → 전체 삭제 → { deleted>=2 } & 목록 total 0
+    await _create(client)
+    await _create(client)
+    resp = await client.delete(_POST)
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] >= 2
+    listing = (await client.get(_POST)).json()
+    assert listing["total"] == 0
+
+
 # ── AI 응답 계약 검증(위반 시 502, 저장 안 함) ────────────────────────────────
 async def _assert_rejected_and_not_saved(client, db_session):
     before = await db_session.scalar(select(func.count()).select_from(TechnicalReport))

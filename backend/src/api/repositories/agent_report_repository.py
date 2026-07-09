@@ -68,3 +68,11 @@ async def delete_for_technical(session: AsyncSession, report_id: UUID) -> int:
         )
     )
     return result.rowcount or 0
+
+
+async def delete_all_technical(session: AsyncSession) -> int:
+    """agent_type='technical' index row **전체** 삭제(전체 삭제용). 삭제 행수 반환."""
+    result = await session.execute(
+        delete(AgentReport).where(AgentReport.agent_type == "technical")
+    )
+    return result.rowcount or 0

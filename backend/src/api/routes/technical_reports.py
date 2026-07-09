@@ -116,6 +116,15 @@ async def get_technical_report_followups(
     return flow
 
 
+@router.delete("", status_code=status.HTTP_200_OK)
+async def delete_all_technical_reports(
+    service: TechnicalReportService = Depends(get_technical_report_service),
+) -> dict[str, int]:
+    """technical 리포트 **전체 삭제**(보관함 목록 전체 비우기). 삭제된 수를 반환한다."""
+    deleted = await service.delete_all_reports()
+    return {"deleted": deleted}
+
+
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_technical_report(
     report_id: UUID,

@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/ui/app-shell";
 import { ArchiveCard } from "@/features/archive/components/archive-card";
 import { ArchiveTabs } from "@/features/archive/components/archive-tabs";
+import { DeleteAllReportsButton } from "@/features/archive/components/delete-all-reports-button";
 import { getArchiveReports } from "@/api/archive";
 import type { AgentType } from "@/types/archive";
 
@@ -23,8 +24,13 @@ export default async function Home({
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <ArchiveTabs active={agentType} />
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
-            총 {archive.total}건
+          <div className="flex items-center gap-3">
+            {agentType === "technical" && archive.items.length > 0 ? (
+              <DeleteAllReportsButton count={archive.total} />
+            ) : null}
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+              총 {archive.total}건
+            </div>
           </div>
         </div>
 

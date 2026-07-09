@@ -16,6 +16,16 @@ export async function getTechnicalReport(
   return backendFetch<TechnicalReportReadModel>(`/api/technical/reports/${reportId}${qs}`);
 }
 
+// DELETE /api/technical/reports/{id} → 204. DB 에서 리포트 삭제(하드 delete).
+export async function deleteTechnicalReport(reportId: string): Promise<void> {
+  await backendFetch<void>(`/api/technical/reports/${reportId}`, { method: "DELETE" });
+}
+
+// DELETE /api/technical/reports → technical 리포트 전체 삭제. { deleted: N } 반환.
+export async function deleteAllTechnicalReports(): Promise<{ deleted: number }> {
+  return backendFetch<{ deleted: number }>(`/api/technical/reports`, { method: "DELETE" });
+}
+
 export async function getTechnicalTrace(reportId: string): Promise<TechnicalTraceDetailReadModel> {
   return backendFetch<TechnicalTraceDetailReadModel>(`/api/technical/reports/${reportId}/trace`);
 }
