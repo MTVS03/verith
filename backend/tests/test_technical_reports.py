@@ -28,7 +28,7 @@ _REQ = {"ticker": TICKER, "query": "373220 기술적 흐름 분석", "client_ses
 _READ_MODEL_KEYS = {
     "report_id", "stock", "meta", "summary", "interpretation",
     "drivers", "signals", "risks", "charts", "verification", "trace_summary",
-    "trust_summary", "indicator_cards", "followup_count",
+    "trust_summary", "indicator_cards", "followup_count", "charts_full",
 }
 
 
@@ -145,24 +145,29 @@ async def test_detail_has_trust_summary(client):
     assert tsum["verification_gate"]["outcome"] == "passed"
 
 
-# 4f) 차트 full payload 전용 endpoint
-async def test_charts_endpoint_full_payload(client):
+# 4f) ?include=charts → 상세 응답에 차트 full payload 임베드(전용 /charts 엔드포인트 폐지)
+async def test_report_include_charts_embeds_full(client):
     rid = await _create(client)
-    resp = await client.get(f"{_POST}/{rid}/charts")
+    # 기본(include 없음)은 charts_full 없음 → 목록/미리보기용 가벼운 응답
+    base = (await client.get(f"{_POST}/{rid}")).json()
+    assert base.get("charts_full") is None
+    # ?include=charts 면 차트 full payload 를 charts_full 에 임베드
+    resp = await client.get(f"{_POST}/{rid}?include=charts")
     assert resp.status_code == 200
-    body = resp.json()
-    assert set(body.keys()) == {"report_id", "stock", "available_periods", "charts"}
-    assert body["stock"]["stock_code"] == TICKER
-    if body["charts"]:
-        c = body["charts"][0]
+    cf = resp.json()["charts_full"]
+    assert cf is not None
+    assert set(cf.keys()) == {"report_id", "stock", "available_periods", "charts"}
+    assert cf["stock"]["stock_code"] == TICKER
+    if cf["charts"]:
+        c = cf["charts"][0]
         assert set(c.keys()) == {
             "period", "candle_unit", "display_order", "has_chart_data",
             "annotation_count", "chart_data", "annotations"}
 
 
-async def test_charts_endpoint_404(client):
+async def test_include_charts_missing_report_404(client):
     from uuid import uuid4
-    assert (await client.get(f"{_POST}/{uuid4()}/charts")).status_code == 404
+    assert (await client.get(f"{_POST}/{uuid4()}?include=charts")).status_code == 404
 
 
 # 4g) trace drawer 전용 endpoint (truthful, duration null)

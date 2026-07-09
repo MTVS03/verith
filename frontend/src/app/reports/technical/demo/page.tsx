@@ -1,4 +1,4 @@
-import { getTechnicalCharts, getTechnicalFollowups, getTechnicalReport, getTechnicalTrace } from "@/api/technical";
+import { getTechnicalFollowups, getTechnicalReport, getTechnicalTrace } from "@/api/technical";
 import { TechnicalChartPanel } from "@/features/technical/components/technical-chart-panel";
 import { TechnicalFollowups } from "@/features/technical/components/technical-followups";
 import { TechnicalHero } from "@/features/technical/components/technical-hero";
@@ -12,13 +12,13 @@ export const dynamic = "force-dynamic";
 const DEMO_REPORT_ID = "eb59303e-5f8d-4b1b-8b15-e145839a9861";
 
 export default async function TechnicalDemoPage() {
-  const [rawReport, charts, trace, followups] = await Promise.all([
-    getTechnicalReport(DEMO_REPORT_ID),
-    getTechnicalCharts(DEMO_REPORT_ID),
+  const [rawReport, trace, followups] = await Promise.all([
+    getTechnicalReport(DEMO_REPORT_ID, { includeCharts: true }),
     getTechnicalTrace(DEMO_REPORT_ID),
     getTechnicalFollowups(DEMO_REPORT_ID),
   ]);
   const report = applyLgEnergyDemoOverrides(rawReport);
+  const charts = report.charts_full ?? rawReport.charts_full ?? null;
 
   return (
     <div className="min-h-screen bg-[#eceff3] py-8 px-4 sm:px-6 lg:px-8 font-sans antialiased text-[#1e293b]">
@@ -51,7 +51,7 @@ export default async function TechnicalDemoPage() {
             {/* Left column */}
             <div className="flex flex-col gap-5 min-w-0">
               <TechnicalSummarySections report={report} />
-              <TechnicalChartPanel charts={charts} />
+              {charts && <TechnicalChartPanel charts={charts} />}
               <TechnicalSignalRiskGrid report={report} />
               <TechnicalTraceDrawer trace={trace} report={report} />
               <div className="p-4 border border-[#f1f5f9] rounded-2xl bg-[#f8fafc] flex items-center gap-2.5">

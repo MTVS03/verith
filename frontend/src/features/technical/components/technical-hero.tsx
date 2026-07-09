@@ -13,7 +13,7 @@ export function TechnicalHero({
   charts,
 }: {
   report: TechnicalReportReadModel;
-  charts?: TechnicalChartsReadModel;
+  charts?: TechnicalChartsReadModel | null;
 }) {
   const [copied, setCopied] = useState(false);
 

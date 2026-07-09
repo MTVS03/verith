@@ -16,7 +16,6 @@ from src.api.deps import get_technical_report_service
 from src.api.schemas.technical_report import (
     FollowupCreateRequest,
     FollowupItem,
-    TechnicalChartsReadModel,
     TechnicalReportCreateRequest,
     TechnicalReportFollowupsReadModel,
     TechnicalReportListResponse,
@@ -63,25 +62,19 @@ async def list_technical_reports(
 @router.get("/{report_id}", response_model=TechnicalReportReadModel)
 async def get_technical_report(
     report_id: UUID,
+    include: str | None = None,
     service: TechnicalReportService = Depends(get_technical_report_service),
 ) -> TechnicalReportReadModel:
-    """단건 조회 — 프론트 친화 read model(raw payload 는 DB 에 보존, 응답엔 구조화만)."""
-    read_model = await service.get_report(report_id)
+    """단건 조회 — 프론트 친화 read model(raw payload 는 DB 에 보존, 응답엔 구조화만).
+
+    `?include=charts` 면 차트 full payload 를 `charts_full` 에 임베드해 리포트+차트를 1 JSON 으로 준다
+    (상세 페이지용). 기본(목록/미리보기)은 메타만 → 가볍게. 전용 /charts 엔드포인트는 폐지됨.
+    """
+    include_charts = "charts" in {p.strip() for p in (include or "").split(",")}
+    read_model = await service.get_report(report_id, include_charts=include_charts)
     if read_model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
     return read_model
-
-
-@router.get("/{report_id}/charts", response_model=TechnicalChartsReadModel)
-async def get_technical_report_charts(
-    report_id: UUID,
-    service: TechnicalReportService = Depends(get_technical_report_service),
-) -> TechnicalChartsReadModel:
-    """차트 탭 렌더용 full payload(period 별 chart_data/annotations). detail 은 메타만."""
-    charts = await service.get_report_charts(report_id)
-    if charts is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
-    return charts
 
 
 @router.get("/{report_id}/trace", response_model=TechnicalTraceDetailReadModel)
