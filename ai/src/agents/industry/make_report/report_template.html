@@ -448,14 +448,15 @@ class Component extends DCLogic {
     const st=this.state; const active=new Set(st.active);
     const counts={}; this.edges.forEach(e=>counts[e.relation]=(counts[e.relation]||0)+1);
     const order=this.relations&&this.relations.length?this.relations:['SUPPLIES','BENEFITS_FROM','COMPETES_WITH','COMMUNITY'];
-    const filters = order.map(r=>{
-      const count=counts[r]||0; const isActive=active.has(r); const future=count===0;
+    // A relation with no edges has nothing to toggle, so it gets no chip.
+    const filters = order.filter(r=>counts[r]).map(r=>{
+      const count=counts[r]; const isActive=active.has(r);
       return {
-        relation:r, label:this.relLabel[r]||r, count: future?'예정':String(count),
+        relation:r, label:this.relLabel[r]||r, count: String(count),
         bg: isActive?this.relSoft[r]:'#ffffff',
         fg: isActive?this.relInk[r]:'#8890a0',
         border: isActive?this.relColor[r]:'rgba(20,26,40,.14)',
-        dash: future?'dashed':'solid',
+        dash: 'solid',
         onClick: ()=>this.toggleRel(r),
       };
     });

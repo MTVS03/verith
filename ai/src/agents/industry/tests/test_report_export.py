@@ -100,6 +100,28 @@ def test_vector_chunks_become_vector_evidence():
     ]
 
 
+def test_graph_evidence_does_not_repeat_the_report_name():
+    """The report joins source.name and source.reportName, so they must not be equal."""
+    rows = [
+        {
+            "evidence_edges": [
+                {
+                    "source": "에코프로",
+                    "relation": "SUPPLIES",
+                    "target": "에코프로비엠",
+                    "evidences": ["원료를 자회사에 공급"],
+                    "origins": ["086520"],
+                }
+            ]
+        }
+    ]
+
+    _nodes, _edges, evidence = build_graph_and_evidence(rows, [])
+
+    source = evidence[0]["source"]
+    assert not (source["name"] and source["name"] == source["reportName"])
+
+
 def test_build_report_payload_has_resolvable_references():
     final_state = {
         "question": "에코프로 공급 경로는?",

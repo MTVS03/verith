@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "research-report.v1",
+  "reportId": "rpt_20260707_ecopro_supply_chain",
+  "createdAt": "2026-07-07T13:52:00+09:00",
+  "locale": "ko-KR",
+  "question": {
+    "text": "에코프로에서 시작된 원료·소재 공급이 어떤 경로로 어떤 기업까지 파급되는가?",
+    "type": "path_impact_propagation",
+    "label": "Path impact propagation"
+  },
+  "answer": {
+    "headline": "에코프로의 원료 공급 경로는 에코프로비엠을 거쳐 배터리 셀 고객사로 확장됩니다.",
+    "body": "그래프 조회 결과는 에코프로가 자회사에 원료를 공급하고, 에코프로비엠이 SK온과 SK이노베이션으로 이어지는 소재 공급 축을 형성한다는 경로를 보여줍니다.",
+    "tags": ["에코프로", "에코프로비엠"],
+    "faithfulness": {
+      "status": "warning",
+      "label": "일부 진술 검증 경고 포함",
+      "unsupportedClaims": []
+    }
+  },
+  "metrics": {
+    "rows": 25,
+    "attempts": 1,
+    "graphEdges": 1,
+    "graphNodes": 2,
+    "citations": 1
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "company:ecopro",
+        "label": "에코프로",
+        "type": "Company",
+        "role": "원료 조달",
+        "kind": "upstream",
+        "position": { "x": 115, "y": 260 }
+      },
+      {
+        "id": "company:ecoprobm",
+        "label": "에코프로비엠",
+        "type": "Company",
+        "role": "양극재 제조",
+        "kind": "midstream",
+        "position": { "x": 325, "y": 260 }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge:g1",
+        "source": "company:ecopro",
+        "target": "company:ecoprobm",
+        "relation": "SUPPLIES",
+        "label": "공급",
+        "style": "solid",
+        "evidenceIds": ["ev:G1"]
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "id": "ev:G1",
+      "ref": "G1",
+      "kind": "graph",
+      "edgeId": "edge:g1",
+      "relation": "SUPPLIES",
+      "title": "에코프로 -> 에코프로비엠",
+      "quote": "당사는 해외 자원개발 투자를 통해 확보한 핵심 광물을 자회사에 공급하는 트레이딩 사업을 영위하고 있습니다.",
+      "source": {
+        "name": "에코프로 사업보고서",
+        "publisher": "DART",
+        "reportName": "사업보고서 (2025.12)",
+        "stockCode": "086520",
+        "url": "http://dart.fss.or.kr/report/viewer.do",
+        "textFragmentUrl": "http://dart.fss.or.kr/report/viewer.do"
+      }
+    }
+  ],
+  "execution": {
+    "pipeline": [
+      {
+        "id": "classify",
+        "title": "Question classification",
+        "status": "done",
+        "statusText": "Implemented",
+        "body": "The LangGraph classify node separates relational, qualitative, and global questions."
+      }
+    ],
+    "cypher": "MATCH path = (a:Company {name: '에코프로'})-[:SUPPLIES*1..5]->(c:Company) RETURN path",
+    "retrievalFlow": "LangGraph classify -> Cypher -> Neo4j rows -> grounded answer -> faithfulness gate"
+  },
+  "graphSnapshot": {
+    "nodes": { "Company": 371, "Industry": 85, "Policy": 42 },
+    "relationships": { "SUPPLIES": 77, "BENEFITS_FROM": 66, "COMPETES_WITH": 21, "OWNS_STAKE": 300 }
+  }
+}
