@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     # AI(technical) 서버 base URL. 코드에 경로를 박지 않고 .env/환경변수에서 읽는다.
     # 없으면 _load_settings() 에서 에러
     AI_SERVICE_URL: str = ""
-    # backend → AI 호출 timeout(초). 숫자 튜닝값 — env 로 override 가능.
-    AI_REQUEST_TIMEOUT_SECONDS: float = 60.0
+    # backend → AI 호출 timeout(초). 숫자 튜닝값 — env 로 override 가능. AI 내부 예산(85초)보다 커야 함.
+    AI_REQUEST_TIMEOUT_SECONDS: float = 90.0
 
     # DART OpenAPI 키 — **corp_code sync 스크립트 전용**. app startup 필수값 아님
     # (_load_settings 에서 검증하지 않는다). 값은 수동 sync 실행 시에만 필요하다.

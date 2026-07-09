@@ -370,6 +370,16 @@ if _intraday_env_file is not None:
 INTRADAY_FETCH_ENABLED: bool = _env_bool("INTRADAY_FETCH_ENABLED", default=False)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7.3-b Trace sink 결선 (관측). §7.3의 "운영 결선은 AI endpoint 브랜치에서 한다"의 실제 결선.
+#     노드별 duration_ms/이벤트는 trace.node()가 이미 측정한다 — sink만 주면 로컬 JSONL로 남는다.
+#     trace_logger가 secret-scrub + 원본 query hash-only(§10·§13)라 파일로 남겨도 PII 안전.
+#     기본 on(로컬 관측). 끄려면 `TECHNICAL_TRACE_ENABLED=off`. 경로는 `TECHNICAL_TRACE_PATH`로 override.
+# ─────────────────────────────────────────────────────────────────────────────
+TECHNICAL_TRACE_ENABLED: bool = _env_bool("TECHNICAL_TRACE_ENABLED", default=True)
+_DEFAULT_TRACE_PATH = Path(__file__).resolve().parents[3] / "traces" / "technical_trace.jsonl"
+TECHNICAL_TRACE_PATH: str = os.getenv("TECHNICAL_TRACE_PATH") or str(_DEFAULT_TRACE_PATH)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 14. 1D intraday(Beta) 판단 상수 (config.md §12). intraday builder/synthesis/kis_client가 사용한다.
 #     계산 모듈에 흩어져 있던 상수를 여기로 모은 정본이다. **값은 이동 전과 동일** —
 #     이 값들은 아직 실측 튜닝 전(Beta)이며, 후속 튜닝 대상이다(변경 시 이 표만 고치면 됨).
@@ -407,7 +417,7 @@ INTRADAY_MARKET_OPEN_HHMMSS: str = "090000"       # 이 시각 이전으로는 �
 # ─────────────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"    # 키 "이름"만(값 아님) — 값은 .env
 OPENAI_MODEL_ENV = "OPENAI_MODEL"        # 모델 "이름"만 — 값은 .env(단일 출처, 코드에 기본값 없음)
-OPENAI_TIMEOUT_SECONDS: float = 20.0     # 1회 호출 timeout(초) — 60초 계약 안에서 보수적 하향
+OPENAI_TIMEOUT_SECONDS: float = 35.0     # 1회 호출 timeout(초) — interpret(~16s) 헤드룸 2x. 내부 예산 85초·계약 90초 안
 OPENAI_MAX_RETRIES: int = 0              # SDK 재시도 끔 — agent-level 재생성/template fallback 우선
 OPENAI_TEMPERATURE: float | None = 0.0   # None이면 요청 파라미터에서 생략 — 튜닝 상수(코드)
 OPENAI_MAX_OUTPUT_TOKENS: int = 3000     # 응답 최대 토큰 — 5구조 요약 + 지표별 2~3문장 detail(+bold)로
@@ -446,8 +456,8 @@ def load_openai_settings() -> OpenAiSettings:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 16. Technical Agent 전체 실행 예산 (api_spec.md §10). AI endpoint가 Deadline으로 사용한다.
-#     Backend→AI 계약 timeout은 60초 — 그보다 먼저 AI가 504를 돌려주도록 내부 예산은 55초로 둔다
+#     Backend→AI 계약 timeout은 90초 — 그보다 먼저 AI가 504를 돌려주도록 내부 예산은 85초로 둔다
 #     (직렬화·error response 여유). cooperative deadline이라 실행 중 sync 작업을 즉시 죽이진 못하고
 #     다음 stage check 지점에서 멈춘다(endpoint의 asyncio.wait_for가 응답 시간까지 바운딩).
 # ─────────────────────────────────────────────────────────────────────────────
-TECHNICAL_AGENT_TIMEOUT_SECONDS: float = 55.0  # 내부 budget(< 60초 계약). endpoint Deadline.after()에 사용
+TECHNICAL_AGENT_TIMEOUT_SECONDS: float = 85.0  # 내부 budget(< 90초 계약). endpoint Deadline.after()에 사용

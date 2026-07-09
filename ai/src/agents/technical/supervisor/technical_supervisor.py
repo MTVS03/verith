@@ -5,13 +5,14 @@
 책임(entrypoint만):
   - allowlist 선검증(MVP 범위 밖 ticker는 OpenAI/cache/KIS 이전에 거절).
   - trace lifecycle(`trace_start`/`trace_end`).
-  - LangGraph graph.invoke(state)로 노드 1~10 파이프라인 위임.
+  - LangGraph graph.invoke(state, config)로 노드 1~10 파이프라인 위임. 주입 의존성(원본 query·client)은
+    `TechnicalDeps`로 묶어 `config['configurable']['deps']`로만 넘긴다 — traced state가 아니다.
   - top-level 예외 처리(trace_end failed 기록 후 전파).
 
 의존 방향(단방향): `technical_supervisor → technical_graph → pipeline_steps`. 노드별 계산/조립
 helper는 `pipeline_steps`가 소유하고, LangGraph node/edge 구성은 `technical_graph`가 담당한다.
-run()은 이 둘을 조립만 한다. checkpointer/persistent memory는 state 정화 전까지 도입하지 않는다
-(langgraph_state.py 보안 경계).
+run()은 이 둘을 조립만 한다. **state는 계산 결과만 담아 secret-safe**이므로 checkpointer·LangSmith
+state tracing을 켜도 PII(원본 query)·secret(client)이 직렬화되지 않는다(langgraph_state.py 정화 경계).
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from .langgraph_state import TechnicalGraphState
+from .langgraph_state import TechnicalDeps
 from .pipeline_steps import MinuteFetcher, OhlcvFetcher
 from .technical_graph import build_technical_graph
 from ..config import is_supported_ticker
@@ -69,13 +70,15 @@ def run(
         "original_query_hash": hash_query(agent_input.query),  # 원문 평문 미기록(§10)
     })
     # 파이프라인(노드 1~10)은 LangGraph StateGraph가 조율한다(technical_graph → pipeline_steps).
-    initial_state: TechnicalGraphState = {
-        "payload": agent_input, "trace_id": trace_id, "llm_client": llm_client,
-        "fetcher": fetcher, "cache": cache, "trace": trace, "deadline": deadline,
-        "intraday_candles": intraday_candles, "intraday_fetcher": intraday_fetcher,
-    }
+    # 주입 의존성(원본 query·runtime client)은 **config['configurable']['deps']** 로만 흐른다 —
+    # traced state에 넣지 않아 checkpointer·LangSmith가 직렬화해도 PII·secret이 새지 않는다(정화 경계).
+    deps = TechnicalDeps(
+        payload=agent_input, trace_id=trace_id, trace=trace, llm_client=llm_client,
+        fetcher=fetcher, cache=cache, deadline=deadline,
+        intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher,
+    )
     try:
-        final_state = build_technical_graph().invoke(initial_state)
+        final_state = build_technical_graph().invoke({}, config={"configurable": {"deps": deps}})
         output = final_state["output"]
     except Exception as exc:
         trace.emit("trace_end", "failed", started_at=run_started, ended_at=trace.now_iso(),

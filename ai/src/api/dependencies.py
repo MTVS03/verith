@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Callable
 
+from src.agents.technical.config import TECHNICAL_TRACE_ENABLED, TECHNICAL_TRACE_PATH
 from src.agents.technical.nodes._llm_utils import LlmClient
-from src.agents.technical.observability.trace_logger import TraceSink
+from src.agents.technical.observability.trace_logger import JsonlTraceSink, TraceSink
 from src.agents.technical.runtime.deadline import Deadline
 from src.agents.technical.services.cache_service import OhlcvCache, default_cache
 from src.agents.technical.services.openai_llm_client import default_openai_client
@@ -54,10 +55,14 @@ def get_cache() -> OhlcvCache | None:
 
 
 def get_trace_sink() -> TraceSink | None:
-    """trace sink. 운영 JSONL 경로 정본이 없으므로 이번 브랜치는 None(=supervisor가 Noop 처리).
+    """trace sink. 로컬 JSONL로 결선 — 노드별 duration_ms·이벤트를 파일로 남긴다(관측).
 
-    테스트는 InMemoryTraceSink로 override해 이벤트를 검증한다."""
-    return None
+    `trace.node()`가 이미 duration을 측정하므로 sink만 주면 파일에 쌓인다. trace_logger가
+    secret-scrub + 원본 query hash-only(§10·§13)라 PII 안전. `TECHNICAL_TRACE_ENABLED=off`면
+    None(=supervisor Noop). 경로는 `TECHNICAL_TRACE_PATH`. 테스트는 InMemoryTraceSink로 override한다."""
+    if not TECHNICAL_TRACE_ENABLED:
+        return None
+    return JsonlTraceSink(TECHNICAL_TRACE_PATH)
 
 
 def get_resolver() -> ResolverProtocol:

@@ -230,7 +230,7 @@ def test_default_client_builds_without_network(monkeypatch):
     assert default_openai_client(model="gpt-x").model == "gpt-x"  # 명시 override 우선
 
 
-# ── retry/timeout 안전화: SDK client에 max_retries=0·timeout=20.0 전달 ─────────
+# ── retry/timeout 안전화: SDK client에 max_retries=0·timeout=35.0 전달 ─────────
 class _RecordingOpenAI:
     """openai.OpenAI 생성 인자를 기록하는 대역(네트워크 없음)."""
     last_kwargs: dict = {}
@@ -251,7 +251,7 @@ def test_default_client_disables_sdk_retries(monkeypatch):
     _patch_sdk(monkeypatch)
     default_openai_client()
     assert _RecordingOpenAI.last_kwargs["max_retries"] == 0     # SDK 재시도 끔
-    assert _RecordingOpenAI.last_kwargs["timeout"] == 20.0      # 보수적 per-call timeout 기본
+    assert _RecordingOpenAI.last_kwargs["timeout"] == 35.0      # per-call timeout 기본(config OPENAI_TIMEOUT_SECONDS)
 
 
 def test_default_client_retry_timeout_override(monkeypatch):

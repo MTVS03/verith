@@ -1,0 +1,3 @@
+# technical agent 로컬 trace(관측) — 커밋 안 함
+traces/
+*.jsonl
