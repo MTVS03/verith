@@ -418,3 +418,176 @@ def test_charts_all_periods_returned_eager():
     cm = build_charts_read_model(report=_report(output_payload=raw), stock=None)
     assert cm.available_periods == ["3m", "1y", "5y"]                    # all-period eager(잠금)
     assert len(cm.charts) == 3
+
+
+# ── indicator cards (지표 카드 read model) ───────────────────────────────────
+def _raw_cards(**over) -> dict:
+    raw = _raw()
+    raw["technical_signals"] = [
+        {"indicator": "moving_average", "signal": "negative", "value": 412000.0, "weight": 0.3,
+         "detail": "이동평균 부정", "detail_source": "llm",
+         "metrics": ["5MA 449300.0", "20MA 496500.0", "60MA 570683.3"]},
+        {"indicator": "rsi", "signal": "neutral", "value": 33.2, "weight": 0.2,
+         "detail": "RSI 중립", "detail_source": "llm", "metrics": ["RSI(14) 33.2", "기준 35/70"]},
+        {"indicator": "volume", "signal": "negative", "value": 1.04, "weight": 0.2,
+         "detail": "거래량 부정", "detail_source": "template_fallback", "metrics": ["거래량비 1.04"]},
+        {"indicator": "support_resistance", "signal": "neutral", "value": 412000.0, "weight": 0.2,
+         "detail": "지지저항 중립", "detail_source": "llm", "metrics": ["지지 403500.0", "저항 582000.0"]},
+        {"indicator": "pattern", "signal": "negative", "value": 21000.0, "weight": 0.1,
+         "detail": "패턴 부정", "detail_source": "llm", "metrics": ["몸통 21000.0"]},
+    ]
+    raw["charts"] = [
+        {"period": "1y", "chart_data": {"candle_unit": "D", "annotations": [
+            {"kind": "dead_cross", "date": "2026-06-01", "label": "데드크로스", "importance": "high"},
+            {"kind": "cup_handle_candidate", "date": "2026-05-13", "label": "컵앤핸들 후보",
+             "importance": "medium", "meta": {"cup_depth_pct": 0.28, "candidate_stage": "handle_forming",
+                                              "volume_confirmed": False}},
+        ]}},
+    ]
+    raw.update(over)
+    return raw
+
+
+def test_indicator_cards_five_with_weight_and_calc_basis():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards(), stock=None)
+    cards = {c.indicator: c for c in rm.indicator_cards}
+    assert set(cards) == {"moving_average", "rsi", "volume", "support_resistance", "pattern"}
+    # weight 는 read model signals 에도, 카드에도 노출.
+    assert rm.signals.items[0].weight == 0.3
+    ma = cards["moving_average"]
+    assert ma.title == "이동평균" and ma.signal_label == "부정" and ma.weight == 0.3
+    assert ma.calc_basis.ma == {"5": 449300.0, "20": 496500.0, "60": 570683.3}
+    assert ma.calc_basis.alignment == "역배열"                     # 5<20<60
+    rsi = cards["rsi"]
+    assert rsi.calc_basis.rsi_period == 14 and rsi.calc_basis.oversold == 35.0 and rsi.calc_basis.overbought == 70.0
+    assert cards["volume"].calc_basis.relative_volume == 1.04
+    sr = cards["support_resistance"].calc_basis
+    assert sr.support == 403500.0 and sr.resistance == 582000.0 and sr.position == "지지 근접"
+    assert cards["moving_average"].verified is True                # 리포트 verification passed
+
+
+def test_pattern_card_exposes_cup_handle_annotation_only():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards(), stock=None)
+    pattern = next(c for c in rm.indicator_cards if c.indicator == "pattern")
+    kinds = [pc.kind for pc in pattern.pattern_candidates]
+    assert "cup_handle_candidate" in kinds
+    pc = next(p for p in pattern.pattern_candidates if p.kind == "cup_handle_candidate")
+    assert pc.period == "1y" and pc.label == "컵앤핸들 후보"
+    assert pc.meta["candidate_stage"] == "handle_forming"          # meta 그대로 전달
+    # annotation-only 정책: signal_score/final_regime/consensus 는 영향 없음(기존값 불변).
+    assert rm.signals.signal_score == 0.3 and rm.summary.final_regime == "uptrend_intact"
+    assert rm.summary.directional_bias == "bullish"                # cup_handle 이 방향 바꾸지 않음
+
+
+def test_pattern_card_empty_when_no_candidate():
+    raw = _raw_cards()
+    raw["charts"] = [{"period": "1y", "chart_data": {"annotations": [
+        {"kind": "dead_cross", "date": "2026-06-01"}]}}]
+    rm = build_read_model(report_id=_RID, raw=raw, stock=None)
+    pattern = next(c for c in rm.indicator_cards if c.indicator == "pattern")
+    assert pattern.pattern_candidates == []                        # 없으면 빈 배열(안전)
+
+
+def test_indicator_cards_backward_safe_empty_payload():
+    rm = build_read_model(report_id=_RID, raw={}, stock=None)
+    assert rm.indicator_cards == []                                # 구버전/빈 payload → 빈 배열
+
+
+def test_calc_basis_series_empty_when_no_chart_series():
+    # _raw_cards 는 annotations 만(candles/overlays/subcharts 없음) → 시계열/파생 모두 빈값(무크래시).
+    rm = build_read_model(report_id=_RID, raw=_raw_cards(), stock=None)
+    cards = {c.indicator: c for c in rm.indicator_cards}
+    assert cards["moving_average"].calc_basis.recent_ma == []
+    assert cards["moving_average"].calc_basis.disparity_20_pct is None
+    assert cards["rsi"].calc_basis.rsi_recent_points == []
+    assert cards["volume"].calc_basis.volume_recent_bars == []
+    assert cards["volume"].calc_basis.current_volume is None and cards["volume"].calc_basis.avg_volume is None
+
+
+def _raw_cards_series() -> dict:
+    """카드 시계열 projection용 — 1y 일봉 chart_data 에 overlays/subcharts/candles 를 채운다."""
+    raw = _raw_cards()
+    dates = ["2026-06-25", "2026-06-26", "2026-06-27", "2026-06-30"]
+    ma5 = [82300, 82500, 82700, 82900]
+    ma20 = [80900, 81050, 81200, 81400]
+    ma60 = [80500, 80550, 80580, 80600]
+    vols = [10500000, 11000000, 10800000, 11800000]
+    raw["charts"] = [{"period": "1y", "chart_data": {
+        "candle_unit": "D",
+        "candles": [{"date": d, "close": (83200 if i == len(dates) - 1 else 82000), "volume": v}
+                    for i, (d, v) in enumerate(zip(dates, vols))],
+        "overlays": {"moving_average": [
+            {"window": 5, "points": [{"date": d, "value": v} for d, v in zip(dates, ma5)]},
+            {"window": 20, "points": [{"date": d, "value": v} for d, v in zip(dates, ma20)]},
+            {"window": 60, "points": [{"date": d, "value": v} for d, v in zip(dates, ma60)]},
+        ]},
+        "subcharts": {"rsi": {"period": 14, "points": [
+            {"date": d, "value": v} for d, v in zip(dates, [55.1, 56.4, 57.0, 58.2])]}},
+        "annotations": [],
+    }}]
+    # 상대거래량 1.10 (avg 역산 확인용)
+    for s in raw["technical_signals"]:
+        if s["indicator"] == "volume":
+            s["metrics"] = ["거래량비 1.10"]
+    return raw
+
+
+def test_calc_basis_ma_table_and_disparity():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards_series(), stock=None)
+    cb = next(c for c in rm.indicator_cards if c.indicator == "moving_average").calc_basis
+    assert len(cb.recent_ma) == 4                                  # 날짜 union, 최근 N(<8)
+    assert cb.recent_ma[-1] == {"date": "2026-06-30", "ma5": 82900, "ma20": 81400, "ma60": 80600}
+    # 20일 이격도 = (현재종가 83200 − 20MA 81400)/81400 ×100
+    assert cb.disparity_20_pct == round((83200 - 81400) / 81400 * 100, 2)
+
+
+def test_calc_basis_rsi_recent_points():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards_series(), stock=None)
+    cb = next(c for c in rm.indicator_cards if c.indicator == "rsi").calc_basis
+    assert len(cb.rsi_recent_points) == 4
+    assert cb.rsi_recent_points[-1] == {"date": "2026-06-30", "value": 58.2}
+
+
+def test_calc_basis_volume_bars_and_avg():
+    rm = build_read_model(report_id=_RID, raw=_raw_cards_series(), stock=None)
+    cb = next(c for c in rm.indicator_cards if c.indicator == "volume").calc_basis
+    assert len(cb.volume_recent_bars) == 4
+    assert cb.volume_recent_bars[-1] == {"date": "2026-06-30", "volume": 11800000}
+    assert cb.current_volume == 11800000
+    assert cb.avg_volume == round(11800000 / 1.10, 1)             # 당일/상대거래량 역산
+
+
+# ── 1d intraday 조건부 계약 잠금 (best-effort — 있으면 흐른다) ────────────────
+def _raw_with_1d() -> dict:
+    raw = _raw()
+    raw["charts"] = [
+        {"period": "3m", "chart_data": {"candle_unit": "D", "candles": [], "annotations": []}},
+        {"period": "1y", "chart_data": {"candle_unit": "D", "candles": [], "annotations": []}},
+        {"period": "5y", "chart_data": {"candle_unit": "W", "candles": [], "annotations": []}},
+        {"period": "1d", "chart_data": {"candle_unit": "1min", "candles": [{"o": 1}], "annotations": []}},
+    ]
+    raw["intraday_context"] = {"as_of": "x"}
+    return raw
+
+
+def test_read_model_includes_1d_when_present():
+    rm = build_read_model(report_id=_RID, raw=_raw_with_1d(), stock=None)
+    assert "1d" in rm.charts.available_periods                       # 있으면 available_periods 에 포함
+    assert rm.trace_summary.data_quality.intraday_available is True  # 보조 신호 true
+    assert rm.trace_summary.flags.has_intraday_context is True
+    assert any(c.period == "1d" and c.candle_unit == "1min" for c in rm.charts.items)
+
+
+def test_read_model_omits_1d_when_absent():
+    # 기본(3m/1y/5y만) — 1d 조건부라 없으면 available_periods 에도 없고 intraday_available=false.
+    rm = build_read_model(report_id=_RID, raw=_raw(), stock=None)
+    assert "1d" not in rm.charts.available_periods
+    assert rm.trace_summary.data_quality.intraday_available is False
+
+
+def test_charts_endpoint_model_passes_1d_full():
+    from src.api.services.technical_report_service import build_charts_read_model
+    cm = build_charts_read_model(report=_report(output_payload=_raw_with_1d()), stock=None)
+    assert "1d" in cm.available_periods
+    intraday = next(c for c in cm.charts if c.period == "1d")
+    assert intraday.candle_unit == "1min" and intraday.chart_data["candles"] == [{"o": 1}]

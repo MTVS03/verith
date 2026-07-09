@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pathlib
 
-import graph as g
-from graph import BatchProviders, build_batch_graph, run_batch, run_query
+import src.agents.news.graph as g
+from src.agents.news.graph import BatchProviders, build_batch_graph, run_batch, run_query
 
 # 배치 노드 이름(graph 모듈 전역) — fake 로 갈아끼워 배선만 검증한다.
 _BATCH_NODE_NAMES = (
@@ -207,7 +207,8 @@ def _import_lines(module) -> list[str]:
 
 def test_graph_and_state_have_no_db_or_http_imports():
     """graph.py·state.py 어디에도 DB 드라이버·HTTP 라이브러리 import 가 없다(절대규칙 1)."""
-    import state
+    import src.agents.news.state as state
+
     for module in (g, state):
         imports = " ".join(_import_lines(module)).lower()
         for mod in ("httpx", "psycopg", "sqlalchemy", "neo4j", "pymysql", "asyncpg", "requests"):

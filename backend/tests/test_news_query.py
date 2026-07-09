@@ -54,7 +54,10 @@ async def test_articles_ordered_and_limited(seeded_client):
     body = resp.json()
     # published_at desc: a2(11) → a3(10). limit=2.
     assert [a["url"] for a in body] == ["https://q.test/2", "https://q.test/3"]
-    assert all({"news_id", "summary", "url"} == set(a) for a in body)
+    assert all(
+        {"news_id", "summary", "url", "title", "publisher", "published_at"} == set(a)
+        for a in body
+    )
     # summary 없는 기사(a3)는 빈 문자열
     assert body[1]["summary"] == ""
 

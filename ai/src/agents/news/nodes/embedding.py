@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-import services.embedder as embedder
+import src.agents.news.services.embedder as embedder
 
 logger = logging.getLogger(__name__)
 

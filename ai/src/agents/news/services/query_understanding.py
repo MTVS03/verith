@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import logging
 
-import services.llm as llm
-from config import (
+import src.agents.news.services.llm as llm
+from src.agents.news.config import (
     COMPANY_ALIASES,
     QUERY_DEFAULT_PERIOD_DAYS,
     QUERY_PRESET_QUESTION_TEMPLATE,
     QUERY_UNDERSTANDING_SYSTEM_PROMPT,
 )
-from schemas.query import QueryIntent, QueryUnderstanding
+from src.agents.news.schemas.query import QueryIntent, QueryUnderstanding
 
 logger = logging.getLogger(__name__)
 

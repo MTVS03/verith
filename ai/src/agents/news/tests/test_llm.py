@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-import services.crawler as crawler
-import services.llm as llm
-from config import EXTRACT_SYSTEM_PROMPT
-from schemas.article import Article, EventCandidate, ExtractResult, SourceType
+import src.agents.news.services.crawler as crawler
+import src.agents.news.services.llm as llm
+from src.agents.news.config import EXTRACT_SYSTEM_PROMPT
+from src.agents.news.schemas.article import Article, EventCandidate, ExtractResult, SourceType
 
 URL = "https://news.example.com/a/1"
 
@@ -195,7 +195,7 @@ def test_fallback_no_content_stays_skip(monkeypatch):
 
 # ---- Tool 루프 상한(§3.2-4) ------------------------------------------------
 def test_tool_loop_capped(monkeypatch):
-    from config import EXTRACT_MAX_TOOL_CALLS
+    from src.agents.news.config import EXTRACT_MAX_TOOL_CALLS
 
     def fake(messages, tools=None, tool_choice="auto"):
         # tools 가 제거되면(상한 도달) 최종 답을 낸다. 그 전에는 계속 tool 을 부른다.

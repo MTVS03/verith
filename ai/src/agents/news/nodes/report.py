@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 
-import services.report_renderer as report_renderer
-from schemas.query import Answer, QueryUnderstanding
-from schemas.response import SubjectQueryResponse
+import src.agents.news.services.report_renderer as report_renderer
+from src.agents.news.schemas.query import Answer, QueryUnderstanding
+from src.agents.news.schemas.response import SubjectQueryResponse
 
 logger = logging.getLogger(__name__)
 

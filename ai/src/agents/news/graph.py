@@ -18,18 +18,18 @@ import functools
 import logging
 from dataclasses import dataclass
 
-from config import GRAPH_RECURSION_LIMIT
-from nodes.crawl import crawl_node
-from nodes.embedding import embedding_node
-from nodes.extract import extract_node
-from nodes.graph_builder import graph_node
-from nodes.importance import importance_node
-from nodes.merge_event import merge_event_node
-from nodes.query import query_node
-from nodes.report import report_node
-from nodes.save import save_node
-from nodes.sentiment import sentiment_node
-from state import BatchState, QueryState
+from src.agents.news.config import GRAPH_RECURSION_LIMIT
+from src.agents.news.nodes.crawl import crawl_node
+from src.agents.news.nodes.embedding import embedding_node
+from src.agents.news.nodes.extract import extract_node
+from src.agents.news.nodes.graph_builder import graph_node
+from src.agents.news.nodes.importance import importance_node
+from src.agents.news.nodes.merge_event import merge_event_node
+from src.agents.news.nodes.query import query_node
+from src.agents.news.nodes.report import report_node
+from src.agents.news.nodes.save import save_node
+from src.agents.news.nodes.sentiment import sentiment_node
+from src.agents.news.state import BatchState, QueryState
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def _default_batch_providers() -> BatchProviders:
     생성자는 BackendClient 를 만들 뿐 네트워크를 치지 않는다. 실제 조회 실패는 각 Provider 가 []/None 으로
     degrade 하므로(providers.py §4.2), backend 미연결에서도 배치가 죽지 않는다.
     """
-    from services.backend.providers import (
+    from src.agents.news.services.backend.providers import (
         BackendEventArticleStatsProvider,
         BackendRecentEventProvider,
     )

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 
-import services.llm as llm
-import services.query_understanding as qu
-from config import QUERY_DEFAULT_PERIOD_DAYS
-from schemas.query import QueryIntent, QueryUnderstanding
+import src.agents.news.services.llm as llm
+import src.agents.news.services.query_understanding as qu
+from src.agents.news.config import QUERY_DEFAULT_PERIOD_DAYS
+from src.agents.news.schemas.query import QueryIntent, QueryUnderstanding
 
 
 def _mock_llm(monkeypatch, payload):

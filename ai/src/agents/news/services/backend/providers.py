@@ -17,12 +17,14 @@ import logging
 
 from pydantic import ValidationError
 
-from config import (
+from src.agents.news.config import (
     BACKEND_EVENT_STATS_PATH,
+    BACKEND_MERGE_CANDIDATES_PATH,
     BACKEND_RECENT_EVENTS_PATH,
+    MERGE_VECTOR_TOP_K,
 )
-from schemas.event import CandidateEvent, EventArticleStats
-from services.backend.client import BackendClient, BackendError
+from src.agents.news.schemas.event import CandidateEvent, EventArticleStats
+from src.agents.news.services.backend.client import BackendClient, BackendError
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +35,29 @@ class BackendRecentEventProvider:
     def __init__(self, client: BackendClient | None = None) -> None:
         self._client = client or BackendClient()
 
-    def get_recent_events(self, companies: list[str], within_days: int) -> list[CandidateEvent]:
-        """동일 회사·최근 within_days 이벤트를 조회 → CandidateEvent 로 매핑.
+    def get_recent_events(
+        self, companies: list[str], within_days: int,
+        embedding: list[float] | None = None,
+    ) -> list[CandidateEvent]:
+        """병합 후보 이벤트를 조회 → CandidateEvent 로 매핑.
 
-        - centroid(embedding)는 backend 가 계산·유지한 값을 **읽어 담기만** 한다(TASK 05 §3.4). 여기서
-          centroid 를 만들지 않는다.
+        - embedding 이 있으면 POST /events/merge-candidates(회사 ∪ 임베딩 최근접, A2) — 회사 없는 기사도
+          내용으로 후보를 얻는다. embedding 이 없으면 기존 GET /events/recent(회사 경로).
+        - centroid(embedding)는 backend 가 계산·유지한 값을 **읽어 담기만** 한다(TASK 05 §3.4).
         - HTTP 실패 시 로깅 후 `[]` (degrade). backend 미연결에서도 병합이 안 죽고 모든 기사가 신규가 된다.
         """
-        params = {"companies": companies, "within_days": within_days}
         try:
-            data = self._client._request("GET", BACKEND_RECENT_EVENTS_PATH, params=params)
+            if embedding:
+                body = {
+                    "companies": companies,
+                    "within_days": within_days,
+                    "embedding": list(embedding),
+                    "top_k": MERGE_VECTOR_TOP_K,
+                }
+                data = self._client._request("POST", BACKEND_MERGE_CANDIDATES_PATH, json=body)
+            else:
+                params = {"companies": companies, "within_days": within_days}
+                data = self._client._request("GET", BACKEND_RECENT_EVENTS_PATH, params=params)
         except BackendError as exc:
             logger.warning("get_recent_events 실패 — [] 로 degrade(모든 기사 신규): %s", exc)
             return []

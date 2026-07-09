@@ -15,12 +15,12 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from schemas.article import Article, ExtractResult
-from schemas.event import Event
-from schemas.graph import GraphBatch
-from schemas.query import Answer, QueryUnderstanding
-from schemas.report import ReportModel
-from schemas.response import SaveResponse, SubjectQueryResponse
+from src.agents.news.schemas.article import Article, ExtractResult
+from src.agents.news.schemas.event import Event
+from src.agents.news.schemas.graph import GraphBatch
+from src.agents.news.schemas.query import Answer, QueryUnderstanding
+from src.agents.news.schemas.report import ReportModel
+from src.agents.news.schemas.response import SaveResponse, SubjectQueryResponse
 
 
 class BatchState(TypedDict, total=False):

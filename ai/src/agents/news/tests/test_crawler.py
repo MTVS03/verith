@@ -10,7 +10,7 @@ import io
 
 import pytest
 
-import services.crawler as crawler
+import src.agents.news.services.crawler as crawler
 
 # 리터럴 공인 IP → DNS 없이 _validate_url 통과(사설 아님).
 PUBLIC = "http://93.184.216.34/article"

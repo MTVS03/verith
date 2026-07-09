@@ -16,22 +16,22 @@ from __future__ import annotations
 import httpx
 import pytest
 
-import nodes.save as save_node_mod
-import services.backend.providers as providers_mod
-import services.backend.query_client as query_client
-import services.backend.save_client as save_client
-from config import (
+import src.agents.news.nodes.save as save_node_mod
+import src.agents.news.services.backend.providers as providers_mod
+import src.agents.news.services.backend.query_client as query_client
+import src.agents.news.services.backend.save_client as save_client
+from src.agents.news.config import (
     BACKEND_QUERY_SHARED_PATH,
     BACKEND_QUERY_SUBJECT_PATH,
     BACKEND_SAVE_PATH,
 )
-from nodes.save import save_node
-from schemas.article import Article
-from schemas.event import CandidateEvent, EventArticleStats
-from schemas.graph import GraphBatch, GraphNode, NodeLabel
-from schemas.report import ArticleRef
-from schemas.response import CleanupResponse, SaveResponse, SubjectQueryResponse
-from services.backend.client import BackendClient, BackendError
+from src.agents.news.nodes.save import save_node
+from src.agents.news.schemas.article import Article
+from src.agents.news.schemas.event import CandidateEvent, EventArticleStats
+from src.agents.news.schemas.graph import GraphBatch, GraphNode, NodeLabel
+from src.agents.news.schemas.report import ArticleRef
+from src.agents.news.schemas.response import CleanupResponse, SaveResponse, SubjectQueryResponse
+from src.agents.news.services.backend.client import BackendClient, BackendError
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +241,8 @@ def test_recent_event_provider_degrades_to_empty_on_failure():
 
 def test_recent_event_provider_contract_compatible_with_decide_merge():
     # TASK 05 fake 자리에 이 provider 를 끼워도 decide_merge 가 동작(계약 호환).
-    import services.event_merge as event_merge
-    from schemas.article import ExtractResult
+    import src.agents.news.services.event_merge as event_merge
+    from src.agents.news.schemas.article import ExtractResult
 
     prov = providers_mod.BackendRecentEventProvider(client=RecordingClient(response=[]))
     art = _article(embedding=[0.1, 0.2, 0.3])

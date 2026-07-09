@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import logging
 
-import services.backend.save_client as save_client
-from config import (
+import src.agents.news.services.backend.save_client as save_client
+from src.agents.news.config import (
     CLEANUP_INTERVAL_MINUTES,
     CLEANUP_MAX_INSTANCES,
     CLEANUP_MISFIRE_GRACE_SEC,
     SCHEDULER_JITTER_SEC,
     SCHEDULER_TIMEZONE,
 )
-from schemas.response import CleanupResponse
+from src.agents.news.schemas.response import CleanupResponse
 
 logger = logging.getLogger(__name__)
 

@@ -17,33 +17,34 @@ import sys
 import time
 from collections import Counter
 
-# --- import 루트(conftest 규약: `from config import`, `from schemas...`) ---
-_ROOT = os.path.dirname(os.path.abspath(__file__))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+# --- import 루트: ai/ (= src 패키지 위치)를 넣어 `src.agents.news.*` 패키지 경로로 import ---
+# (news 4단계 상위 = news→agents→src→ai). streamlit 단독 실행에서도 패키지가 풀리게 shim.
+_AI_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+if _AI_ROOT not in sys.path:
+    sys.path.insert(0, _AI_ROOT)
 
 os.environ.setdefault("BACKEND_BASE_URL", "http://127.0.0.1:8001")
 
 import streamlit as st  # noqa: E402
 
 # 노드(배치) — graph.py 와 동일한 함수들을 직접 부른다
-import nodes.crawl as crawl_mod  # noqa: E402
-from nodes.crawl import crawl_node  # noqa: E402
-from nodes.embedding import embedding_node  # noqa: E402
-from nodes.extract import extract_node  # noqa: E402
-from nodes.graph_builder import graph_node  # noqa: E402
-from nodes.importance import importance_node  # noqa: E402
-from nodes.merge_event import merge_event_node  # noqa: E402
-from nodes.save import save_node  # noqa: E402
-from nodes.sentiment import sentiment_node  # noqa: E402
+import src.agents.news.nodes.crawl as crawl_mod  # noqa: E402
+from src.agents.news.nodes.crawl import crawl_node  # noqa: E402
+from src.agents.news.nodes.embedding import embedding_node  # noqa: E402
+from src.agents.news.nodes.extract import extract_node  # noqa: E402
+from src.agents.news.nodes.graph_builder import graph_node  # noqa: E402
+from src.agents.news.nodes.importance import importance_node  # noqa: E402
+from src.agents.news.nodes.merge_event import merge_event_node  # noqa: E402
+from src.agents.news.nodes.save import save_node  # noqa: E402
+from src.agents.news.nodes.sentiment import sentiment_node  # noqa: E402
 
 # 질의 서비스(리포트) — 직접 조합(배선 우회로 subject 프리셋도 사용)
-import services.answer_generator as ag  # noqa: E402
-import services.graph_query as gq  # noqa: E402
-import services.query_understanding as qu  # noqa: E402
-import services.report_renderer as rr  # noqa: E402
-import services.rss as rss_mod  # noqa: E402
-from services.backend.providers import (  # noqa: E402
+import src.agents.news.services.answer_generator as ag  # noqa: E402
+import src.agents.news.services.graph_query as gq  # noqa: E402
+import src.agents.news.services.query_understanding as qu  # noqa: E402
+import src.agents.news.services.report_renderer as rr  # noqa: E402
+import src.agents.news.services.rss as rss_mod  # noqa: E402
+from src.agents.news.services.backend.providers import (  # noqa: E402
     BackendEventArticleStatsProvider,
     BackendRecentEventProvider,
 )
@@ -185,6 +186,28 @@ def gauge_bar(g: dict) -> str:
     )
 
 
+def render_daily_counts(daily: list[dict]) -> None:
+    """날짜별 뉴스량(backend 집계값)을 막대그래프로. 리포트가 감성/순위 말고 '시간 흐름'도 보이게 한다."""
+    if not daily:
+        return
+    st.markdown("**🗓️ 날짜별 뉴스량**")
+    try:
+        import pandas as pd
+        df = pd.DataFrame(daily).rename(columns={"count": "뉴스 건수"}).set_index("date")
+        st.bar_chart(df["뉴스 건수"], height=220)
+    except Exception:  # pandas 미설치 등 → 표로 degrade(데모라 실패해도 멈추지 않게)
+        st.table(daily)
+    total = sum(int(d.get("count", 0)) for d in daily)
+    st.caption(f"총 {total}건 · {len(daily)}일에 분포")
+
+
+def dominant_label(g: dict) -> str:
+    """기사 표본이 적어(1건) 비율 바가 무의미할 때 쓸 대표 감성 문구. 감성 없는 기사면 '감성 미분석'."""
+    pairs = [("긍정", g.get("positive", 0)), ("중립", g.get("neutral", 0)), ("부정", g.get("negative", 0))]
+    label, cnt = max(pairs, key=lambda x: x[1])
+    return label if cnt > 0 else "감성 미분석"
+
+
 def build_report(subject: str | None = None, question: str | None = None) -> dict:
     """질의 서비스 직접 조합 → report_json. subject(종목 프리셋) 또는 question(자유질문)."""
     if subject:
@@ -216,15 +239,31 @@ def render_report(rj: dict) -> None:
         st.markdown("**🧭 뉴스 흐름 요약**")
         st.info(rj["answer_text"])
 
+    render_daily_counts(rj.get("daily_counts") or [])
+
     events = rj.get("top_events") or []
     if events:
         st.markdown(f"**📌 주요 이벤트 ({len(events)})**")
     for e in events:
         eg = e.get("gauge") or {}
-        with st.expander(f"{e.get('canonical_title','(제목 없음)')}  ·  중요도 {e.get('importance',0):.2f}  ·  관련기사 {e.get('article_count',0)}건"):
-            st.markdown(gauge_bar(eg), unsafe_allow_html=True)
+        ac = e.get("article_count", 0)
+        with st.expander(f"{e.get('canonical_title','(제목 없음)')}  ·  중요도 {e.get('importance',0):.2f}  ·  관련기사 {ac}건"):
+            # 기사 1건짜리 이벤트는 비율 바가 곧 100%라 과장돼 보인다 → 표본 수 + 대표 감성 텍스트로 표시.
+            if ac <= 1:
+                st.markdown(f"기사 {ac}건 · **{dominant_label(eg)}** &nbsp;<span style='color:#888;font-size:12px'>(표본 1건 — 비율 생략)</span>", unsafe_allow_html=True)
+            else:
+                st.markdown(gauge_bar(eg), unsafe_allow_html=True)
             for a in (e.get("articles") or []):
-                st.markdown(f"- [{a.get('summary','')[:80]}]({a.get('url','')})")
+                # 기사 제목 + (언론사·발행일) 헤더 + 요약 전문. 제목/언론사/발행일은 backend가 내려줄 때만 표시(없으면 생략).
+                title = a.get("title") or a.get("summary", "")[:40]
+                url = a.get("url", "")
+                meta = []
+                if a.get("publisher"):
+                    meta.append("📰 " + str(a["publisher"]))
+                if a.get("published_at"):
+                    meta.append("🗓️ " + str(a["published_at"])[:10])  # YYYY-MM-DD
+                st.markdown(f"**[{title}]({url})**" + ("　—　" + " · ".join(meta) if meta else ""))
+                st.caption(a.get("summary", ""))
 
 
 # ---------------------------------------------------------------------------

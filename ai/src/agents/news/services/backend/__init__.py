@@ -10,17 +10,17 @@
 """
 from __future__ import annotations
 
-from services.backend.client import BackendClient, BackendError
-from services.backend.providers import (
+from src.agents.news.services.backend.client import BackendClient, BackendError
+from src.agents.news.services.backend.providers import (
     BackendEventArticleStatsProvider,
     BackendRecentEventProvider,
 )
-from services.backend.query_client import (
+from src.agents.news.services.backend.query_client import (
     get_articles_by_event,
     get_events_by_subject,
     get_shared_events,
 )
-from services.backend.save_client import request_cleanup, save_batch
+from src.agents.news.services.backend.save_client import request_cleanup, save_batch
 
 __all__ = [
     "BackendClient",

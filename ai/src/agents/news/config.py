@@ -136,6 +136,7 @@ MERGE_W_TIME: float = 0.1                       # 시간 근접도 가중
 MERGE_THRESHOLD: float = 0.7                    # 미만이면 신규 이벤트(억지 편입 금지) — 튜닝 대상(§4)
 MERGE_CANDIDATE_WINDOW_DAYS: int = 7            # 후보: 동일 회사·최근 N일(event_merge.md §5)
 MERGE_TIME_DECAY_DAYS: float = 7.0             # time_proximity 감쇠 스케일(며칠 차이까지 가깝게 볼지) — 튜닝 대상
+MERGE_VECTOR_TOP_K: int = 20                    # A2: 임베딩 최근접 병합 후보 개수(pgvector). 회사 없는 기사의 후보 확보용 — 튜닝 대상
 
 # ---------------------------------------------------------------------------
 # 중요도(importance) 설정 — TASK 06. importance = 기사 개수 + 언론사 가중치 + 감성 절대값
@@ -211,6 +212,7 @@ BACKEND_SAVE_BATCH_SIZE: int | None = int(_BACKEND_SAVE_BATCH_SIZE_ENV) if _BACK
 BACKEND_SAVE_PATH: str = "/news/batch/save"                       # 배치 저장(POST): {articles, graph_batch} → SaveResponse
 BACKEND_CLEANUP_PATH: str = "/news/cleanup"                       # 7일 롤링 삭제 트리거(POST) → CleanupResponse
 BACKEND_RECENT_EVENTS_PATH: str = "/news/events/recent"          # 병합 후보(GET, TASK 05) → CandidateEvent[]
+BACKEND_MERGE_CANDIDATES_PATH: str = "/news/events/merge-candidates"  # 병합 후보(POST, A2): 회사 ∪ 임베딩 최근접 → CandidateEvent[]
 BACKEND_EVENT_STATS_PATH: str = "/news/events/stats"             # 중요도 통계(GET, TASK 06) → EventArticleStats | null
 BACKEND_QUERY_SUBJECT_PATH: str = "/news/query/subject"         # 종목 single-hop(GET) → SubjectQueryResponse
 BACKEND_QUERY_SHARED_PATH: str = "/news/query/shared"          # 공유 이벤트 multi-hop(GET) → SubjectQueryResponse
@@ -228,13 +230,18 @@ DEDUP_SKIP_EXISTING: bool = (os.getenv("DEDUP_SKIP_EXISTING") or "true").strip()
 # schemas/graph.py Enum(TASK 07) 재사용 — config에 안 둔다.
 # ---------------------------------------------------------------------------
 QUERY_DEFAULT_PERIOD_DAYS: int = 7          # 질문에 기간 표현이 없을 때 기본 조회 기간(query_spec §2-①)
-REPORT_TOP_N: int = 5                        # 리포트 '주요 이슈' TOP 개수
-REPORT_MAX_ARTICLES_PER_EVENT: int = 3      # 이벤트별 화면 노출 대표 기사 수(article_count(총 건수)와 별개, TASK 01 §3.3)
+REPORT_TOP_N: int = 10                       # 리포트 '주요 이슈' TOP 개수
+REPORT_MAX_ARTICLES_PER_EVENT: int = 100    # 이벤트별 화면 노출 기사 수 = '전부'(넉넉한 안전 상한). article_count(총 건수)와 별개
+QUERY_ANSWER_MAX_ARTICLES_PER_EVENT: int = 3  # ④ 답변 생성 LLM에 넣는 이벤트별 근거 기사 상한. 표시(전부)와 분리 — 토큰 보호(8192 컨텍스트, QUERY_ANSWER_MAX_EVENTS와 함께)
 # ⚠️ 관련도(질문-이벤트 적합도) 점수 정의는 미확정(CLAUDE.md §8, query_spec §6) → 잠정 importance 내림차순.
 #    관련도 점수 확정 시 이 값만 교체한다(정렬 기준을 코드에 박지 않는다). 현재 지원: "importance".
 REPORT_RANKING: str = "importance"
-QUERY_ANSWER_MAX_TOKENS: int = 1024         # ④ 답변 생성 토큰(services/llm.py에 전달). 추출용 LLM_MAX_TOKENS와 별개
+QUERY_ANSWER_MAX_TOKENS: int = 2048         # ④ 답변 생성 토큰(services/llm.py에 전달). 추출용 LLM_MAX_TOKENS와 별개. 바쁜 종목(이벤트多)은 근거 event_id(UUID) 나열이 길어 1024면 JSON이 잘려 파싱 실패 → 2048로 상향
 QUERY_ANSWER_TEMPERATURE: float = 0.3       # ④ 답변 생성 온도(요약 서술이라 추출(0.1)보다 약간 높임) — 튜닝 대상
+# ④ 답변 생성 LLM에 넘길 근거 이벤트 상한. 바쁜 종목(삼성전자 등 이벤트 수십개)은 전부 넣으면 prompt가
+#    서버 컨텍스트(8192)를 잠식해 답변 JSON이 잘려 파싱 실패한다(finish_reason=length). 리포트는 어차피
+#    importance순 TOP N(REPORT_TOP_N)만 노출하므로, 답변도 상위 이벤트만 근거로 삼는다(프롬프트 축소 + 근거 칩↔노출 이벤트 정합).
+QUERY_ANSWER_MAX_EVENTS: int = 8
 # 종목 선택(A) → 자유 질문(B) 변환 문구. 문구를 코드에 흩지 않고 config에(query_spec §2-①).
 QUERY_PRESET_QUESTION_TEMPLATE: str = "{company} 최근 뉴스 요약해줘"
 

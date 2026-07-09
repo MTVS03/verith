@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from config import (
+from src.agents.news.config import (
     BACKEND_AUTH_TOKEN,
     BACKEND_BASE_URL,
     BACKEND_MAX_RETRIES,

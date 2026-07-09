@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from schemas.report import ArticleRef, SentimentGauge
-from schemas.event import Event
+from src.agents.news.schemas.report import ArticleRef, DailyCount, SentimentGauge
+from src.agents.news.schemas.event import Event
 
 
 class EventWithArticles(BaseModel):
@@ -32,6 +32,8 @@ class SubjectQueryResponse(BaseModel):
     events: list[EventWithArticles] = Field(default_factory=list)
     # 전체 감성 집계(sentiment=None 제외). backend가 채운다 — ai는 재집계 안 함(절대규칙 4, SCHEMA_SPEC §7.3).
     overall_gauge: SentimentGauge = Field(default_factory=SentimentGauge)
+    # 포함된 이벤트 기사들의 발행일(KST)별 건수(오름차순). backend 집계값을 받기만 함(리포트 막대그래프용).
+    daily_counts: list[DailyCount] = Field(default_factory=list)
 
 
 class SaveResponse(BaseModel):

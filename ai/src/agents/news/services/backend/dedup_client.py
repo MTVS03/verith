@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import logging
 
-from config import BACKEND_EXISTS_PATH
-from services.backend.client import BackendClient, BackendError
+from src.agents.news.config import BACKEND_EXISTS_PATH
+from src.agents.news.services.backend.client import BackendClient, BackendError
 
 logger = logging.getLogger(__name__)
 

@@ -12,16 +12,16 @@ import math
 
 import pytest
 
-import services.importance as importance
-from config import (
+import src.agents.news.services.importance as importance
+from src.agents.news.config import (
     IMPORTANCE_DEFAULT_PUBLISHER_WEIGHT,
     IMPORTANCE_W_PUBLISHER,
     IMPORTANCE_W_SENTIMENT,
     IMPORTANCE_W_VOLUME,
 )
-from nodes.importance import importance_node
-from schemas.article import Article, Sentiment
-from schemas.event import Event, EventArticleStats
+from src.agents.news.nodes.importance import importance_node
+from src.agents.news.schemas.article import Article, Sentiment
+from src.agents.news.schemas.event import Event, EventArticleStats
 
 _URL_SEQ = iter(range(1_000_000))
 

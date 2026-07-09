@@ -6,12 +6,12 @@
 """
 from __future__ import annotations
 
-import services.report_renderer as rr
-from config import REPORT_MAX_ARTICLES_PER_EVENT, REPORT_TOP_N
-from schemas.event import Event
-from schemas.query import Answer, QueryUnderstanding
-from schemas.report import ArticleRef, SentimentGauge
-from schemas.response import EventWithArticles, SubjectQueryResponse
+import src.agents.news.services.report_renderer as rr
+from src.agents.news.config import REPORT_MAX_ARTICLES_PER_EVENT, REPORT_TOP_N
+from src.agents.news.schemas.event import Event
+from src.agents.news.schemas.query import Answer, QueryUnderstanding
+from src.agents.news.schemas.report import ArticleRef, DailyCount, SentimentGauge
+from src.agents.news.schemas.response import EventWithArticles, SubjectQueryResponse
 
 
 def _ewa(cid, title, importance, n_articles, gauge):
@@ -38,10 +38,10 @@ def test_build_model_sorts_by_importance_and_limits(monkeypatch):
 
     # importance 내림차순
     assert [e.canonical_title for e in model.top_events][:3] == ["높은 중요도", "중간 중요도", "낮은 중요도"]
-    # 이벤트별 대표 소수만(총 건수와 구분)
+    # 이벤트별 관련 기사 '전부' 노출(중복만 제거). article_count(총 건수)와 값은 같다(모두 distinct).
     top = model.top_events[0]
     assert top.article_count == 5
-    assert len(top.articles) == REPORT_MAX_ARTICLES_PER_EVENT
+    assert len(top.articles) == 5  # 5건 전부(상한 REPORT_MAX_ARTICLES_PER_EVENT=100 이내)
     # overall_gauge 는 backend 집계값 그대로(재집계 없음)
     assert model.overall_gauge is overall
     assert model.data_limited is False
@@ -123,6 +123,29 @@ def test_report_json_preserves_special_chars_verbatim():
     # 원문이 손실·변형 없이 그대로 담김
     assert payload["top_events"][0]["canonical_title"] == "<b>실적</b> & \"발표\""
     assert payload["answer_text"] == "정상 <b>텍스트</b>"
+
+
+def test_report_json_carries_daily_counts_verbatim():
+    """날짜별 뉴스량은 backend 집계값을 그대로 싣는다(ai 재집계 없음). JSON 에 date(ISO)·count 로 직렬화."""
+    daily = [DailyCount(date="2026-07-07", count=3), DailyCount(date="2026-07-08", count=5)]
+    resp = SubjectQueryResponse(
+        subject="삼성전자", subject_found=True,
+        events=[_ewa("e1", "이슈", 1.0, 1, SentimentGauge(positive=1))],
+        overall_gauge=SentimentGauge(positive=1), daily_counts=daily,
+    )
+    payload = rr.build_report_model(_understanding(), resp, Answer(text="t")).model_dump(mode="json")
+    assert payload["daily_counts"] == [
+        {"date": "2026-07-07", "count": 3},
+        {"date": "2026-07-08", "count": 5},
+    ]
+
+
+def test_report_json_daily_counts_default_empty():
+    """backend 가 daily_counts 를 안 줘도(구버전 응답) 빈 리스트로 안전하게 파싱된다."""
+    resp = SubjectQueryResponse(subject="삼성전자", subject_found=True,
+                                events=[_ewa("e1", "이슈", 1.0, 1, SentimentGauge(positive=1))])
+    payload = rr.build_report_model(_understanding(), resp, Answer(text="t")).model_dump(mode="json")
+    assert payload["daily_counts"] == []
 
 
 def test_fallback_report_json_conforms_to_schema():

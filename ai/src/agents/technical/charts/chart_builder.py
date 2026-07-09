@@ -519,6 +519,13 @@ def _cup_handle_at(source: Sequence[OHLCV], end_i: int, *, lookback: int, vol_av
         "handle_pullback_pct": round(handle_pullback, 4),
         "handle_bars": handle_bars,
         "candidate_stage": "handle_forming",
+        # 구간 렌더용 x축 좌표 — 탐지에 이미 쓴 index 에서 **실제 source date 만** 파생(추정 없음).
+        # handle_start=우측 rim 다음 봉, handle_end=현재 anchor 봉(end_i). 프론트가 컵/핸들 구간을 그린다.
+        "left_rim_date": source[lo_i + left_rim_idx].date,
+        "bottom_date": source[lo_i + bottom_idx].date,
+        "right_rim_date": source[lo_i + right_rim_idx].date,
+        "handle_start_date": source[lo_i + right_rim_idx + 1].date,
+        "handle_end_date": source[end_i].date,
         # 거래량은 생성 조건이 아니라 confirmation 정보. 기존 VOLUME_SPIKE_MULTIPLIER 재사용.
         "volume_confirmed": bool(vol_ratio is not None and vol_ratio >= VOLUME_SPIKE_MULTIPLIER),
         "volume_ratio": vol_ratio,

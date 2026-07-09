@@ -11,8 +11,8 @@ import logging
 import signal
 import threading
 
-from scheduler.cleanup_scheduler import start_cleanup_scheduler
-from scheduler.rss_scheduler import start_rss_scheduler
+from src.agents.news.scheduler.cleanup_scheduler import start_cleanup_scheduler
+from src.agents.news.scheduler.rss_scheduler import start_rss_scheduler
 
 logger = logging.getLogger(__name__)
 

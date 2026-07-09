@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from utils.html_parser import extract_text
+from src.agents.news.utils.html_parser import extract_text
 
 
 def test_normal_page_uses_visible_text():

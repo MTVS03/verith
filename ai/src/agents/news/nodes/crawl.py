@@ -11,9 +11,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-import services.backend.dedup_client as dedup_client
-import services.rss as rss
-from config import CRAWL_MAX_ARTICLES, DEDUP_SKIP_EXISTING
+import src.agents.news.services.backend.dedup_client as dedup_client
+import src.agents.news.services.rss as rss
+from src.agents.news.config import CRAWL_MAX_ARTICLES, DEDUP_SKIP_EXISTING
 
 logger = logging.getLogger(__name__)
 

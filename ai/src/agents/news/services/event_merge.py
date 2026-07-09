@@ -18,17 +18,17 @@ from datetime import datetime, timezone
 from typing import Protocol
 from uuid import uuid4
 
-from config import (
+from src.agents.news.config import (
     MERGE_CANDIDATE_WINDOW_DAYS,
     MERGE_THRESHOLD,
     MERGE_W_COMPANY,
     MERGE_W_SUMMARY,
     MERGE_W_TIME,
 )
-from schemas.article import Article, ExtractResult
-from schemas.event import CandidateEvent, Event, MergeCandidate, MergeDecision
-from utils.entity import normalize_entity_name
-from utils.similarity import company_overlap, cosine_similarity, time_proximity
+from src.agents.news.schemas.article import Article, ExtractResult
+from src.agents.news.schemas.event import CandidateEvent, Event, MergeCandidate, MergeDecision
+from src.agents.news.utils.entity import normalize_entity_name
+from src.agents.news.utils.similarity import company_overlap, cosine_similarity, time_proximity
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,12 @@ _FALLBACK_TITLE_MAX_CHARS = 40
 class RecentEventProvider(Protocol):
     """후보 이벤트 조회 계약(후보 축소). 실제 구현은 TASK 08(backend 클라이언트)."""
 
-    def get_recent_events(self, companies: list[str], within_days: int) -> list[CandidateEvent]:
-        """동일 회사·최근 within_days 이벤트만 반환(후보 축소, event_merge.md §5).
+    def get_recent_events(
+        self, companies: list[str], within_days: int,
+        embedding: list[float] | None = None,
+    ) -> list[CandidateEvent]:
+        """동일 회사·최근 within_days 이벤트 + (embedding 주면) 임베딩 최근접 이벤트를 후보로 반환(A2).
+        회사 없는 기사도 embedding 으로 내용이 비슷한 최근 이벤트를 후보로 얻어 과분할을 막는다.
         미주입 기본 구현은 []를 반환(backend 미연결에서도 파이프라인이 죽지 않고, 모든 기사가 신규가 됨)."""
         ...
 
@@ -53,7 +57,10 @@ class DefaultRecentEventProvider:
     TASK 08의 backend 클라이언트가 이 자리에 실제 조회 provider를 주입한다.
     """
 
-    def get_recent_events(self, companies: list[str], within_days: int) -> list[CandidateEvent]:
+    def get_recent_events(
+        self, companies: list[str], within_days: int,
+        embedding: list[float] | None = None,
+    ) -> list[CandidateEvent]:
         return []
 
 
@@ -69,15 +76,22 @@ class BatchAugmentedProvider:
         self._base = base
         self._batch = batch_candidates
 
-    def get_recent_events(self, companies: list[str], within_days: int) -> list[CandidateEvent]:
-        base_events = self._base.get_recent_events(companies, within_days)
-        # 배치 후보는 회사가 하나라도 겹치는 것만(다른 회사 사건과 섞이지 않게 — 후보 축소 계약과 동일).
+    def get_recent_events(
+        self, companies: list[str], within_days: int,
+        embedding: list[float] | None = None,
+    ) -> list[CandidateEvent]:
+        base_events = self._base.get_recent_events(companies, within_days, embedding)
+        # 배치 후보 편입 규칙: 회사가 겹치면 후보. 양쪽 다 회사가 없으면(무회사 기사끼리) 내용(요약)으로만
+        # 판정하도록 후보에 포함한다(A1 재정규화가 요약·시간으로 채점, 임계값이 과병합을 막음). 한쪽만 회사가
+        # 있으면(회사 vs 무회사) 다른 사건일 가능성이 커 섞지 않는다.
         query_set = {n for n in (normalize_entity_name(c) for c in companies) if n}
-        batch_hits = [
-            c
-            for c in self._batch
-            if query_set & {n for n in (normalize_entity_name(x) for x in c.companies) if n}
-        ]
+        batch_hits: list[CandidateEvent] = []
+        for c in self._batch:
+            cand_set = {n for n in (normalize_entity_name(x) for x in c.companies) if n}
+            if query_set & cand_set:
+                batch_hits.append(c)
+            elif not query_set and not cand_set:
+                batch_hits.append(c)
         return list(base_events) + batch_hits
 
 
@@ -102,15 +116,25 @@ def score_candidate(
     - summary_similarity = cosine_similarity(기사 벡터, 후보 대표 벡터(centroid))
     - company_overlap    = 회사 리스트 Jaccard(한쪽 비면 0)
     - time_similarity    = 이벤트 발생 시점 근접도(None 이면 0)
+
+    ⚠️ 회사 신호 재정규화(§3 보강): 회사 항은 **양쪽에 회사가 다 있을 때만** 유효하다. 한쪽이라도 회사가
+       없으면 company_overlap=0 은 '다른 회사'가 아니라 '회사 정보 없음(미지)'이므로, 회사 가중치를 요약·
+       시간에 재분배해(요약·시간 합=1) 회사 없는 기사도 내용으로 병합되게 한다. 둘 다 회사가 있으나 안
+       겹치면(진짜 다른 회사) 재정규화하지 않고 company_overlap=0 을 그대로 반영해 과병합을 막는다.
     """
     summary_sim = cosine_similarity(article_vec, cand.embedding)
     company_ov = company_overlap(article_companies, cand.companies)
     time_sim = time_proximity(article_time, cand.event_time)
-    score = (
-        MERGE_W_SUMMARY * summary_sim
-        + MERGE_W_COMPANY * company_ov
-        + MERGE_W_TIME * time_sim
-    )
+    company_known = bool(article_companies) and bool(cand.companies)
+    if company_known:
+        score = (
+            MERGE_W_SUMMARY * summary_sim
+            + MERGE_W_COMPANY * company_ov
+            + MERGE_W_TIME * time_sim
+        )
+    else:
+        denom = MERGE_W_SUMMARY + MERGE_W_TIME
+        score = (MERGE_W_SUMMARY / denom) * summary_sim + (MERGE_W_TIME / denom) * time_sim
     return MergeCandidate(
         event_id=cand.canonical_id,
         score=score,
@@ -137,7 +161,9 @@ def decide_merge(
         return None  # 임베딩 없음 → 병합 skip 신호(노드가 event_id/analysis_completed 미설정)
 
     article_time = _article_time(article, extract)
-    candidates_events = provider.get_recent_events(extract.companies, MERGE_CANDIDATE_WINDOW_DAYS)
+    candidates_events = provider.get_recent_events(
+        extract.companies, MERGE_CANDIDATE_WINDOW_DAYS, article.embedding
+    )
 
     scored = [
         score_candidate(article.embedding, extract.companies, article_time, ce)

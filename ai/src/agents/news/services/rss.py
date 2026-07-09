@@ -18,9 +18,9 @@ import urllib.request
 
 from pydantic import ValidationError
 
-from config import MAX_RETRIES, RETRY_BACKOFF, RSS_CANDIDATES, RSS_TIMEOUT, USER_AGENT
-from schemas.article import Article
-from utils.rss_parser import parse_rss
+from src.agents.news.config import MAX_RETRIES, RETRY_BACKOFF, RSS_CANDIDATES, RSS_TIMEOUT, USER_AGENT
+from src.agents.news.schemas.article import Article
+from src.agents.news.utils.rss_parser import parse_rss
 
 logger = logging.getLogger(__name__)
 

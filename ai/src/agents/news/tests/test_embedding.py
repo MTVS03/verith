@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import services.embedder as embedder
-import nodes.embedding as embedding_node_mod
-from nodes.embedding import embedding_node
-from schemas.article import Article
-from utils.similarity import company_overlap, cosine_similarity, time_proximity
+import src.agents.news.services.embedder as embedder
+import src.agents.news.nodes.embedding as embedding_node_mod
+from src.agents.news.nodes.embedding import embedding_node
+from src.agents.news.schemas.article import Article
+from src.agents.news.utils.similarity import company_overlap, cosine_similarity, time_proximity
 
 
 def _article(url: str, summary: str | None) -> Article:

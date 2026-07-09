@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-import services.importance as importance
+import src.agents.news.services.importance as importance
 
 logger = logging.getLogger(__name__)
 

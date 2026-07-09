@@ -80,6 +80,7 @@ class SignalItem(BaseModel):
     indicator: str
     signal: str | None = None
     value: float | None = None
+    weight: float | None = None           # 신호 가중치(저장돼 있으나 그동안 미노출 → 추가)
     metrics: list[str] = Field(default_factory=list)
     detail: str | None = None
     detail_source: str | None = None
@@ -219,6 +220,59 @@ class TrustSummaryBlock(BaseModel):
     source_linkage: SourceLinkageBlock
 
 
+# ── indicator card (지표 카드 UI용 — projection only, 새 판단 없음) ──────────
+class AnnotationBrief(BaseModel):
+    """차트 annotation 요약(패턴 후보/관련 이벤트). raw chart_data 전체가 아니라 카드용 얇은 값."""
+
+    kind: str
+    label: str | None = None
+    period: str | None = None             # 부모 차트 period(annotation 자체엔 없음)
+    date: str | None = None
+    importance: str | None = None
+    meta: dict | None = None              # kind별 계산 근거(cup_depth_pct 등) — 그대로 전달
+
+
+class IndicatorCalcBasis(BaseModel):
+    """지표별 계산 근거(저장 metrics/value에서 **방어적 파싱** — 실패 시 null, 조작 없음). raw chips 병기."""
+
+    kind: str
+    current_value: float | None = None
+    ma: dict[str, float] | None = None    # {"5":.., "20":.., "60":..}
+    alignment: str | None = None          # 정배열 | 역배열 | 혼조
+    rsi_period: int | None = None
+    oversold: float | None = None
+    overbought: float | None = None
+    relative_volume: float | None = None
+    support: float | None = None
+    resistance: float | None = None
+    position: str | None = None           # 지지 근접 | 저항 근접 | 중간
+    # 시계열/파생(차트 chart_data projection — 저장값, 계산 재실행 없음). 카드 내 표·스파크라인·바 용.
+    disparity_20_pct: float | None = None                          # (현재가−20MA)/20MA ×100
+    recent_ma: list[dict] = Field(default_factory=list)            # [{date, ma5?, ma20?, ma60?}] (최근 N)
+    rsi_recent_points: list[dict] = Field(default_factory=list)    # [{date, value}] (스파크라인)
+    current_volume: float | None = None
+    avg_volume: float | None = None
+    volume_recent_bars: list[dict] = Field(default_factory=list)   # [{date, volume}] (최근 N)
+    metrics: list[str] = Field(default_factory=list)               # raw 계산 칩(프론트 fallback)
+    related_annotations: list[AnnotationBrief] = Field(default_factory=list)
+
+
+class IndicatorCard(BaseModel):
+    """지표 카드 1개 — 프론트가 RSI/이동평균/거래량/지지저항/패턴을 바로 렌더."""
+
+    indicator: str
+    title: str
+    signal: str | None = None
+    signal_label: str | None = None       # 긍정/중립/부정
+    weight: float | None = None
+    llm_detail: str | None = None         # technical_signals[].detail (LLM/템플릿 문장)
+    detail_source: str | None = None
+    verified: bool = True                 # 리포트 verification 통과 기준(지표별 세부 검증 아님)
+    code_metrics: list[str] = Field(default_factory=list)
+    calc_basis: IndicatorCalcBasis
+    pattern_candidates: list[AnnotationBrief] = Field(default_factory=list)  # pattern 카드만(cup_handle 등)
+
+
 class TechnicalReportReadModel(BaseModel):
     """POST/GET 단건 응답 — 프론트가 섹션별로 바로 렌더할 수 있는 read model.
 
@@ -238,6 +292,7 @@ class TechnicalReportReadModel(BaseModel):
     verification: VerificationBlock
     trace_summary: TraceSummaryBlock
     trust_summary: TrustSummaryBlock                   # 상단 카드용 집계(신뢰도/데이터품질/검증게이트/출처연결)
+    indicator_cards: list[IndicatorCard] = Field(default_factory=list)  # 지표 카드 UI용 projection
     followup_count: int = 0                            # 이 리포트에 이어진 후속 질문 수(스레드는 별도 endpoint)
 
 

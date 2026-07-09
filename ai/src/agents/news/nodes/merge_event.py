@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-import services.event_merge as event_merge
+import src.agents.news.services.event_merge as event_merge
 
 logger = logging.getLogger(__name__)
 

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import logging
 
-import services.answer_generator as answer_generator
-import services.graph_query as graph_query
-import services.query_understanding as query_understanding
-from schemas.query import QueryUnderstanding
+import src.agents.news.services.answer_generator as answer_generator
+import src.agents.news.services.graph_query as graph_query
+import src.agents.news.services.query_understanding as query_understanding
+from src.agents.news.schemas.query import QueryUnderstanding
 
 logger = logging.getLogger(__name__)
 

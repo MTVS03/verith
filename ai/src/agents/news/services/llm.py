@@ -24,8 +24,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from pydantic import ValidationError
 
-import services.crawler as crawler
-from config import (
+import src.agents.news.services.crawler as crawler
+from src.agents.news.config import (
     EXTRACT_CONTENT_MAX_CHARS,
     EXTRACT_MAX_TOOL_CALLS,
     EXTRACT_SYSTEM_PROMPT,
@@ -38,7 +38,7 @@ from config import (
     LLM_TEMPERATURE,
     LLM_TIMEOUT,
 )
-from schemas.article import Article, ExtractResult, SourceType
+from src.agents.news.schemas.article import Article, ExtractResult, SourceType
 
 logger = logging.getLogger(__name__)
 
