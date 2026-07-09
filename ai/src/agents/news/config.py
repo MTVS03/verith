@@ -87,7 +87,11 @@ LLM_MAX_TOKENS: int = 2048                 # JSON 출력 상한. thinking 모델
 # thinking 이 켜진 채 max_tokens 가 작으면 추론이 토큰을 소진해 content 가 비어 온다(파싱 실패의 실제 원인).
 # 추출/질의 답변 모두 thinking 을 끈다. (vLLM/SGLang OpenAI 엔드포인트: chat_template_kwargs 로 전달)
 LLM_DISABLE_THINKING: bool = (os.getenv("LLM_DISABLE_THINKING") or "true").strip().lower() in ("1", "true", "yes")
-LLM_TIMEOUT: float = 30.0                  # 모델 호출 타임아웃(초)
+LLM_TIMEOUT: float = 30.0                  # 모델 호출 타임아웃(초) — read(생성 대기) 예산
+# 방어(2026-07-10): connect 만 분리해 짧게. 서버 다운(패킷 드랍)이면 read 30초가 아니라 3초 만에
+# 실패를 감지한다 — 실측: 서버 다운 시 질의 1회가 189초(2호출×3시도×30초)를 낭비하던 것의 원인.
+# 서버가 살아 있으면 connect 는 즉시 성립하므로 정상 경로 동작·출력에 영향 없음.
+LLM_CONNECT_TIMEOUT: float = 3.0           # TCP 연결 성립 예산(초). 다운 감지 전용
 LLM_MAX_RETRIES: int = 2                   # 재시도 횟수(총 시도 = 1 + LLM_MAX_RETRIES)
 LLM_RETRY_BACKOFF: float = 1.0             # 재시도 간 대기(초)
 
