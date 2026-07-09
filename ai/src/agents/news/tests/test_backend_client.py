@@ -17,15 +17,20 @@ import httpx
 import pytest
 
 import src.agents.news.nodes.save as save_node_mod
+import src.agents.news.nodes.save_report as save_report_node_mod
 import src.agents.news.services.backend.providers as providers_mod
 import src.agents.news.services.backend.query_client as query_client
+import src.agents.news.services.backend.report_client as report_client
 import src.agents.news.services.backend.save_client as save_client
 from src.agents.news.config import (
     BACKEND_QUERY_SHARED_PATH,
     BACKEND_QUERY_SUBJECT_PATH,
+    BACKEND_REPORT_SAVE_PATH,
     BACKEND_SAVE_PATH,
 )
 from src.agents.news.nodes.save import save_node
+from src.agents.news.nodes.save_report import save_report_node
+from src.agents.news.schemas.query import QueryIntent, QueryUnderstanding
 from src.agents.news.schemas.article import Article
 from src.agents.news.schemas.event import CandidateEvent, EventArticleStats
 from src.agents.news.schemas.graph import GraphBatch, GraphNode, NodeLabel
@@ -384,3 +389,95 @@ def test_save_node_survives_unexpected_exception(monkeypatch):
     state = {"articles": [_article()], "graph_batch": GraphBatch(nodes=[GraphNode(label=NodeLabel.EVENT, key="e1")])}
     out = save_node(state)  # 예외를 삼키고 ok=False 로 통과
     assert out["save_result"].ok is False
+
+
+# ---------------------------------------------------------------------------
+# report_client.save_report (질의 리포트 저장 → backend 발급 report_id)
+# ---------------------------------------------------------------------------
+def test_save_report_success_returns_report_id(monkeypatch):
+    fake = RecordingClient(response={"report_id": "rpt-1", "report": {"subject": "삼성전자"}})
+    _use_client(monkeypatch, report_client, fake)
+    report_id = report_client.save_report(
+        {"subject": "삼성전자", "answer_text": "요약"}, question="삼성 요약해줘", intent="요약",
+    )
+    assert report_id == "rpt-1"                       # backend 가 발급한 id 를 그대로 반환
+    # POST 로 리포트 저장 경로에 보냄 + payload 에 report/question/intent 포함.
+    assert fake.calls[0]["method"] == "POST"
+    assert fake.calls[0]["path"] == BACKEND_REPORT_SAVE_PATH
+    payload = fake.calls[0]["json"]
+    assert payload["report"]["subject"] == "삼성전자"
+    assert payload["question"] == "삼성 요약해줘"
+    assert payload["intent"] == "요약"
+
+
+def test_save_report_failure_returns_none(monkeypatch):
+    # 쓰기 실패는 성공 위장 금지 → report_id 없이 None(인라인 답변은 이미 나갔다).
+    fake = RecordingClient(error=BackendError("down"))
+    _use_client(monkeypatch, report_client, fake)
+    assert report_client.save_report({"subject": "삼성전자"}) is None
+
+
+def test_save_report_bad_response_returns_none(monkeypatch):
+    # 응답에 report_id 가 없으면(스키마 불일치) None — 저장됐다고 위장하지 않는다.
+    fake = RecordingClient(response={"report": {"subject": "삼성전자"}})
+    _use_client(monkeypatch, report_client, fake)
+    assert report_client.save_report({"subject": "삼성전자"}) is None
+
+
+def test_save_report_empty_report_skips_backend(monkeypatch):
+    fake = RecordingClient(response={"report_id": "x"})
+    _use_client(monkeypatch, report_client, fake)
+    assert report_client.save_report({}) is None
+    assert fake.calls == []                           # backend 호출 없음(환각 금지)
+
+
+# ---------------------------------------------------------------------------
+# save_report_node (얇은 노드)
+# ---------------------------------------------------------------------------
+def test_save_report_node_sets_report_id_and_passes_question_intent(monkeypatch):
+    captured = {}
+
+    def fake_save(report_json, *, question=None, intent=None, client_session_id=None):
+        captured.update(report_json=report_json, question=question, intent=intent)
+        return "rpt-9"
+
+    monkeypatch.setattr(save_report_node_mod.report_client, "save_report", fake_save)
+    state = {
+        "question": "삼성 요약해줘",
+        "report_json": {"subject": "삼성전자"},
+        "understanding": QueryUnderstanding(companies=["삼성전자"], intent=QueryIntent.SUMMARY),
+    }
+    out = save_report_node(state)
+    assert out["report_id"] == "rpt-9"               # backend 발급 id 를 state 에 실음
+    # understanding.intent 는 표시/검색용 문자열로 넘어간다("요약").
+    assert captured["intent"] == "요약"
+    assert captured["question"] == "삼성 요약해줘"
+
+
+def test_save_report_node_missing_report_id_passes_through(monkeypatch):
+    # 저장 실패(None)여도 흐름을 죽이지 않고 report_id 없이 통과(§2-5).
+    monkeypatch.setattr(save_report_node_mod.report_client, "save_report", lambda *a, **k: None)
+    out = save_report_node({"report_json": {"subject": "삼성전자"}})
+    assert "report_id" not in out
+
+
+def test_save_report_node_survives_unexpected_exception(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(save_report_node_mod.report_client, "save_report", boom)
+    out = save_report_node({"report_json": {"subject": "삼성전자"}})  # 예외 삼키고 통과
+    assert "report_id" not in out
+
+
+def test_save_report_node_no_report_json_skips(monkeypatch):
+    called = {"n": 0}
+
+    def fake_save(*a, **k):
+        called["n"] += 1
+        return "x"
+
+    monkeypatch.setattr(save_report_node_mod.report_client, "save_report", fake_save)
+    out = save_report_node({})                        # report_json 없음 → 저장 건너뜀
+    assert called["n"] == 0
+    assert "report_id" not in out

@@ -5,7 +5,8 @@
 검증 축(TASK 11 §7):
 - 배치 배선: crawl→…→save 순서, 앞 노드 산출 키를 뒤 노드가 받음, merge_event·importance 에 주입한
   Provider 가 실제로 노드에 전달됨, Provider 미주입(BatchProviders()) degrade(provider=None) 통과.
-- 질의 배선: query→report 로 이어지고 run_query 가 질문→JSON 리포트(state["report_json"])를 반환.
+- 질의 배선: query→report→save_report 로 이어지고 run_query 가 질문→JSON 리포트(state["report_json"])를
+  반환하며, save_report 가 backend 발급 report_id 를 실으면 반환 JSON 에도 얹는다(frontend 재조회용).
 - 진입점: run_batch/run_query 가 컴파일된 앱을 invoke.
 - 얇음·미접근: graph.py/state.py 에 SQL·Cypher·DB 드라이버·HTTP 라이브러리 import 없음, 배선 라이브러리
   (LangGraph)·backend import 는 함수 안(격리)에만.
@@ -167,7 +168,11 @@ def test_run_batch_invokes_compiled_graph_and_returns_state(monkeypatch):
 
 
 def test_run_query_returns_report_json_from_report_node(monkeypatch):
-    """run_query('질문') 이 query→report 를 이어 state['report_json'](JSON 계약)을 반환한다(Supervisor 진입점, §7)."""
+    """run_query('질문') 이 query→report→save_report 를 이어 state['report_json'](JSON 계약)을 반환한다(§7).
+
+    save_report 는 backend 저장 노드이므로 fake(미저장, report_id 없음)로 대체 — backend/네트워크 미호출.
+    미저장이면 report_id 키가 붙지 않아 report_json 이 그대로 반환된다(§2-5 정직 표기).
+    """
     order: list[str] = []
 
     def fake_query(state):
@@ -180,19 +185,39 @@ def test_run_query_returns_report_json_from_report_node(monkeypatch):
         assert state["answer"] == "A"                  # query 산출을 받는다
         return {"report_json": {"subject": "삼성전자", "answer_text": "리포트"}}
 
+    def fake_save_report(state):
+        order.append("save_report")
+        assert state["report_json"]["subject"] == "삼성전자"  # report 산출을 받는다
+        return {}                                      # 미저장(report_id 없음)
+
     monkeypatch.setattr(g, "query_node", fake_query)
     monkeypatch.setattr(g, "report_node", fake_report)
+    monkeypatch.setattr(g, "save_report_node", fake_save_report)
 
     payload = run_query("삼성 요약해줘")
 
-    assert order == ["query", "report"]
+    assert order == ["query", "report", "save_report"]
     assert payload == {"subject": "삼성전자", "answer_text": "리포트"}
+
+
+def test_run_query_surfaces_report_id_when_saved(monkeypatch):
+    """save_report 가 backend 발급 report_id 를 실으면 run_query 반환 JSON 에도 얹힌다(frontend 재조회용, §7)."""
+    monkeypatch.setattr(g, "query_node", lambda s: {"answer": "A"})
+    monkeypatch.setattr(g, "report_node", lambda s: {"report_json": {"subject": "삼성전자"}})
+    # save_report_node 가 backend 저장 후 report_id 를 state 에 싣는 상황을 fake.
+    monkeypatch.setattr(g, "save_report_node", lambda s: {"report_id": "rpt-123"})
+
+    payload = run_query("삼성 요약해줘")
+
+    assert payload["subject"] == "삼성전자"
+    assert payload["report_id"] == "rpt-123"           # 인라인 응답으로 report_id 전달
 
 
 def test_run_query_returns_empty_dict_when_report_json_missing(monkeypatch):
     """report 가 report_json 을 못 채워도 run_query 는 예외 없이 dict({})를 반환한다(방어)."""
     monkeypatch.setattr(g, "query_node", lambda s: {})
     monkeypatch.setattr(g, "report_node", lambda s: {})
+    monkeypatch.setattr(g, "save_report_node", lambda s: s)  # report_json 없으면 저장 건너뜀
     assert run_query("q") == {}
 
 

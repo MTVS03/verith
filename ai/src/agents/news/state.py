@@ -43,3 +43,4 @@ class QueryState(TypedDict, total=False):
     answer: Answer                                 # query(④) → report
     report_model: ReportModel                      # report(09) → report
     report_json: dict                              # report(최종 산출, JSON) → Supervisor·backend·frontend
+    report_id: str                                 # save_report(백엔드 저장 후 backend 발급) → Supervisor·frontend(GET /news/reports/{id})

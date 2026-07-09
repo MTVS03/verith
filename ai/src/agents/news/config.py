@@ -218,6 +218,7 @@ BACKEND_QUERY_SUBJECT_PATH: str = "/news/query/subject"         # 종목 single-
 BACKEND_QUERY_SHARED_PATH: str = "/news/query/shared"          # 공유 이벤트 multi-hop(GET) → SubjectQueryResponse
 BACKEND_EVENT_ARTICLES_PATH: str = "/news/events/{event_id}/articles"  # 이벤트별 기사 on-demand(GET, ?limit=N) → ArticleRef[]
 BACKEND_EXISTS_PATH: str = "/news/exists"                          # 이미 저장된 url 조회(POST): {urls} → {existing} — 신규 기사만 처리
+BACKEND_REPORT_SAVE_PATH: str = "/news/reports"                    # 질의 리포트 저장(POST): {report, question, intent} → {report_id, report}. frontend 가 report_id 로 GET
 
 # 배치 수집 후 '이미 저장된 url'을 backend 에 물어 걸러낼지. True 면 비싼 LLM 처리 전에 신규만 남긴다
 # (매시간 피드 전체를 재처리하지 않게 함). backend 미연결 시엔 걸러내지 않고 전부 처리(degrade, crawl_node).

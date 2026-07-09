@@ -4,7 +4,8 @@
 
 - 배치 그래프: crawl → extract → sentiment → embedding → merge_event → importance → graph → save
   (CLAUDE.md §3). merge_event·importance 에는 조회 Provider(TASK 08)를 **주입**한다.
-- 질의 그래프: query → report(query_spec §1). backend 접근은 query 노드 내부 query_client 로만.
+- 질의 그래프: query → report → save_report(query_spec §1). backend 접근은 query 노드 내부 query_client·
+  save_report 노드 내부 report_client 로만(리포트를 DB 에 저장하고 backend 발급 report_id 를 얻는다).
 
 ⚠️ 절대규칙 1·2: 이 파일은 노드를 **등록·순서 지정·Provider 주입·컴파일**만 한다. backend·LLM·DB 를
    직접 부르지 않고(SQL·Cypher·HTTP 없음), 파이프라인/질의 로직을 복제하지 않는다(§4·§5). 실제 로직은
@@ -28,6 +29,7 @@ from src.agents.news.nodes.merge_event import merge_event_node
 from src.agents.news.nodes.query import query_node
 from src.agents.news.nodes.report import report_node
 from src.agents.news.nodes.save import save_node
+from src.agents.news.nodes.save_report import save_report_node
 from src.agents.news.nodes.sentiment import sentiment_node
 from src.agents.news.state import BatchState, QueryState
 
@@ -101,20 +103,24 @@ def build_batch_graph(providers: BatchProviders | None = None):
 
 
 def build_query_graph():
-    """질의 노드 query → report 를 연결한 컴파일된 앱을 반환한다.
+    """질의 노드 query → report → save_report 를 연결한 컴파일된 앱을 반환한다.
 
-    backend 접근은 query 노드 내부의 query_client(TASK 08)로만 일어난다 — 이 파일은 주입할 Provider 도
-    없이 노드를 잇기만 한다(질의측은 노드가 서비스를 직접 부르는 구조, TASK 09).
+    backend 접근은 query 노드 내부의 query_client(조회)·save_report 노드 내부의 report_client(리포트 저장,
+    report_id 발급)로만 일어난다 — 이 파일은 주입할 Provider 도 없이 노드를 잇기만 한다(질의측은 노드가
+    서비스를 직접 부르는 구조, TASK 09). save_report 는 저장 실패해도 report_id 없이 통과하므로(§2-5)
+    backend 미연결에서도 질의가 죽지 않는다(인라인 리포트는 report 노드가 이미 만든다).
     """
     from langgraph.graph import END, START, StateGraph
 
     builder = StateGraph(QueryState)
     builder.add_node("query", query_node)
     builder.add_node("report", report_node)
+    builder.add_node("save_report", save_report_node)
 
     builder.add_edge(START, "query")
     builder.add_edge("query", "report")
-    builder.add_edge("report", END)
+    builder.add_edge("report", "save_report")
+    builder.add_edge("save_report", END)
     return builder.compile()
 
 
@@ -139,7 +145,15 @@ def run_query(question: str) -> dict:
     (팀 계약: ai·backend·frontend JSON 통일 — backend 저장·frontend 렌더). 종목 프리셋도 question
     문자열로 온다. 렌더 실패 시에도 report 노드가 최소 '데이터 제한' JSON 으로 degrade 하므로(TASK 09)
     항상 dict 를 돌려준다.
+
+    save_report 노드가 리포트를 backend 에 저장하고 발급받은 report_id 를 state 에 실으면, 그 값을 반환
+    JSON 에도 실어(setdefault) 인라인 응답으로 받은 frontend 가 `GET /news/reports/{id}` 로 리포트를 다시
+    열 수 있게 한다. 저장 실패(미저장)면 report_id 키는 없다(정직 표기, §2-5) — 인라인 리포트는 그대로 유효.
     """
     app = build_query_graph()
     result = app.invoke({"question": question}, config=_run_config())
-    return result.get("report_json") or {}
+    report_json = result.get("report_json") or {}
+    report_id = result.get("report_id")
+    if report_id and isinstance(report_json, dict):
+        report_json.setdefault("report_id", report_id)
+    return report_json

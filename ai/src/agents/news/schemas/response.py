@@ -49,3 +49,14 @@ class CleanupResponse(BaseModel):
     deleted_articles: int = 0
     deleted_events: int = 0
     message: str | None = None
+
+
+class ReportSaveResponse(BaseModel):
+    """질의 리포트 저장 응답 wrapper — { report_id, report }(SCHEMA_SPEC §7.2).
+
+    backend 가 생성한 report_id 를 부착해 돌려준다(에이전트는 id 를 만들지 않는다, CLAUDE.md §2-5).
+    report 는 방금 저장한 ai ReportModel JSON 원본(backend 는 재해석하지 않음). frontend 는 이 report_id 로
+    GET /news/reports/{id} 를 호출해 리포트를 다시 연다(technical 과 동형: 저장 → id → 프론트 조회).
+    """
+    report_id: str
+    report: dict = Field(default_factory=dict)
