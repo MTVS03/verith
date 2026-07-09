@@ -16,3 +16,8 @@ export async function getIndustryReport(reportId: string): Promise<IndustryRepor
 export async function deleteIndustryReport(reportId: string): Promise<void> {
   await backendFetch<void>(`/api/industry/reports/${reportId}`, { method: "DELETE" });
 }
+
+// DELETE /api/industry/reports → industry 리포트 전체 삭제. { deleted: N } 반환.
+export async function deleteAllIndustryReports(): Promise<{ deleted: number }> {
+  return backendFetch<{ deleted: number }>(`/api/industry/reports`, { method: "DELETE" });
+}

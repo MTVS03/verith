@@ -97,6 +97,15 @@ async def get_industry_report_html(
     return HTMLResponse(content=html)
 
 
+@router.delete("", status_code=status.HTTP_200_OK)
+async def delete_all_industry_reports(
+    service: IndustryReportService = Depends(get_industry_report_service),
+) -> dict:
+    """industry 리포트 전체 삭제. 삭제 건수 반환."""
+    deleted = await service.delete_all_reports()
+    return {"deleted": deleted}
+
+
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_industry_report(
     report_id: UUID,

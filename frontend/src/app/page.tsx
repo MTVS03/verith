@@ -25,8 +25,8 @@ export default async function Home({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <ArchiveTabs active={agentType} />
           <div className="flex items-center gap-3">
-            {agentType === "technical" && archive.items.length > 0 ? (
-              <DeleteAllReportsButton count={archive.total} />
+            {archive.items.length > 0 ? (
+              <DeleteAllReportsButton count={archive.total} agentType={agentType} />
             ) : null}
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
               총 {archive.total}건

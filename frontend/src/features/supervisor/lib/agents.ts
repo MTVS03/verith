@@ -73,5 +73,7 @@ export function agentReportHref(type: AgentType, reportId: string | null): strin
   if (type === "technical") return `/reports/technical/${reportId}`;
   if (type === "news") return `/reports/news/${reportId}`;
   if (type === "industry") return `/reports/industry/${reportId}`;
+  if (type === "fundamental") return `/reports/fundamental/${reportId}`;
+  if (type === "flow") return `/reports/flow/${reportId}`;
   return null;
 }

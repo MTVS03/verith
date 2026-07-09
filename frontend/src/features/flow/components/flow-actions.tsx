@@ -3,28 +3,24 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Download, Trash2 } from "lucide-react";
+import { ChevronLeft, Printer, Trash2 } from "lucide-react";
 
-import { deleteIndustryReport } from "@/api/industry";
+import { deleteFlowReport } from "@/api/flow";
 
-// industry 상세 상단 액션바 — 목록 복귀 · PDF 다운로드 · 삭제.
-// 화면은 iframe(sandbox) 이라 부모에서 print 가 막힌다 → HTML 을 새 탭(autoprint)으로 열어
-// 브라우저 인쇄/PDF 저장 창을 자동으로 띄운다.
-export function IndustryActions({ reportId }: { reportId: string }) {
+// flow 상세 상단 액션바 — 목록 복귀 · 인쇄(PDF) · 삭제. flow 상세는 iframe 이 아니라
+// React 렌더라서 window.print() 로 바로 인쇄/PDF 저장이 된다(technical 과 동일).
+export function FlowActions({ reportId }: { reportId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [isPending, startTransition] = useTransition();
-
-  const onPdf = () =>
-    window.open(`/api/industry/reports/${reportId}/html?autoprint=1`, "_blank", "noopener");
 
   const onDelete = async () => {
     if (busy) return;
     if (!window.confirm("이 리포트를 삭제할까요? 되돌릴 수 없습니다.")) return;
     setBusy(true);
     try {
-      await deleteIndustryReport(reportId);
-      startTransition(() => router.push("/?agent_type=industry"));
+      await deleteFlowReport(reportId);
+      startTransition(() => router.push("/?agent_type=flow"));
     } catch {
       window.alert("삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       setBusy(false);
@@ -33,9 +29,9 @@ export function IndustryActions({ reportId }: { reportId: string }) {
 
   const disabled = busy || isPending;
   return (
-    <div className="mb-5 flex items-center justify-between">
+    <div className="mb-5 flex items-center justify-between print:hidden">
       <Link
-        href="/?agent_type=industry"
+        href="/?agent_type=flow"
         className="flex items-center gap-1.5 text-[13px] font-bold text-[#4f46e5] transition-colors hover:text-[#4338ca]"
       >
         <ChevronLeft className="h-4 w-4" /> 리포트 목록으로 돌아가기
@@ -52,12 +48,11 @@ export function IndustryActions({ reportId }: { reportId: string }) {
         </button>
         <button
           type="button"
-          onClick={onPdf}
-          title="새 탭에서 리포트를 열어 인쇄·PDF 저장 창을 자동으로 띄웁니다."
+          onClick={() => window.print()}
           className="flex items-center gap-1.5 rounded-xl bg-[#4f46e5] px-3.5 py-2.5 text-[13px] font-bold text-white shadow-[0_4px_10px_-3px_rgba(79,70,229,0.5)] transition-colors hover:bg-[#4338ca]"
         >
-          <Download className="h-4 w-4" />
-          <span>PDF 다운로드</span>
+          <Printer className="h-4 w-4" />
+          <span>인쇄 · PDF 저장</span>
         </button>
       </div>
     </div>

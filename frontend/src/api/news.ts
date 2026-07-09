@@ -12,3 +12,8 @@ export async function getNewsReport(reportId: string): Promise<NewsReportEnvelop
 export async function deleteNewsReport(reportId: string): Promise<void> {
   await backendFetch<void>(`/news/reports/${reportId}`, { method: "DELETE" });
 }
+
+// DELETE /news/reports → news 리포트 전체 삭제. { deleted: N } 반환.
+export async function deleteAllNewsReports(): Promise<{ deleted: number }> {
+  return backendFetch<{ deleted: number }>(`/news/reports`, { method: "DELETE" });
+}

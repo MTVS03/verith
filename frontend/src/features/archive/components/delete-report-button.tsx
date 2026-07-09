@@ -7,11 +7,15 @@ import { Trash2 } from "lucide-react";
 import { deleteTechnicalReport } from "@/api/technical";
 import { deleteNewsReport } from "@/api/news";
 import { deleteIndustryReport } from "@/api/industry";
+import { deleteFundamentalReport } from "@/api/fundamental";
+import { deleteFlowReport } from "@/api/flow";
 import type { AgentType } from "@/types/archive";
 
 async function deleteByType(agentType: AgentType, reportId: string): Promise<void> {
   if (agentType === "news") return deleteNewsReport(reportId);
   if (agentType === "industry") return deleteIndustryReport(reportId);
+  if (agentType === "fundamental") return deleteFundamentalReport(reportId);
+  if (agentType === "flow") return deleteFlowReport(reportId);
   return deleteTechnicalReport(reportId);
 }
 

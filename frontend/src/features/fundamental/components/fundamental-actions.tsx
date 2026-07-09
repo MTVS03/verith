@@ -5,26 +5,26 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, Download, Trash2 } from "lucide-react";
 
-import { deleteIndustryReport } from "@/api/industry";
+import { deleteFundamentalReport } from "@/api/fundamental";
 
-// industry 상세 상단 액션바 — 목록 복귀 · PDF 다운로드 · 삭제.
-// 화면은 iframe(sandbox) 이라 부모에서 print 가 막힌다 → HTML 을 새 탭(autoprint)으로 열어
-// 브라우저 인쇄/PDF 저장 창을 자동으로 띄운다.
-export function IndustryActions({ reportId }: { reportId: string }) {
+// fundamental 상세 상단 액션바 — 목록 복귀 · PDF 다운로드 · 삭제.
+// 화면은 iframe(sandbox) 이라 부모에서 print 가 막힌다 → report_html 을 새 탭(autoprint)으로 열어
+// 브라우저 인쇄/PDF 저장을 자동으로 띄운다.
+export function FundamentalActions({ reportId }: { reportId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const onPdf = () =>
-    window.open(`/api/industry/reports/${reportId}/html?autoprint=1`, "_blank", "noopener");
+    window.open(`/api/fundamental/reports/${reportId}/html?autoprint=1`, "_blank", "noopener");
 
   const onDelete = async () => {
     if (busy) return;
     if (!window.confirm("이 리포트를 삭제할까요? 되돌릴 수 없습니다.")) return;
     setBusy(true);
     try {
-      await deleteIndustryReport(reportId);
-      startTransition(() => router.push("/?agent_type=industry"));
+      await deleteFundamentalReport(reportId);
+      startTransition(() => router.push("/?agent_type=fundamental"));
     } catch {
       window.alert("삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       setBusy(false);
@@ -35,7 +35,7 @@ export function IndustryActions({ reportId }: { reportId: string }) {
   return (
     <div className="mb-5 flex items-center justify-between">
       <Link
-        href="/?agent_type=industry"
+        href="/?agent_type=fundamental"
         className="flex items-center gap-1.5 text-[13px] font-bold text-[#4f46e5] transition-colors hover:text-[#4338ca]"
       >
         <ChevronLeft className="h-4 w-4" /> 리포트 목록으로 돌아가기

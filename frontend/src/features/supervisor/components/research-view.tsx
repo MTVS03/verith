@@ -8,6 +8,8 @@ import { analyzeQuery } from "@/api/supervisor";
 import { createTechnicalReport } from "@/api/technical-create";
 import { createNewsReport } from "@/api/news-create";
 import { createIndustryReport } from "@/api/industry-create";
+import { createFundamentalReport } from "@/api/fundamental-create";
+import { createFlowReport } from "@/api/flow-create";
 import type { SupervisorAnalyzeResponse } from "@/types/supervisor";
 import type { AgentType } from "@/types/archive";
 import { AGENT_META, AGENT_ORDER } from "@/features/supervisor/lib/agents";
@@ -102,6 +104,29 @@ export function ResearchView() {
           .then((r) => setCreated("technical", { reportId: r.report_id }))
           .catch(() => setCreated("technical", { reportId: null }))
           .finally(() => setCreated("technical", { creating: false }));
+      }
+
+      // fundamental: supervisor 가 이미 만든 output(FundamentalResponse)을 save-only 로 저장.
+      // technical 처럼 backend 가 AI 를 재호출하지 않는다 — 중복 실행 제거(속도).
+      const fundamentalResult = resultOf("fundamental");
+      if (fundamentalResult?.status === "success" && fundamentalResult.output) {
+        setCreated("fundamental", { creating: true, reportId: null });
+        createFundamentalReport({ output: fundamentalResult.output, question: q })
+          .then((r) => setCreated("fundamental", { reportId: r.report_id }))
+          .catch(() => setCreated("fundamental", { reportId: null }))
+          .finally(() => setCreated("fundamental", { creating: false }));
+      }
+
+      // flow: supervisor 가 이미 만든 output(AgentOutput{payload})을 save-only 로 저장.
+      // flow 는 종목 의존 — 종목 확정 + 성공 + payload 가 있어야 저장한다.
+      const flowResult = resultOf("flow");
+      const flowPayload = flowResult?.output?.payload as Record<string, unknown> | undefined;
+      if (stock && flowResult?.status === "success" && flowPayload) {
+        setCreated("flow", { creating: true, reportId: null });
+        createFlowReport({ payload: flowPayload, question: q })
+          .then((r) => setCreated("flow", { reportId: r.report_id }))
+          .catch(() => setCreated("flow", { reportId: null }))
+          .finally(() => setCreated("flow", { creating: false }));
       }
 
       // news: supervisor 가 이미 만든 output(ReportModel)을 save-only 로 저장.
