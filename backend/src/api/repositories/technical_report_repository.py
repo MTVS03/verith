@@ -23,12 +23,20 @@ from db.models.technical.technical_report import TechnicalReport
 
 
 async def ensure_stock(session: AsyncSession, *, stock_code: str, stock_name: str) -> None:
-    """stocks 에 종목이 없을 때만 insert(마스터 보호 — 기존 이름 덮어쓰지 않음).
+    """stocks 에 종목 이름을 보강한다(마스터 자가 확장·치유, 큐레이션 이름은 보호).
 
-    ON CONFLICT DO NOTHING 이므로 이미 있으면 stock_name 을 갱신하지 않는다.
+    - 없으면 insert.
+    - 이미 있고 **기존 이름이 코드와 같으면(placeholder — 과거 KIS 미상 시 FK용으로 저장된 코드)**
+      실제 이름으로 갱신(치유). 단 새 이름도 코드면 무의미하므로 갱신하지 않는다.
+    - 기존 이름이 실제 이름(코드 != 이름)이면 **덮어쓰지 않는다**(큐레이션·기존 보강 보호).
     """
     stmt = pg_insert(Stock).values(stock_code=stock_code, stock_name=stock_name)
-    stmt = stmt.on_conflict_do_nothing(index_elements=[Stock.stock_code])
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[Stock.stock_code],
+        set_={"stock_name": stmt.excluded.stock_name},
+        # 기존이 placeholder(이름==코드)이고 새 값은 실제 이름(코드 아님)일 때만 치유.
+        where=(Stock.stock_name == Stock.stock_code) & (stmt.excluded.stock_name != Stock.stock_code),
+    )
     await session.execute(stmt)
 
 
