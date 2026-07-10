@@ -835,7 +835,9 @@ class TechnicalReportService:
         now = datetime.now(UTC)
         report_as_of = _parse_dt(raw.get("as_of")) or as_of
 
-        stock_name = await self._resolve_stock_name(req.ticker, req.stock_name)
+        stock_name = await self._resolve_stock_name(
+            req.ticker, req.stock_name, output.resolved_stock_name
+        )
 
         report = TechnicalReport(
             id=report_id,
@@ -987,13 +989,23 @@ class TechnicalReportService:
             model_name=interpretation.model_name, followup_count=0,
         )
 
-    async def _resolve_stock_name(self, ticker: str, requested: str | None) -> str:
-        """마스터 우선: 기존 stocks > allowlist > 요청값(미지 종목) > ticker."""
+    async def _resolve_stock_name(
+        self, ticker: str, requested: str | None, kis_name: str | None = None
+    ) -> str:
+        """마스터 우선: 기존 stocks > allowlist > 요청값 > **KIS 종목명** > ticker.
+
+        stocks 마스터(2607종)에 없는 코드(ETF·외국주 등)는 AI가 KIS output1에서 뽑은 종목명
+        (`kis_name`)으로 코드 대신 실제 이름을 쓴다. 이 반환값은 ensure_stock 으로 stocks 에도
+        보강 저장돼 마스터가 자가 확장·치유된다 — 기존 큐레이션 이름은 안 덮어씀.
+
+        DB에 이름이 있어도 그 값이 **코드와 같으면(placeholder — 과거 KIS 미상 시 FK용으로 저장된 코드)**
+        미해결로 보고 KIS 이름을 우선한다. 그래야 코드로 굳은 행이 실제 이름으로 치유된다."""
         existing = await self._session.get(Stock, ticker)
-        if existing is not None:
+        if existing is not None and existing.stock_name != ticker:  # placeholder(코드=이름)는 미해결 취급
             return existing.stock_name
         req_name = requested.strip() if requested and requested.strip() else None
-        return allowlist_name(ticker) or req_name or ticker
+        kis = kis_name.strip() if kis_name and kis_name.strip() else None
+        return allowlist_name(ticker) or req_name or kis or ticker
 
     # ── 조회 ──────────────────────────────────────────────────────────────────
     async def get_report(

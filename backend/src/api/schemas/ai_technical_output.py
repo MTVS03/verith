@@ -125,6 +125,9 @@ class TechnicalAgentOutputMirror(_Lenient):
     charts: list[MirrorChart] = Field(default_factory=list)
     interpretation: MirrorInterpretation
     verification: MirrorVerification
+    # KIS output1 best-effort 종목명(표시용). stocks 마스터에 없는 코드(ETF·외국주 등)의 이름 보강 소스.
+    # 미상이면 None — _resolve_stock_name 이 `DB > 요청값 > 이 값 > ticker` 순으로 최종 선택한다.
+    resolved_stock_name: str | None = None
 
     @model_validator(mode="after")
     def _indicators_unique(self) -> "TechnicalAgentOutputMirror":
