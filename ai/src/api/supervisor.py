@@ -30,10 +30,12 @@ from src.api.dependencies import (
     get_trace_sink,
 )
 from src.api.errors import AppError
+from src.supervisor.config import LLM_REWRITE_ENABLED
 from src.supervisor.execution.adapters import AgentAdapter, ExecutionDeps
 from src.supervisor.planning.fallback_lookup import FallbackLookupProtocol
 from src.supervisor.planning.fallback_observer import FallbackObserver
 from src.supervisor.planning.resolve_client import ResolverProtocol
+from src.supervisor.planning.rewrite_llm import LlmRewriter
 from src.supervisor.runtime import run_analysis, to_response_dict
 from src.supervisor.schemas import SupervisorInput
 
@@ -92,6 +94,10 @@ async def analyze(
     except AppError:
         llm_client = None
 
+    # agent 별 지시 성형: llm_client(technical과 동일 OpenAI, .complete 호환)를 재사용한다. LLM 없거나
+    # 토글 off 면 rewriter=None → planner 가 결정론 템플릿(기존 동작). LlmRewriter 는 실패 시 템플릿 폴백.
+    rewriter = LlmRewriter(llm_client) if (llm_client is not None and LLM_REWRITE_ENABLED) else None
+
     deps = ExecutionDeps(
         technical_llm_client=llm_client,
         technical_fetcher=fetcher,
@@ -111,6 +117,7 @@ async def analyze(
         observer=observer,
         adapters=adapters,
         deps=deps,
+        rewriter=rewriter,
     )
     response = to_response_dict(execution)
     response["request_id"] = request_id

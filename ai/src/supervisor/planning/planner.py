@@ -23,7 +23,7 @@ from src.supervisor.planning.fallback_observer import (
 from src.supervisor.planning.interpret import QueryClassifier, interpret
 from src.supervisor.planning.policy import context_for, decide
 from src.supervisor.planning.resolve_client import ResolveResult, ResolverProtocol, ResolverToolError
-from src.supervisor.planning.rewrite import rewrite
+from src.supervisor.planning.rewrite_llm import QueryRewriter, TemplateRewriter
 from src.supervisor.schemas import (
     AGENT_ORDER,
     Resolution,
@@ -140,6 +140,7 @@ def run_supervisor(
     fallback: FallbackLookupProtocol | None = None,
     observer: FallbackObserver | None = None,
     classifier: QueryClassifier | None = None,
+    rewriter: QueryRewriter | None = None,
 ) -> SupervisorDecision:
     """상위 orchestration. 원본 query 를 보존하고 항상 5개 task 를 반환한다.
 
@@ -162,13 +163,18 @@ def run_supervisor(
         resolution = Resolution(used_stock_resolver=False, status="not_attempted")
 
     context = context_for(resolution)
+    # 지시 성형(주입식): 미주입이면 결정론 템플릿. LLM rewriter 주입 시 에이전트별 맞춤 지시를
+    # 1회 호출로 생성하고, 실패는 에이전트별 템플릿으로 안전 착지한다. 종목코드는 여기서 만들지
+    # 않는다 — rewrite 결과는 rewritten_query(자연어)만 채우고, stock_code 는 context(resolver)에서 온다.
+    rw = rewriter or TemplateRewriter()
+    rewritten = rw.rewrite_all(original_query, context)
     tasks: list[TaskEnvelope] = []
     for agent_type in AGENT_ORDER:
         can_run, reason = decide(agent_type, resolution)
         tasks.append(
             TaskEnvelope(
                 agent_type=agent_type,
-                rewritten_query=rewrite(agent_type, context, original_query),
+                rewritten_query=rewritten[agent_type],
                 context=context,
                 can_run=can_run,
                 reason=reason,

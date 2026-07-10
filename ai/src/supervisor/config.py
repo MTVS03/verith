@@ -16,3 +16,8 @@ RESOLVER_TIMEOUT: float = float(os.getenv("SUPERVISOR_RESOLVER_TIMEOUT") or 5.0)
 RESOLVER_PATH: str = "/api/stocks/resolve"
 
 USER_AGENT: str = "verith-supervisor/0.1"
+
+# agent 별 지시(rewritten_query)를 LLM 으로 성형할지 여부. off 면 결정론 템플릿(기존 동작).
+# LLM 이 실패해도 LlmRewriter 가 템플릿으로 안전 착지하므로 기본 on. 끄려면 env=off.
+_LLM_REWRITE_RAW = (os.getenv("SUPERVISOR_LLM_REWRITE_ENABLED") or "true").strip().lower()
+LLM_REWRITE_ENABLED: bool = _LLM_REWRITE_RAW in {"1", "true", "yes", "on"}
