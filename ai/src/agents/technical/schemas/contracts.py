@@ -219,3 +219,7 @@ class TechnicalAgentOutput(_StrictModel):
     # 1D 장중 분봉 보조 컨텍스트(Beta). 없으면 None — 기존 D/W/M 분석은 그대로 통과한다.
     # final_regime 을 바꾸지 않는 보조 근거이며, 생성·보정 로직은 후속(Phase 2)에서 붙는다.
     intraday_context: IntradayContext | None = None
+    # KIS output1(hts_kor_isnm) best-effort 종목명. stocks 마스터에 없는 코드(ETF·외국주 등)의 표시명
+    # 보강용 — backend가 `DB > 요청값 > 이 값 > ticker코드` 순으로 최종 선택하고 stocks에 보강 저장한다.
+    # 표시 전용(계산/판정 무관), 미상이면 None(하위호환 — 기존 경로는 None으로 동작).
+    resolved_stock_name: str | None = None

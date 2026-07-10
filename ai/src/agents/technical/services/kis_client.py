@@ -515,6 +515,43 @@ def fetch_multi_timeframe_ohlcv(
     return {period: fetch_ohlcv(ticker, period, end_date=end) for period in ALLOWED_PERIODS}
 
 
+# ── 종목명(hts_kor_isnm) best-effort 조회 — stocks 마스터에 없는 코드(ETF·외국주 등) 표시명 보강용 ──
+_OUT1_STOCK_NAME_FIELD = "hts_kor_isnm"  # KIS 일봉 output1 한글종목명(kis_mapping §12.5 계열)
+
+
+def fetch_stock_name(
+    ticker: str, *, end_date: datetime | date | str | None = None,
+    client: httpx.Client | None = None,
+) -> str | None:
+    """KIS 일봉 응답 output1의 한글종목명(`hts_kor_isnm`)만 **best-effort**로 조회한다.
+
+    stocks 마스터(2607종)에 없는 코드(ETF·외국주·우선주·신규상장)의 표시명이 코드로 남는 것을
+    보강하는 용도다. 표시 전용 — 계산/판정과 무관. **실패는 삼켜 None을 반환**해 리포트를 막지 않는다
+    (이름 미상은 backend가 ticker 코드로 최종 폴백). output2(시세)가 비어도 output1의 이름은 온다.
+    """
+    try:
+        validate_ticker(ticker)
+        end = normalize_end_date(end_date) or datetime.now().date()
+        start = end - timedelta(days=7)  # 짧은 구간(비거래일 대비 여유) — output1 이름만 필요
+        owns_client = client is None
+        client = client or httpx.Client(timeout=KIS_TIMEOUT_SECONDS)
+        try:
+            settings = load_kis_settings()
+            token = get_access_token(client=client)
+            data = _call_chart(settings, token, ticker, "D", _ymd(start), _ymd(end), client)
+        finally:
+            if owns_client:
+                client.close()
+        out1 = data.get("output1")
+        if isinstance(out1, list):
+            out1 = out1[0] if out1 else {}
+        name = (out1 or {}).get(_OUT1_STOCK_NAME_FIELD)
+        name = name.strip() if isinstance(name, str) else None
+        return name or None
+    except Exception:  # noqa: BLE001 - best-effort: 이름 조회 실패가 리포트를 막지 않는다(표시 전용)
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 주식당일분봉조회 (kis_mapping §12) — output2 → IntradayCandle, output1 → 메타데이터
 # ─────────────────────────────────────────────────────────────────────────────
