@@ -8,18 +8,19 @@ from pydantic import BaseModel, Field
 from .contract import FundamentalAgentInput, FundamentalRequest
 
 
-Intent = Literal["fundamental_health", "profitability", "stability", "growth", "valuation"]
+Intent = Literal[
+    "fundamental_health", "profitability", "stability", "growth", "valuation"
+]
 FsDiv = Literal["CFS", "OFS"]
 ReportMode = Literal["annual", "latest"]
 
 _YEARS_RE = re.compile(r"(?P<years>\d+)\s*(?:개년|년)")
-_EXPLICIT_LATEST_KEYWORDS = ("이번 분기", "분기", "최신")
-_RECENT_KEYWORD = "최근"
+_QUARTERLY_KEYWORDS = ("분기", "이번 분기", "분기보고서")
 _INTENT_RULES: tuple[tuple[Intent, tuple[str, ...]], ...] = (
-    ("profitability", ("수익성", "마진", "roe", "ROE")),
-    ("stability", ("부채", "안정성", "유동")),
+    ("profitability", ("수익성", "마진", "roe", "ROE", "이익률")),
+    ("stability", ("부채", "안정성", "유동", "건전성", "레버리지", "차입")),
     ("growth", ("성장", "매출 증가")),
-    ("valuation", ("밸류", "per", "pbr", "PER", "PBR", "저평가")),
+    ("valuation", ("밸류", "per", "pbr", "PER", "PBR", "저평가", "고평가")),
 )
 
 
@@ -51,16 +52,10 @@ def interpret_query(query: str) -> QueryInterpretation:
         defaulted_fields.append("years")
 
     report_mode: ReportMode = "annual"
-    has_explicit_latest = any(keyword in text for keyword in _EXPLICIT_LATEST_KEYWORDS)
-    has_recent = _RECENT_KEYWORD in text
-    if has_explicit_latest:
+    has_quarterly_keyword = any(keyword in text for keyword in _QUARTERLY_KEYWORDS)
+    if has_quarterly_keyword:
         report_mode = "latest"
-        applied_rules.append("report_mode:explicit_latest_keyword")
-    elif has_recent and years_match is None:
-        report_mode = "latest"
-        applied_rules.append("report_mode:recent_keyword")
-    elif has_recent and years_match is not None:
-        applied_rules.append("report_mode:annual_recent_nyears_override")
+        applied_rules.append("report_mode:quarterly_keyword")
     else:
         defaulted_fields.append("report_mode")
 
@@ -76,13 +71,18 @@ def interpret_query(query: str) -> QueryInterpretation:
     else:
         defaulted_fields.append("fs_div")
 
+    matched_intents: list[Intent] = [
+        candidate
+        for candidate, keywords in _INTENT_RULES
+        if any(keyword.casefold() in lower_text for keyword in keywords)
+    ]
     intent: Intent = "fundamental_health"
-    for candidate, keywords in _INTENT_RULES:
-        if any(keyword.casefold() in lower_text for keyword in keywords):
-            intent = candidate
-            applied_rules.append(f"intent:{candidate}")
-            break
-    if intent == "fundamental_health":
+    if len(matched_intents) == 1:
+        intent = matched_intents[0]
+        applied_rules.append(f"intent:{intent}")
+    elif len(matched_intents) >= 2:
+        applied_rules.append("intent:multi_axis_comprehensive")
+    else:
         defaulted_fields.append("intent")
 
     return QueryInterpretation(
@@ -95,7 +95,9 @@ def interpret_query(query: str) -> QueryInterpretation:
     )
 
 
-def to_fundamental_request(public_input: FundamentalAgentInput) -> tuple[FundamentalRequest, QueryInterpretation]:
+def to_fundamental_request(
+    public_input: FundamentalAgentInput,
+) -> tuple[FundamentalRequest, QueryInterpretation]:
     interpretation = interpret_query(public_input.query)
     return (
         FundamentalRequest(
