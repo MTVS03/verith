@@ -16,6 +16,9 @@ FundamentalAgentInput(request_id, trace_id, ticker, query)
   결정론 해석기(`core/query_interpreter.py`)가 파싱해 정한다. LLM 미사용.
 - 적용된 규칙은 응답 `meta.input_interpretation`에 기록되어 Supervisor/디버깅에서 추적 가능하다.
 - 옛 내부 계약 `FundamentalRequest(ticker, intent…)`는 내부 계약으로만 남고, 외부 진입점은 위 하나다.
+- 해석 규칙 v2(2026-07-10): 2개 이상 분석 축이 함께 매칭되면 `fundamental_health` 종합 intent로 해석한다.
+- `latest`는 분기 계열 명시어로만 선택하며, bare `최근`·`최신`은 `annual` 기본값을 유지한다.
+- 명확한 동의어 `이익률`·`건전성`·`레버리지`·`차입`·`고평가`를 각 축에 보수적으로 추가한다.
 
 ## 2. Supervisor adapter 연결 (이번 변경)
 
