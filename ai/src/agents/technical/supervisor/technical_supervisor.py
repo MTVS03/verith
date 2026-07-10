@@ -18,7 +18,7 @@ state tracing을 켜도 PII(원본 query)·secret(client)이 직렬화되지 않
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from .langgraph_state import TechnicalDeps
 from .pipeline_steps import MinuteFetcher, OhlcvFetcher
@@ -30,7 +30,11 @@ from ..runtime.deadline import Deadline
 from ..schemas.contracts import TechnicalAgentInput, TechnicalAgentOutput
 from ..schemas.intraday import IntradayCandle
 from ..services.cache_service import OhlcvCache
-from ..services.kis_client import OutOfScopeTickerError, fetch_multi_timeframe_ohlcv
+from ..services.kis_client import (
+    OutOfScopeTickerError,
+    fetch_multi_timeframe_ohlcv,
+    fetch_stock_name,
+)
 
 
 def run(
@@ -44,6 +48,7 @@ def run(
     intraday_candles: Sequence[IntradayCandle] | None = None,
     intraday_fetcher: MinuteFetcher | None = None,
     deadline: Deadline | None = None,
+    name_resolver: Callable[[str], str | None] | None = None,
 ) -> TechnicalAgentOutput:
     """TechnicalAgentInput → 1~10 노드 조율(LangGraph) → TechnicalAgentOutput.
 
@@ -72,10 +77,15 @@ def run(
     # 파이프라인(노드 1~10)은 LangGraph StateGraph가 조율한다(technical_graph → pipeline_steps).
     # 주입 의존성(원본 query·runtime client)은 **config['configurable']['deps']** 로만 흐른다 —
     # traced state에 넣지 않아 checkpointer·LangSmith가 직렬화해도 PII·secret이 새지 않는다(정화 경계).
+    # 종목명 resolver: 미지정 + 기본(실 KIS) fetcher일 때만 실 KIS 이름 조회를 붙인다. fake fetcher를
+    # 주입한 테스트는 name_resolver=None → 네트워크 없이 동작(표시명은 입력 stock_name/코드로 폴백).
+    if name_resolver is None and fetcher is fetch_multi_timeframe_ohlcv:
+        name_resolver = fetch_stock_name
     deps = TechnicalDeps(
         payload=agent_input, trace_id=trace_id, trace=trace, llm_client=llm_client,
         fetcher=fetcher, cache=cache, deadline=deadline,
         intraday_candles=intraday_candles, intraday_fetcher=intraday_fetcher,
+        name_resolver=name_resolver,
     )
     try:
         final_state = build_technical_graph().invoke({}, config={"configurable": {"deps": deps}})

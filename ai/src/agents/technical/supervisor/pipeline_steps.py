@@ -635,6 +635,7 @@ def _stale_reconstruct(
 def _unavailable_output(
     agent_input: TechnicalAgentInput, trace_id: str, data_status: DataStatus,
     *, regime: RegimeResult, charts: Sequence[ChartPayload], source: str = "KIS",
+    resolved_stock_name: str | None = None,
 ) -> TechnicalAgentOutput:
     """regime 판단 불가 → signal·risk null, technical_signals=[], interpretation=template fallback."""
     return TechnicalAgentOutput(
@@ -654,4 +655,5 @@ def _unavailable_output(
             calc_passed=False, regime_passed=False, label_matched=True,
             outcome=VerificationOutcome.TEMPLATE_FALLBACK, regen_count=0,
         ),
+        resolved_stock_name=resolved_stock_name,
     )

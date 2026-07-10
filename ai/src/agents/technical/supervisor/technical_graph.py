@@ -57,7 +57,21 @@ def _n_data_collect(state: TechnicalGraphState, config: RunnableConfig) -> dict:
         "daily": ohlcv[KIS_PERIOD_DAILY], "weekly": ohlcv[KIS_PERIOD_WEEKLY],
         "monthly": ohlcv[KIS_PERIOD_MONTHLY],
         "source": "KIS (stale)" if used_stale else "KIS",
+        # 표시명 보강(best-effort): 주입 stock_name 우선, 없으면 KIS output1 종목명(resolver 있을 때만).
+        "resolved_stock_name": _resolve_name(d),
     }
+
+
+def _resolve_name(d) -> str | None:
+    """표시용 종목명 best-effort. 주입 stock_name > KIS resolver(있으면) > None. 실패는 삼킨다(표시 전용)."""
+    if d.payload.stock_name:
+        return d.payload.stock_name
+    if d.name_resolver is None:
+        return None
+    try:
+        return d.name_resolver(d.payload.ticker)
+    except Exception:  # noqa: BLE001 - 이름 조회 실패가 리포트를 막지 않는다
+        return None
 
 
 def _n_output_data_limited(state: TechnicalGraphState, config: RunnableConfig) -> dict:
@@ -66,7 +80,7 @@ def _n_output_data_limited(state: TechnicalGraphState, config: RunnableConfig) -
     output = steps._unavailable_output(
         d.payload, d.trace_id, DataStatus.DATA_LIMITED,
         regime=steps._empty_regime("시세 데이터를 확보하지 못해 국면을 판정하지 않습니다."),
-        charts=[], source=state["source"],
+        charts=[], source=state["source"], resolved_stock_name=state.get("resolved_stock_name"),
     )
     return {"output": output}
 
@@ -94,6 +108,7 @@ def _n_output_regime_unavailable(state: TechnicalGraphState, config: RunnableCon
     output = steps._unavailable_output(
         d.payload, d.trace_id, DataStatus.REGIME_UNAVAILABLE,
         regime=steps._to_regime_result(state["regime_result"]), charts=charts, source=state["source"],
+        resolved_stock_name=state.get("resolved_stock_name"),
     )
     return {"output": output}
 
@@ -189,6 +204,7 @@ def _n_build_output(state: TechnicalGraphState, config: RunnableConfig) -> dict:
         interpretation=result.interpretation,
         verification=result.verification,
         intraday_context=intraday_context,
+        resolved_stock_name=state.get("resolved_stock_name"),
     )
     return {"output": output}
 

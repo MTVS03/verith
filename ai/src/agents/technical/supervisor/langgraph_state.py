@@ -13,7 +13,7 @@ secret-safe다: checkpointer·LangSmith state tracing이 state를 직렬화해�
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
@@ -59,6 +59,7 @@ class TechnicalDeps:
     deadline: Deadline | None
     intraday_candles: Sequence[IntradayCandle] | None  # run()이 Sequence로 받음
     intraday_fetcher: Any                 # MinuteFetcher(supervisor alias → Any)
+    name_resolver: Callable[[str], str | None] | None = None  # (ticker)→KIS 종목명. None이면 조회 안 함(테스트/미배선)
 
 
 def deps_of(config: RunnableConfig) -> TechnicalDeps:
@@ -77,6 +78,7 @@ class TechnicalGraphState(TypedDict, total=False):
     monthly: Sequence[OHLCV]
     used_stale: bool
     source: str
+    resolved_stock_name: str | None       # KIS output1 종목명(best-effort, 표시용). data_collect에서 채움
     regime_result: MultiframeRegimeResult
     bundle: IndicatorBundle
     signal_result: SignalScoreResult
