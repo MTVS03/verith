@@ -8,15 +8,13 @@ import { ChevronLeft, Download, Trash2 } from "lucide-react";
 import { deleteIndustryReport } from "@/api/industry";
 
 // industry 상세 상단 액션바 — 목록 복귀 · PDF 다운로드 · 삭제.
-// 화면은 iframe(sandbox) 이라 부모에서 print 가 막힌다 → HTML 을 새 탭(autoprint)으로 열어
-// 브라우저 인쇄/PDF 저장 창을 자동으로 띄운다.
+// React 렌더라서 window.print() 로 바로 인쇄/PDF 저장이 된다(flow·technical 과 동일).
 export function IndustryActions({ reportId }: { reportId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  const onPdf = () =>
-    window.open(`/api/industry/reports/${reportId}/html?autoprint=1`, "_blank", "noopener");
+  const onPdf = () => window.print();
 
   const onDelete = async () => {
     if (busy) return;
@@ -33,7 +31,7 @@ export function IndustryActions({ reportId }: { reportId: string }) {
 
   const disabled = busy || isPending;
   return (
-    <div className="mb-5 flex items-center justify-between">
+    <div className="mb-5 flex items-center justify-between print:hidden">
       <Link
         href="/?agent_type=industry"
         className="flex items-center gap-1.5 text-[13px] font-bold text-[#4f46e5] transition-colors hover:text-[#4338ca]"
@@ -53,7 +51,7 @@ export function IndustryActions({ reportId }: { reportId: string }) {
         <button
           type="button"
           onClick={onPdf}
-          title="새 탭에서 리포트를 열어 인쇄·PDF 저장 창을 자동으로 띄웁니다."
+          title="브라우저 인쇄 창에서 PDF 로 저장할 수 있습니다."
           className="flex items-center gap-1.5 rounded-xl bg-[#4f46e5] px-3.5 py-2.5 text-[13px] font-bold text-white shadow-[0_4px_10px_-3px_rgba(79,70,229,0.5)] transition-colors hover:bg-[#4338ca]"
         >
           <Download className="h-4 w-4" />
