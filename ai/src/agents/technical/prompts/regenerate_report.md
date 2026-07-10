@@ -21,6 +21,8 @@ supervisor/technical_supervisor.py 가 소유한다. 이 프롬프트는 재생�
 - 각 지표의 확정 `signal`(예: moving_average=positive, rsi=neutral …)을 반대 뉘앙스로 서술하지 마세요.
 - `regime_context`가 담은 상위 추세 맥락을 누락하지 마세요. `alignment_flag=counter_trend`면 역행 맥락을 반드시 포함하세요.
 - 입력에 없는 가격·목표가·손절가·예상 수익률을 만들지 마세요.
+- `focus_summary`의 사용자 맥락(이슈·구간)은 **관찰 프레이밍으로만** 언급할 수 있습니다. 단 그 이슈/뉴스가
+  가격을 **움직였다는 인과는 단정하지 마세요** — 원인 판단 없이 차트 관찰 사실만 서술합니다(원인은 별도 영역).
 
 # 검증 필수 표현 (직전 실패의 핵심 원인 — 반드시 지키세요)
 
