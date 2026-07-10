@@ -73,11 +73,20 @@ def get_chat_llm(
     ``enable_thinking=True`` for hard multi-hop reasoning, and give it room
     with ``max_tokens``.
     """
+    import httpx
     from langchain_openai import ChatOpenAI
 
     base_url = os.getenv("LLM_BASE_URL", DEFAULT_LLM_BASE_URL)
     model = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     api_key = os.getenv("LLM_API_KEY", "sk-no-key-required")
+
+    # 방어(2026-07-10): timeout/max_retries 미지정 시 openai 기본값(전체 600초·재시도 2)이라
+    # 서버 다운(패킷 드랍) 때 호출마다 수십 초~수 분을 매달린다(supervisor 지연의 실측 원인 중 하나).
+    # connect 만 3초로 분리해 다운을 빨리 감지하고, read 는 120초로 넉넉히(35B 생성 대기).
+    # 서버가 살아 있으면 connect 는 즉시 성립 — 정상 경로 동작·출력에 영향 없음.
+    # 호출자가 timeout/max_retries 를 명시하면 그 값이 우선한다(setdefault).
+    kwargs.setdefault("timeout", httpx.Timeout(120.0, connect=3.0))
+    kwargs.setdefault("max_retries", 1)
 
     return ChatOpenAI(
         base_url=base_url,

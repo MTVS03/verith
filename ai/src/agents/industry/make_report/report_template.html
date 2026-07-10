@@ -85,7 +85,12 @@ a:hover{color:#1b3fa0}
       </div>
       <div style="padding:24px 26px;border-radius:18px;background:#f7f9fc;border:1px solid rgba(20,26,40,.06)">
         <p style="margin:0 0 12px;font-size:17px;line-height:1.55;font-weight:700;letter-spacing:-.01em;color:#1b1e26">{{ answerHeadline }}</p>
-        <p style="margin:0 0 18px;font-size:14.5px;line-height:1.78;color:#4a515f;font-weight:500;white-space:pre-line">{{ answerBody }}</p>
+        <!-- 답변 본문: 마크다운-lite 파싱 블록(제목/불릿/문단). 빈 문자열 세그먼트는 렌더돼도 보이지 않는다. -->
+        <div style="margin:0 0 18px">
+          <sc-for list="{{ answerBlocks }}" as="b" hint-placeholder-count="5">
+            <p style="margin:{{ b.margin }};padding-left:{{ b.indent }};position:relative;font-size:{{ b.size }};line-height:1.78;color:{{ b.color }};font-weight:500"><span style="position:absolute;left:2px;color:#3f6ede;font-weight:800">{{ b.marker }}</span><sc-for list="{{ b.segs }}" as="s" hint-placeholder-count="2"><b style="color:#1b1e26;font-weight:700">{{ s.bold }}</b><span>{{ s.plain }}</span></sc-for></p>
+          </sc-for>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">
           <sc-for list="{{ answerTags }}" as="tag" hint-placeholder-count="6">
             <span style="height:30px;padding:0 13px;display:inline-flex;align-items:center;border-radius:999px;background:#fff;border:1px solid rgba(20,26,40,.1);color:#3a4150;font:700 13px Pretendard,sans-serif">{{ tag }}</span>
@@ -111,6 +116,7 @@ a:hover{color:#1b3fa0}
         </div>
       </div>
 
+      <sc-if value="{{ hasGraph }}" hint-placeholder-val="{{ true }}">
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:stretch">
         <div style="min-height:470px;border:1px solid rgba(20,26,40,.08);border-radius:18px;background-image:radial-gradient(rgba(20,30,60,.055) 1.1px,transparent 1.1px);background-size:22px 22px;background-color:#fbfcfe;overflow:hidden">
           <svg ref="{{ graphRef }}" viewBox="0 0 980 560" role="img" aria-label="공급망 관계 그래프" style="display:block;width:100%;height:100%;min-height:470px"></svg>
@@ -129,6 +135,13 @@ a:hover{color:#1b3fa0}
           </div>
         </aside>
       </div>
+      </sc-if>
+      <sc-if value="{{ noGraph }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:12px;padding:26px;border-radius:18px;background:#fbfcfe;border:1px dashed rgba(20,26,40,.16);color:#6a7280;font-size:14px;font-weight:600;line-height:1.6;word-break:keep-all">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9aa1b0" stroke-width="2" stroke-linecap="round" style="flex:none"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8 11l8-4M8 13l8 4"/></svg>
+        <span>이 질문은 공시 원문 검색(벡터) 기반으로 답변되어 관계 그래프 데이터가 없습니다. &ldquo;A 기업의 공급망이 어디까지 이어지는가&rdquo;처럼 기업 간 관계를 묻는 질문이면 그래프가 생성됩니다.</span>
+      </div>
+      </sc-if>
     </div>
 
     <!-- EVIDENCE -->
@@ -155,7 +168,7 @@ a:hover{color:#1b3fa0}
               <span style="height:24px;padding:0 10px;display:inline-flex;align-items:center;border-radius:999px;background:{{ it.pillBg }};color:{{ it.pillFg }};font:900 11px Pretendard,sans-serif">{{ it.relLabel }}</span>
             </div>
             <h3 style="margin:0;font-size:15px;font-weight:800;line-height:1.4;letter-spacing:-.01em;color:#161922">{{ it.title }}</h3>
-            <p style="margin:0;font-size:13.5px;line-height:1.65;color:#4a515f;font-weight:500;flex:1">{{ it.quote }}</p>
+            <p style="margin:0;font-size:13.5px;line-height:1.65;color:#4a515f;font-weight:500;flex:1;word-break:keep-all">{{ it.quoteDisplay }}</p>
             <p style="margin:0;font-size:12px;font-weight:700;color:#9aa1b0">{{ it.source }}</p>
             <sc-if value="{{ it.hasUrl }}" hint-placeholder-val="{{ true }}">
               <a href="{{ it.url }}" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;gap:6px;width:fit-content;height:34px;padding:0 13px;border-radius:10px;border:1px solid rgba(20,26,40,.12);color:#3a4150;font:700 12.5px Pretendard,sans-serif">원문 열기<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
@@ -273,6 +286,34 @@ class Component extends DCLogic {
 
   shortId(id){
     return String(id||'').replace(/^ev:/,'').replace(/^edge:/,'');
+  }
+
+  // 답변 본문(마크다운-lite: **볼드**, "* " 불릿)을 표시 블록으로 파싱한다(가독성 개선).
+  // LLM이 내는 그대로의 텍스트를 재작성하지 않고 표기만 바꾼다 — 내용 불변.
+  parseInlineSegs(text){
+    return String(text).split(/(\*\*[^*]+\*\*)/).filter(s=>s!=='').map(s=>{
+      const m=/^\*\*([^*]+)\*\*$/.exec(s);
+      return m?{bold:m[1],plain:''}:{bold:'',plain:s};
+    });
+  }
+  parseAnswerBlocks(body){
+    const blocks=[];
+    for(const raw of String(body||'').split(/\r?\n/)){
+      const line=raw.trim();
+      if(!line) continue;
+      const bullet=/^[*\-•]\s+(.*)$/.exec(line);
+      const text=bullet?bullet[1]:line;
+      const heading=!bullet && /^\*\*[^*]+\*\*:?$/.test(line);
+      blocks.push({
+        margin: heading?'14px 0 6px':(bullet?'0 0 7px':'0 0 10px'),
+        size: heading?'15px':'14.5px',
+        indent: bullet?'16px':'0px',
+        marker: bullet?'·':'',
+        color: heading?'#1b1e26':'#4a515f',
+        segs: this.parseInlineSegs(text),
+      });
+    }
+    return blocks;
   }
 
   sourceText(source){
@@ -491,7 +532,12 @@ class Component extends DCLogic {
       .filter(it=>active.has(it.relation) && (!q || [it.id,it.relation,it.title,it.quote,it.source].join(' ').toLowerCase().includes(q)))
       .map(it=>{
         const hl=selEv.has(it.id);
-        return { id:it.id, title:it.title, quote:it.quote, source:it.source, url:it.url, hasUrl:it.hasUrl,
+        // 카드에는 발췌만 보여준다(원문 청크가 700자+로 오면 카드가 지나치게 길어짐).
+        // 검색(filter)은 위에서 전체 quote 로 하므로 잘라도 검색 품질은 그대로다.
+        const QUOTE_MAX=240;
+        const q0=String(it.quote||'');
+        const quoteDisplay=q0.length>QUOTE_MAX?q0.slice(0,QUOTE_MAX).trimEnd()+'…':q0;
+        return { id:it.id, title:it.title, quote:it.quote, quoteDisplay, source:it.source, url:it.url, hasUrl:it.hasUrl,
           relLabel:this.relLabel[it.relation], pillBg:this.relSoft[it.relation], pillFg:this.relInk[it.relation],
           borderCol: hl?this.relColor[it.relation]:'rgba(20,26,40,.08)',
           shadow: hl?('0 0 0 3px '+this.relSoft[it.relation]):'0 1px 3px rgba(20,30,60,.05)' };
@@ -548,7 +594,11 @@ class Component extends DCLogic {
       faithDot:faithTone.dot,
       answerHeadline:this.report.answerHeadline,
       answerBody:this.report.answerBody,
+      answerBlocks:this.parseAnswerBlocks(this.report.answerBody),
       answerTags:this.report.answerTags,
+      // 정성(벡터 검색) 질문은 그래프 행이 없어 nodes 가 빈다 — 빈 SVG 대신 정직한 안내를 보여준다.
+      hasGraph:this.nodes.length>0,
+      noGraph:this.nodes.length===0,
     };
   }
 }

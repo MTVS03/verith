@@ -52,3 +52,10 @@ button {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* PDF 저장(window.print()) 시 액션바·목차 등 화면 전용 요소는 숨긴다. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

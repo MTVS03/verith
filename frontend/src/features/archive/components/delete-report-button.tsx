@@ -5,10 +5,29 @@ import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 
 import { deleteTechnicalReport } from "@/api/technical";
+import { deleteNewsReport } from "@/api/news";
+import { deleteIndustryReport } from "@/api/industry";
+import { deleteFundamentalReport } from "@/api/fundamental";
+import { deleteFlowReport } from "@/api/flow";
+import type { AgentType } from "@/types/archive";
+
+async function deleteByType(agentType: AgentType, reportId: string): Promise<void> {
+  if (agentType === "news") return deleteNewsReport(reportId);
+  if (agentType === "industry") return deleteIndustryReport(reportId);
+  if (agentType === "fundamental") return deleteFundamentalReport(reportId);
+  if (agentType === "flow") return deleteFlowReport(reportId);
+  return deleteTechnicalReport(reportId);
+}
 
 // 보관함 카드의 삭제 버튼. 카드 전체가 <Link> 라 클릭 전파를 막고(navigate 방지), 브라우저에서
 // 백엔드 DELETE 직접 호출(백엔드 CORS 허용) → 성공 시 router.refresh() 로 목록(서버 컴포넌트) 재조회.
-export function DeleteReportButton({ reportId }: { reportId: string }) {
+export function DeleteReportButton({
+  reportId,
+  agentType = "technical",
+}: {
+  reportId: string;
+  agentType?: AgentType;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
@@ -20,7 +39,7 @@ export function DeleteReportButton({ reportId }: { reportId: string }) {
     if (!window.confirm("이 리포트를 삭제할까요? 되돌릴 수 없습니다.")) return;
     setBusy(true);
     try {
-      await deleteTechnicalReport(reportId);
+      await deleteByType(agentType, reportId);
       startTransition(() => router.refresh());
     } catch {
       window.alert("삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");

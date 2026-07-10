@@ -30,6 +30,7 @@ from src.agents.news.config import (
     EXTRACT_MAX_TOOL_CALLS,
     EXTRACT_SYSTEM_PROMPT,
     LLM_BASE_URL,
+    LLM_CONNECT_TIMEOUT,
     LLM_DISABLE_THINKING,
     LLM_MAX_RETRIES,
     LLM_MAX_TOKENS,
@@ -107,7 +108,13 @@ def _chat_completion(messages: list[dict], tools: list[dict] | None = None,
     last_exc: Exception | None = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            resp = httpx.post(url, json=payload, timeout=LLM_TIMEOUT)
+            # connect 를 분리(방어): 서버 다운(패킷 드랍)이면 read 예산(30초)이 아니라 3초에 감지.
+            # 서버 정상이면 connect 는 즉시라 동작·출력 불변. (config LLM_CONNECT_TIMEOUT 주석 참조)
+            resp = httpx.post(
+                url,
+                json=payload,
+                timeout=httpx.Timeout(LLM_TIMEOUT, connect=LLM_CONNECT_TIMEOUT),
+            )
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as exc:

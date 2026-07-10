@@ -25,6 +25,12 @@ export function AppShell({
               <p className="text-xs text-slate-500">Evidence-based AI Stock Research</p>
             </div>
           </Link>
+          <Link
+            href="/research"
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-indigo-500/20 transition hover:bg-indigo-700"
+          >
+            AI 리서치
+          </Link>
         </div>
       </header>
 

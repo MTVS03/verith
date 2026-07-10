@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.common.agent_report import AgentReport
@@ -28,6 +29,7 @@ from src.api.schemas.fundamental_report import (
     FundamentalReportCreateRequest,
     FundamentalReportEnvelope,
     FundamentalReportListResponse,
+    FundamentalReportSaveRequest,
 )
 
 
@@ -183,12 +185,56 @@ class FundamentalReportService:
         if output.meta.trace_id != trace_id:
             raise AIContractError("AI 응답 trace_id 가 요청과 불일치")
 
+        return await self._persist(
+            output,
+            raw,
+            request_id=request_id,
+            trace_id=trace_id,
+            question=req.query,
+            client_session_id=req.client_session_id,
+            stock_name=req.stock_name,
+        )
+
+    async def save_report(self, req: FundamentalReportSaveRequest) -> FundamentalReportEnvelope:
+        """save-only — supervisor 가 만든 output 을 AI 재호출 없이 그대로 저장한다.
+
+        request_id/trace_id 는 output 안의 것(supervisor 실행 id)을 승계한다. create_report 와 달리
+        요청↔응답 cross-check 는 없다(요청을 새로 보내지 않았으므로 대조 대상이 없다). 구조 계약만 검증.
+        """
+        try:
+            output = FundamentalAgentOutputMirror.model_validate(req.output)
+        except ValidationError as exc:
+            raise AIContractError(f"fundamental output 계약 위반: {exc.error_count()} error(s)") from exc
+
+        return await self._persist(
+            output,
+            req.output,
+            request_id=output.request_id,
+            trace_id=output.meta.trace_id,
+            question=req.question,
+            client_session_id=req.client_session_id,
+            stock_name=req.stock_name,
+        )
+
+    async def _persist(
+        self,
+        output: FundamentalAgentOutputMirror,
+        raw: dict[str, Any],
+        *,
+        request_id: str | None,
+        trace_id: str | None,
+        question: str,
+        client_session_id: str | None,
+        stock_name: str | None,
+    ) -> FundamentalReportEnvelope:
+        """검증된 output → 7 테이블 매핑 + agent_reports 인덱스 저장. create/save 공통 경로."""
+        ticker = output.ticker
         erd_payload = output.meta.erd_payload.model_dump()
         root = erd_payload["fundamental_report"]
         report_id = _uuid(root["id"])
         now = datetime.now(UTC)
         report_as_of = _parse_dt(root.get("as_of")) or now
-        stock_name = await self._resolve_stock_name(req.ticker, req.stock_name, output.corp_name)
+        stock_name = await self._resolve_stock_name(ticker, stock_name, output.corp_name)
 
         report = FundamentalReport(
             id=report_id,
@@ -314,12 +360,12 @@ class FundamentalReportService:
             agent_type="fundamental",
             agent_report_id=report_id,
             request_id=request_id,
-            client_session_id=req.client_session_id,
+            client_session_id=client_session_id,
             owner_user_id=None,
             owner_session_id=None,
-            stock_code=req.ticker,
+            stock_code=ticker,
             stock_name=stock_name,
-            question=req.query,
+            question=question,
             answer_text=output.verdict,
             data_status=root.get("data_status"),
             trace_id=trace_id,
@@ -332,7 +378,7 @@ class FundamentalReportService:
             },
         )
 
-        await fr_repo.ensure_stock(self._session, stock_code=req.ticker, stock_name=stock_name)
+        await fr_repo.ensure_stock(self._session, stock_code=ticker, stock_name=stock_name)
         await fr_repo.add_report(
             self._session,
             report=report,
@@ -389,6 +435,14 @@ class FundamentalReportService:
         deleted = await fr_repo.delete_root(self._session, report_id)
         await self._session.commit()
         return deleted > 0
+
+    async def delete_all_reports(self) -> int:
+        """fundamental 리포트 전체 삭제(index 먼저, root 는 자식 CASCADE). 삭제 행수 반환."""
+        await agent_repo.delete_all_for_type(self._session, "fundamental")
+        result = await self._session.execute(delete(FundamentalReport))
+        deleted = result.rowcount or 0
+        await self._session.commit()
+        return deleted
 
     async def _detail_payload(self, report: FundamentalReport) -> dict[str, Any]:
         ratios = await fr_repo.list_ratios(self._session, report.id)

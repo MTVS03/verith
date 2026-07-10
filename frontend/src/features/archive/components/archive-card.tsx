@@ -30,9 +30,7 @@ export function ArchiveCard({ item }: { item: ArchiveItem }) {
               tone={toneToStatusTone(item.card.badge_tone)}
             />
           ) : null}
-          {item.agent_type === "technical" ? (
-            <DeleteReportButton reportId={item.report_id} />
-          ) : null}
+          <DeleteReportButton reportId={item.report_id} agentType={item.agent_type} />
         </div>
       </div>
 

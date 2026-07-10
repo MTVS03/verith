@@ -153,6 +153,15 @@ async def get_report(
     return envelope
 
 
+@router.delete("/reports", status_code=status.HTTP_200_OK)
+async def delete_all_reports(
+    service: NewsReportService = Depends(get_news_report_service),
+) -> dict:
+    """news 리포트 전체 삭제. 삭제 건수 반환."""
+    deleted = await service.delete_all_reports()
+    return {"deleted": deleted}
+
+
 @router.delete("/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_report(
     report_id: uuid.UUID,

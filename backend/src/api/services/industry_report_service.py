@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.common.agent_report import AgentReport
@@ -144,6 +145,16 @@ class IndustryReportService:
             return None
         return IndustryReportEnvelope(report_id=report.id, report=report.payload)
 
+    async def get_report_html(self, report_id: UUID) -> str | None:
+        """저장된 payload → AI 렌더 → 완결 HTML(text). 없으면 None(→404).
+
+        payload 손상 시 AI 가 422 → AIValidationError 를 그대로 올린다(라우트가 422).
+        """
+        report = await ir_repo.get_report(self._session, report_id)
+        if report is None:
+            return None
+        return await self._ai.render_industry_html(report.payload)
+
     async def list_reports(
         self,
         *,
@@ -170,3 +181,11 @@ class IndustryReportService:
         deleted = await ir_repo.delete_root(self._session, report_id)
         await self._session.commit()
         return deleted > 0
+
+    async def delete_all_reports(self) -> int:
+        """industry 리포트 전체 삭제(index 먼저, root 는 자식 CASCADE). 삭제 행수 반환."""
+        await agent_repo.delete_all_for_type(self._session, "industry")
+        result = await self._session.execute(delete(IndustryReport))
+        deleted = result.rowcount or 0
+        await self._session.commit()
+        return deleted

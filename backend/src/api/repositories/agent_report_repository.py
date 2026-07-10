@@ -59,6 +59,14 @@ async def list_reports(
     return list(rows.scalars().all())
 
 
+async def delete_all_for_type(session: AsyncSession, agent_type: str) -> int:
+    """agent_type index row **전체** 삭제(전체 삭제용). 삭제 행수 반환."""
+    result = await session.execute(
+        delete(AgentReport).where(AgentReport.agent_type == agent_type)
+    )
+    return result.rowcount or 0
+
+
 async def delete_for_technical(session: AsyncSession, report_id: UUID) -> int:
     """agent_type='technical' AND agent_report_id=report_id 인 index row 삭제."""
     result = await session.execute(

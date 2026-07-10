@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_session
@@ -72,6 +73,37 @@ async def get_industry_report(
     if envelope is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
     return envelope
+
+
+@router.get("/{report_id}/html", response_class=HTMLResponse)
+async def get_industry_report_html(
+    report_id: UUID,
+    service: IndustryReportService = Depends(get_industry_report_service),
+) -> HTMLResponse:
+    """저장된 payload 를 AI 가 완결 HTML 로 렌더 → iframe 이 그대로 로드한다.
+
+    payload 손상(422)은 빈 iframe 대신 422 로 드러낸다(handoff §5).
+    """
+    try:
+        html = await service.get_report_html(report_id)
+    except AIValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except (AIContractError, AIUnavailableError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except AITimeoutError as exc:
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
+    if html is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
+    return HTMLResponse(content=html)
+
+
+@router.delete("", status_code=status.HTTP_200_OK)
+async def delete_all_industry_reports(
+    service: IndustryReportService = Depends(get_industry_report_service),
+) -> dict:
+    """industry 리포트 전체 삭제. 삭제 건수 반환."""
+    deleted = await service.delete_all_reports()
+    return {"deleted": deleted}
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

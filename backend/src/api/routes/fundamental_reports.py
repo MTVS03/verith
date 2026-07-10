@@ -21,6 +21,7 @@ from src.api.schemas.fundamental_report import (
     FundamentalReportCreateRequest,
     FundamentalReportEnvelope,
     FundamentalReportListResponse,
+    FundamentalReportSaveRequest,
 )
 from src.api.services.fundamental_report_service import FundamentalReportService
 
@@ -49,6 +50,18 @@ async def create_fundamental_report(
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc
 
 
+@router.post("/save", response_model=FundamentalReportEnvelope, status_code=status.HTTP_201_CREATED)
+async def save_fundamental_report(
+    req: FundamentalReportSaveRequest,
+    service: FundamentalReportService = Depends(get_fundamental_report_service),
+) -> FundamentalReportEnvelope:
+    """save-only — supervisor 가 이미 만든 fundamental output 을 AI 재호출 없이 저장(news 방식)."""
+    try:
+        return await service.save_report(req)
+    except (AIContractError, AIUnavailableError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
 @router.get("", response_model=FundamentalReportListResponse)
 async def list_fundamental_reports(
     stock_code: str = Query(pattern=r"^\d{6}$"),
@@ -68,6 +81,15 @@ async def get_fundamental_report(
     if envelope is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
     return envelope
+
+
+@router.delete("", status_code=status.HTTP_200_OK)
+async def delete_all_fundamental_reports(
+    service: FundamentalReportService = Depends(get_fundamental_report_service),
+) -> dict:
+    """fundamental 리포트 전체 삭제. 삭제 건수 반환."""
+    deleted = await service.delete_all_reports()
+    return {"deleted": deleted}
 
 
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
