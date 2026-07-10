@@ -18,6 +18,7 @@ from src.supervisor.planning.fallback_lookup import FallbackLookupProtocol
 from src.supervisor.planning.fallback_observer import FallbackObserver
 from src.supervisor.planning.interpret import QueryClassifier
 from src.supervisor.planning.resolve_client import ResolverProtocol
+from src.supervisor.planning.rewrite_llm import QueryRewriter
 from src.supervisor.schemas import SupervisorInput
 from src.supervisor.planning.planner import run_supervisor
 
@@ -31,13 +32,16 @@ def run_analysis(
     adapters: dict[str, AgentAdapter] | None = None,
     deps: ExecutionDeps | None = None,
     classifier: QueryClassifier | None = None,
+    rewriter: QueryRewriter | None = None,
 ) -> ExecutionResult:
     """planning → execution. 원본 query 보존, 항상 5 tasks / 5 results.
 
     fallback 은 canonical resolver not_found 일 때만 planner 가 쓰는 보조 lookup(주입식).
-    observer 는 fallback 사용 관측(주입식, 미주입이면 no-op)."""
+    observer 는 fallback 사용 관측(주입식, 미주입이면 no-op).
+    rewriter 는 agent 별 지시 성형(주입식) — 미주입이면 결정론 템플릿(기존 동작)."""
     decision = run_supervisor(
-        inp, resolver=resolver, fallback=fallback, observer=observer, classifier=classifier
+        inp, resolver=resolver, fallback=fallback, observer=observer,
+        classifier=classifier, rewriter=rewriter,
     )
     return run_tasks(decision, adapters=adapters, deps=deps)
 
